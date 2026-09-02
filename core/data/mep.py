@@ -6,13 +6,24 @@ se divide por el MEP **de la fecha de ese precio**, nunca por el de hoy. Usar el
 MEP de hoy para una compra de 2024 no es una aproximación, es un error de varios
 cientos por ciento.
 
-Cascada de fuentes, en orden:
-  1. ArgentinaDatos — API pública, serie diaria desde 2020, es la primaria.
-  2. Cocos — MEP implícito con AL30/AL30D, si el broker está conectado.
-Lo que se descarga se guarda en la caché, así que la app sirve con la serie
-guardada aunque las dos fuentes estén caídas.
+**Las fuentes del MEP son siempre públicas y sin cuenta.** El MEP lo necesita
+cualquiera que use la aplicación, así que no puede depender de estar conectado a
+un broker: Cocos queda reservado para bonos, ONs y letras, que no existen en
+ninguna fuente pública (ver `docs/DECISIONES.md`).
 
-(yfinance no sirve como respaldo: AL30.BA y AL30D.BA figuran como delistados.)
+Cascada:
+  1. ArgentinaDatos — serie diaria completa desde 2018 y también el día de hoy.
+     Es la primaria. API pública, sin credenciales.
+  2. dolarapi.com — solo el valor de hoy, por si la primaria está caída o
+     todavía no publicó la rueda. Pública, sin credenciales.
+  3. La caché — siempre es la base. Con la serie guardada la aplicación valúa
+     igual aunque las dos APIs estén caídas.
+
+Descartadas y por qué, para no volver a intentarlas:
+  · PyOBD (BYMA Open Data) — hoy devuelve vacío para todos los símbolos.
+  · yfinance con AL30/AL30D — los da por delistados.
+  · Cocos — funciona, pero exige cuenta de broker. No es aceptable para un dato
+    que necesita todo el mundo.
 """
 
 from datetime import date, timedelta
@@ -22,8 +33,10 @@ import requests
 
 from core.data import cache
 
-INICIO = "2020-01-01"
+INICIO = "2018-01-01"
 _URL_ARGDATOS = "https://api.argentinadatos.com/v1/cotizaciones/dolares/bolsa"
+_URL_DOLARAPI = "https://dolarapi.com/v1/dolares/bolsa"
+_HEADERS = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
 
 _memoria = {"serie": None, "fuente": None}
 
@@ -43,8 +56,9 @@ def _filtrar_outliers(s: pd.Series) -> pd.Series:
 
 
 def _desde_argentinadatos() -> pd.Series:
-    r = requests.get(_URL_ARGDATOS, timeout=20,
-                     headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"})
+    """Serie histórica completa. El array NO viene ordenado por fecha: hay que
+    ordenarlo, no leer el último elemento."""
+    r = requests.get(_URL_ARGDATOS, timeout=20, headers=_HEADERS)
     r.raise_for_status()
     datos = r.json()
     if not isinstance(datos, list):
@@ -61,42 +75,51 @@ def _desde_argentinadatos() -> pd.Series:
     return _filtrar_outliers(s.sort_index())
 
 
-def _desde_cocos() -> pd.Series:
-    """MEP implícito = precio en pesos del AL30 sobre su tramo en dólares."""
-    from core.broker import cocos
-    if cocos.cliente() is None:
+def _desde_dolarapi() -> pd.Series:
+    """Solo el valor de hoy. Sirve para completar la rueda que la fuente
+    histórica todavía no publicó, o si esa fuente está caída."""
+    r = requests.get(_URL_DOLARAPI, timeout=15, headers=_HEADERS)
+    r.raise_for_status()
+    d = r.json()
+    v = d.get("venta") or d.get("compra")
+    f = (d.get("fechaActualizacion") or "")[:10]
+    if not v or not f or float(v) <= 50:
         return pd.Series(dtype=float)
-    ars = cocos.historico("AL30", INICIO)
-    usd = cocos.historico("AL30D", INICIO)
-    if ars.empty or usd.empty or "Close" not in ars.columns:
-        return pd.Series(dtype=float)
-    a, u = ars["Close"].dropna(), usd["Close"].dropna()
-    mep = (a / u.reindex(a.index, method="ffill")).dropna()
-    return _filtrar_outliers(mep[(mep > 50) & (mep < 100_000)])
+    return pd.Series({pd.Timestamp(f): float(v)})
 
 
 def sincronizar(forzar: bool = False) -> dict:
-    """Trae lo que falta y lo guarda. Devuelve un resumen de lo que hizo."""
+    """Trae lo que falta y lo guarda. Devuelve un resumen de lo que hizo.
+
+    No corta en la primera fuente que responde: la histórica y la del día se
+    complementan, porque ArgentinaDatos a veces publica la rueda con uno o dos
+    días de atraso y valuar la cartera de hoy con el MEP de anteayer es un error
+    silencioso.
+    """
     ultima = cache.ultima_fecha_mep()
     hoy = date.today().isoformat()
     if not forzar and ultima and ultima >= (date.today() - timedelta(days=1)).isoformat():
         return {"estado": "al dia", "ultima": ultima, "nuevas": 0}
 
+    guardadas, fuentes = 0, []
     for nombre, fn in (("ArgentinaDatos", _desde_argentinadatos),
-                       ("Cocos (AL30/AL30D)", _desde_cocos)):
+                       ("dolarapi", _desde_dolarapi)):
         try:
             s = fn()
         except Exception as e:
-            print(f"  [mep] {nombre} falló: {e}")
+            print(f"  [mep] {nombre} no respondió: {e}")
             continue
         if s is not None and not s.empty:
-            n = cache.guardar_mep(s, nombre)
-            _memoria["serie"] = None            # invalida el cacheado en memoria
-            _memoria["fuente"] = nombre
-            return {"estado": "sincronizado", "fuente": nombre,
-                    "nuevas": n, "ultima": str(s.index[-1].date()), "hasta": hoy}
+            guardadas += cache.guardar_mep(s, nombre)
+            fuentes.append(nombre)
 
-    return {"estado": "sin fuentes", "ultima": ultima, "nuevas": 0}
+    _memoria["serie"] = None                 # invalida el cacheado en memoria
+    if not fuentes:
+        return {"estado": "sin fuentes", "ultima": ultima, "nuevas": 0}
+
+    _memoria["fuente"] = " + ".join(fuentes)
+    return {"estado": "sincronizado", "fuente": _memoria["fuente"],
+            "nuevas": guardadas, "ultima": cache.ultima_fecha_mep(), "hasta": hoy}
 
 
 # ── Lectura ───────────────────────────────────────────────────────────────────

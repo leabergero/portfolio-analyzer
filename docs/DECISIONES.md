@@ -28,6 +28,45 @@ que lo sustentan → comparar contra benchmarks y entre carteras.
 | Caché de mercado | Se reconstruye de cero | Las dos bases viejas se descartan |
 | Control de versiones | git desde el primer commit | Ninguno de los dos proyectos anteriores lo tenía |
 
+## Cocos es la excepción, no la fuente por defecto
+
+**La aplicación tiene que funcionar completa sin cuenta de broker.** Cocos
+Capital se usa **exclusivamente** para los instrumentos que no existen en
+ninguna fuente pública:
+
+- bonos soberanos argentinos,
+- obligaciones negociables,
+- letras.
+
+Todo lo demás —acciones, CEDEARs, ETFs, benchmarks y **el dólar MEP**— sale de
+fuentes públicas sin credenciales. El MEP en particular lo necesita cualquiera
+que abra la aplicación: hacerlo depender del broker dejaría sin valuación en
+dólares a todo usuario que no tenga cuenta.
+
+Consecuencia de diseño: **sin Cocos conectado, la aplicación funciona entera
+salvo los precios de bonos y ONs.** Eso no es un modo degradado accidental, es
+el comportamiento esperado y hay que mantenerlo así.
+
+### Fuentes del MEP (todas públicas)
+
+| Orden | Fuente | Qué aporta |
+|---|---|---|
+| 1 | `api.argentinadatos.com/v1/cotizaciones/dolares/bolsa` | Serie diaria completa desde 2018 **y** el día de hoy. Primaria |
+| 2 | `dolarapi.com/v1/dolares/bolsa` | Solo el valor de hoy: completa la rueda que la primaria a veces publica con un día de atraso |
+| 3 | Caché local | Siempre es la base; con ella la app valúa aunque las dos APIs estén caídas |
+
+Descartadas, para no volver a intentarlas:
+
+- **PyOBD / BYMA Open Data** — hoy devuelve vacío para todos los símbolos,
+  incluidos GGAL y METR. El respaldo que Terminal Financiera declara por esta
+  vía es código muerto.
+- **yfinance con AL30/AL30D** — los da por delistados.
+- **Cocos** — funciona, pero exige cuenta. Ver arriba.
+
+Dos detalles que cuestan caro si se olvidan: la API de ArgentinaDatos **no
+devuelve el array ordenado por fecha** (hay que ordenarlo, no leer el último
+elemento), y **requiere header `User-Agent`** o responde 404.
+
 ## Contrato del CSV propio
 
 ```
