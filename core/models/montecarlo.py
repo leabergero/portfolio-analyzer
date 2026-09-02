@@ -130,15 +130,19 @@ def simular(posiciones, horizonte: int = 252, n_sims: int = 10_000,
     centros = (bordes[:-1] + bordes[1:]) / 2
     ancho = float(centros[1] - centros[0]) if len(centros) > 1 else 1.0
     escala = n_sims * ancho
-    normal = stats.norm.pdf(centros, finales.mean(), finales.std(ddof=1)) * escala
+    mu, sd = finales.mean(), finales.std(ddof=1)
+    normal = stats.norm.pdf(centros, mu, sd) * escala
     try:
         forma, loc, esc = stats.lognorm.fit(finales, floc=0)
         lognormal = stats.lognorm.pdf(centros, forma, loc, esc) * escala
-        mejor = ("lognormal"
-                 if stats.kstest(finales, "lognorm", args=(forma, loc, esc)).statistic
-                 <= stats.kstest(finales, "norm",
-                                 args=(finales.mean(), finales.std(ddof=1))).statistic
-                 else "normal")
+        # `kstest(datos, "norm", args=(...))` revienta en scipy 1.18
+        # (`ndtr() takes from 1 to 2 positional arguments`) y el except dejaba
+        # el ajuste lognormal en cero: se dibujaba una línea plana sobre el eje
+        # y el veredicto caía siempre en "normal" sin haber comparado nada.
+        # Igual que en risk.py: se pasa la CDF ya evaluada.
+        ks_log = stats.kstest(finales, lambda v: stats.lognorm.cdf(v, forma, loc, esc)).statistic
+        ks_norm = stats.kstest(finales, lambda v: stats.norm.cdf(v, mu, sd)).statistic
+        mejor = "lognormal" if ks_log <= ks_norm else "normal"
     except Exception:
         lognormal, mejor = np.zeros_like(centros), "normal"
 

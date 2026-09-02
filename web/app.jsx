@@ -66,7 +66,12 @@ function Grafico({ datos, layout, alto = 280 }) {
       colorway: c.series,
       height: alto,
     };
+    // Los tres se mezclan campo a campo: un `margin: {l: 82}` en el llamador
+    // reemplazaba el objeto entero y Plotly volvía a SUS defaults (t=100, b=80),
+    // así que el área de dibujo quedaba en 50 px dentro de un gráfico de 230 y
+    // las barras se amontonaban abajo con medio panel vacío arriba.
     const mezcla = { ...base, ...layout,
+      margin: { ...base.margin, ...(layout?.margin || {}) },
       xaxis: { ...base.xaxis, ...(layout?.xaxis || {}) },
       yaxis: { ...base.yaxis, ...(layout?.yaxis || {}) } };
     Plotly.react(nodo.current, datos, mezcla,
@@ -190,12 +195,13 @@ function Barra({ modo, setModo, tema, setTema, carteras, cartera, setCartera }) 
 // para responder una sola pregunta.
 // Posición es el resumen rápido de la cartera y absorbe todo lo que responde
 // "qué tengo y cómo se comporta": KPIs de riesgo, tenencias, composición,
-// correlaciones, distribución de retornos y momentum. Riesgo queda solo con lo
-// que profundiza. Menos pestañas, y cada una con una pregunta entera adentro.
+// correlaciones, distribución de retornos, comparación contra el índice y
+// momentum. Riesgo queda solo con lo que profundiza. Menos pestañas, y cada una
+// con una pregunta entera adentro.
 const PESTANAS = [
   ["posicion", "Posición"], ["riesgo", "Riesgo"],
   ["markowitz", "Optimización"], ["montecarlo", "Monte Carlo"],
-  ["capm", "Benchmark"], ["regimenes", "Regímenes"],
+  ["regimenes", "Regímenes"],
 ];
 
 const BENCHMARKS = [["SP500", "S&P 500"], ["MERVAL", "Merval"], ["STOXX600", "STOXX 600"]];
@@ -249,13 +255,20 @@ function Analisis({ cartera, recargar }) {
                  : M[k]?.estado === "error" ? "error" : "corriendo")} />
           </button>
         ))}
-        <span style={{ marginLeft: "auto", display: "flex", alignItems: "center",
-                       gap: 7, paddingBottom: 6 }}>
-          <span style={{ fontSize: 12, color: "var(--texto-3)" }}>Comparar contra</span>
-          <select value={bench} onChange={(e) => setBench(e.target.value)}>
-            {BENCHMARKS.map(([k, t]) => <option key={k} value={k}>{t}</option>)}
-          </select>
-        </span>
+        {/* El índice solo cambia algo en dos pestañas: en Posición manda sobre
+            beta, alpha y R², y en Optimización calibra la aversión al riesgo (δ)
+            de Black-Litterman. En Riesgo, Monte Carlo y Regímenes lo único que
+            movería es la región de la tasa libre de riesgo, que ya va escrita
+            debajo de cada KPI que la usa. Mostrarlo ahí invitaba a tocarlo
+            esperando un efecto que no existe. */}
+        {(tab === "posicion" || tab === "markowitz") && (
+          <span style={{ marginLeft: "auto", display: "flex", alignItems: "center",
+                         gap: 7, paddingBottom: 6 }}>
+            <span style={{ fontSize: 12, color: "var(--texto-3)" }}>Comparar contra</span>
+            <select value={bench} onChange={(e) => setBench(e.target.value)}>
+              {BENCHMARKS.map(([k, t]) => <option key={k} value={k}>{t}</option>)}
+            </select>
+          </span>)}
       </div>
       <Panel tab={tab} R={R} M={M} cartera={cartera} bench={bench} recargar={recargar} />
     </>
@@ -271,14 +284,14 @@ function Panel({ tab, R, M, cartera, bench, recargar }) {
 
   const vistas = {
     posicion: <Posicion d={{ ...d, cartera_nombre: cartera }} cartera={cartera}
-                        recargar={recargar} extras={{ composicion: R.composicion,
-                        riesgo: R.riesgo, momentum: R.momentum }} />,
+                        recargar={recargar} bench={bench}
+                        extras={{ composicion: R.composicion, riesgo: R.riesgo,
+                                  momentum: R.momentum, capm: R.capm }} />,
     riesgo: <Riesgo d={d} cartera={cartera} extras={{ stress: R.stress }} />,
     markowitz: <Markowitz d={d} cartera={cartera} bench={bench}
                           extras={{ objetivos: R.objetivos, bl: R.blacklitterman,
                                     momentum: R.momentum }} />,
     montecarlo: <MonteCarlo d={d} cartera={cartera} />,
-    capm: <Capm d={d} cartera={cartera} bench={bench} />,
     regimenes: <Regimenes d={d} cartera={cartera} />,
   };
   return vistas[tab] || <div className="cargando">—</div>;
@@ -363,7 +376,7 @@ function AltaRapida({ cartera, recargar }) {
   );
 }
 
-function Posicion({ d, cartera, recargar, extras }) {
+function Posicion({ d, cartera, recargar, extras, bench }) {
   const filas = d.posiciones || [];
   const [corr, setCorr] = useState(null);
   const r = extras?.riesgo;
@@ -440,7 +453,15 @@ function Posicion({ d, cartera, recargar, extras }) {
       <Seccion titulo="Cómo son los días de esta cartera" />
       {r && !r.error ? <Distribucion d={r} /> : <div className="cargando">Calculando…</div>}
 
-      {/* 6 · Es momento de entrar o esperar */}
+      {/* 6 · Contra qué se compara */}
+      <Seccion titulo="¿Y contra el mercado?" />
+      {extras?.capm
+        ? (extras.capm.error
+            ? <div className="aviso mal">{extras.capm.error}</div>
+            : <Capm d={extras.capm} cartera={cartera} bench={bench} />)
+        : <div className="cargando">Comparando contra el índice…</div>}
+
+      {/* 7 · Es momento de entrar o esperar */}
       <Seccion titulo="¿Viento a favor o en contra?" />
       {extras?.momentum
         ? (extras.momentum.error
@@ -545,18 +566,21 @@ function Distribucion({ d }) {
               line: { color: c.acento, width: 2.4 } }] : []),
           ]}
           layout={{
-            bargap: 0.02,
+            bargap: 0.02, margin: { t: 28 },
             xaxis: { title: "Retorno de un día", ticksuffix: " %" },
             yaxis: { title: "Cantidad de días" },
             shapes: [linea(d.var95_pct, c.alerta), linea(d.var99_pct, c.negativo),
                      linea(dist.media_pct, c.texto3, 1)],
+            // Las tres marcas caen en pocos puntos porcentuales, así que cada
+            // una se ancla hacia afuera de su propia línea: centradas se
+            // escribían una encima de la otra.
             annotations: [
-              { x: d.var95_pct, y: 1, yref: "paper", text: "día malo", showarrow: false,
-                font: { size: 10, color: c.alerta }, yanchor: "bottom" },
               { x: d.var99_pct, y: 1, yref: "paper", text: "1 de cada 100", showarrow: false,
-                font: { size: 10, color: c.negativo }, yanchor: "bottom" },
+                font: { size: 10, color: c.negativo }, yanchor: "bottom", xanchor: "right" },
+              { x: d.var95_pct, y: 1, yref: "paper", text: "día malo", showarrow: false,
+                font: { size: 10, color: c.alerta }, yanchor: "bottom", xanchor: "left" },
               { x: dist.media_pct, y: 1, yref: "paper", text: "día promedio", showarrow: false,
-                font: { size: 10, color: c.texto3 }, yanchor: "bottom" }] }} />
+                font: { size: 10, color: c.texto3 }, yanchor: "bottom", xanchor: "left" }] }} />
         <div className="pie">
           Cada barra es la cantidad de ruedas que terminaron con ese retorno, sobre{" "}
           {dist.n_dias} días. En <span style={{ color: c.negativo }}>rojo</span> las pérdidas
@@ -730,7 +754,7 @@ function RiesgoResumen({ d }) {
       <div className="fila f2">
         <div className="panel">
           <h3>Peso contra aporte al riesgo</h3>
-          <Grafico alto={Math.max(220, contrib.length * 46)}
+          <Grafico alto={Math.max(230, contrib.length * 40 + 110)}
             datos={[
               { type: "bar", orientation: "h", name: "aporte al riesgo",
                 y: contrib.map((x) => x.ticker).reverse(),
@@ -931,7 +955,7 @@ function RiesgoCambiario({ cartera }) {
       {enPesos.length > 0 && (
         <div className="panel">
           <h3>De dónde viene el riesgo de cada activo en pesos</h3>
-          <Grafico alto={Math.max(200, enPesos.length * 46)}
+          <Grafico alto={Math.max(210, enPesos.length * 40 + 110)}
             datos={[
               { type: "bar", orientation: "h", name: "el activo",
                 y: enPesos.map((x) => x.ticker).reverse(), x: enPesos.map((x) => x.activo_pct).reverse(),
@@ -1050,7 +1074,7 @@ function RiesgoLimite({ cartera, d }) {
 
             <div className="panel">
               <h3>Cómo se mueven los pesos</h3>
-              <Grafico alto={Math.max(230, r.ordenes.length * 46)}
+              <Grafico alto={Math.max(240, r.ordenes.length * 40 + 110)}
                 datos={[
                   { type: "bar", orientation: "h", name: "hoy",
                     y: r.ordenes.map((o) => o.ticker).reverse(),
@@ -1298,7 +1322,7 @@ function McPorActivo({ cartera, horizonte }) {
     <>
       <div className="panel">
         <h3>Rango de resultados de cada activo</h3>
-        <Grafico alto={Math.max(260, todos.length * 52)}
+        <Grafico alto={Math.max(280, todos.length * 44 + 110)}
           datos={[
             { type: "bar", orientation: "h", name: "escenario malo → mediana",
               y: todos.map((f) => f.ticker).reverse(),
@@ -1582,7 +1606,8 @@ function DistribucionFinal({ d }) {
             { type: "scatter", mode: "lines", x: dist.x, y: dist.lognormal,
               name: "ajuste lognormal", line: { color: c.positivo, width: 2, dash: "dot" } },
           ]}
-          layout={{ bargap: 0.02, xaxis: { title: "Valor final", tickprefix: "$" },
+          layout={{ bargap: 0.02, margin: { t: 26 },
+                    xaxis: { title: "Valor final", tickprefix: "$" },
                     yaxis: { title: "Escenarios" },
                     shapes: [d.final.var95, d.final.var99, d.valor_inicial].map((x, i) => ({
                       type: "line", x0: x, x1: x, yref: "paper", y0: 0, y1: 0.9,
@@ -1594,9 +1619,13 @@ function DistribucionFinal({ d }) {
                         font: { size: 10, color: c.texto3 }, yanchor: "bottom" }] }} />
         <div className="pie">
           Las barras son los {d.n_simulaciones.toLocaleString("es-AR")} escenarios simulados.
-          El mejor ajuste teórico es <b>{dist.mejor_ajuste}</b> — que sea lognormal y no normal
-          es lo esperable: un precio no puede ser negativo, así que la distribución de valores
-          finales está sesgada hacia arriba.
+          El mejor ajuste teórico es <b>{dist.mejor_ajuste}</b>
+          {dist.mejor_ajuste === "lognormal"
+            ? <> — es lo esperable: un precio no puede ser negativo, así que la distribución
+                de valores finales queda sesgada hacia arriba y la campana normal se queda
+                corta en los dos extremos.</>
+            : <>: en este horizonte la campana normal describe los valores finales tan bien
+                como la lognormal.</>}
         </div>
       </div>
     </>
@@ -1614,6 +1643,17 @@ function Capm({ d: inicial, cartera, bench }) {
     setD(null);
     api(`/api/capm/${encodeURIComponent(cartera)}?benchmark=${bench}`).then(setD);
   }, [bench, cartera]);
+
+  // Los tres índices se comparan solos. Con un R² bajo, saber cuál de los tres
+  // explica la cartera es justamente lo que hay que mirar: dejarlo detrás de un
+  // botón era esconder la respuesta a la advertencia que da el panel de arriba.
+  useEffect(() => {
+    let vivo = true;
+    setTodos(null);
+    api(`/api/capm/${encodeURIComponent(cartera)}/benchmarks`)
+      .then((r) => vivo && setTodos(r));
+    return () => { vivo = false; };
+  }, [cartera]);
   if (!d) return <div className="cargando">Comparando contra el índice…</div>;
   if (d.error) return <div className="aviso mal">{d.error}</div>;
   const nivel = d.diagnostico_r2?.nivel;
@@ -1694,12 +1734,8 @@ function Capm({ d: inicial, cartera, bench }) {
         </div>
         <div className="panel">
           <h3>¿Cuál es el índice correcto?</h3>
-          {!todos ? (
-            <button className="btn" onClick={async () =>
-              setTodos(await api(`/api/capm/${encodeURIComponent(cartera)}/benchmarks`))}>
-              Comparar los tres índices
-            </button>
-          ) : todos.error ? <div className="aviso mal">{todos.error}</div> : (
+          {!todos ? <div className="cargando">Midiendo los tres índices…</div>
+           : todos.error ? <div className="aviso mal">{todos.error}</div> : (
             <>
               <div className="tabla-wrap"><table>
                 <thead><tr><th>Índice</th><th className="n">R²</th><th className="n">Beta</th><th className="n">Alpha</th></tr></thead>
@@ -1732,7 +1768,7 @@ function Momentum({ d }) {
     <>
       <div className="panel">
         <h3>Momentum a 12 meses, salteando el último</h3>
-        <Grafico alto={Math.max(220, a.length * 44)}
+        <Grafico alto={Math.max(230, a.length * 40 + 110)}
           datos={[{ type: "bar", orientation: "h",
                     y: a.map((x) => x.ticker).reverse(),
                     x: a.map((x) => x.mom_12_1_pct).reverse(),
@@ -1745,7 +1781,9 @@ function Momentum({ d }) {
         <h3>Veredicto por activo</h3>
         <div className="tabla-wrap"><table>
           <thead><tr><th>Ticker</th><th className="n">12−1</th><th className="n">12 meses</th>
-                     <th className="n">3 meses</th><th>Señal</th><th>Qué significa</th></tr></thead>
+                     <th className="n">3 meses</th><th>Señal</th>
+                     <th className="n">1 mes</th><th>Entrada</th>
+                     <th>Qué significa</th></tr></thead>
           <tbody>{a.map((x) => (
             <tr key={x.ticker}>
               <td className="mono">{x.ticker}</td>
@@ -1753,9 +1791,27 @@ function Momentum({ d }) {
               <td className="n">{pct(x.mom_12m_pct, 1)}</td>
               <td className={"n " + signo(x.mom_3m_pct)}>{pct(x.mom_3m_pct, 1)}</td>
               <td><span className={"chip " + (x.señal === "FAVORABLE" ? "ok" : x.señal === "EVITAR" ? "mal" : x.señal === "ESPERAR" ? "ojo" : "")}>{x.señal}</span></td>
-              <td style={{ fontSize: 12.5, color: "var(--texto-2)" }}>{x.veredicto}</td>
+              {/* El mes va después de la señal y sin color de signo: acá un
+                  número negativo es una buena noticia para el que compra, así
+                  que pintarlo de rojo diría lo contrario de lo que significa. */}
+              <td className="n">{pct(x.mom_1m_pct, 1)}</td>
+              <td title={x.entrada_texto}>
+                <span className={"chip " + (x.entrada === "BUEN PRECIO" ? "ok"
+                                          : x.entrada === "CARO" ? "ojo" : "")}>{x.entrada}</span>
+              </td>
+              <td style={{ fontSize: 12.5, color: "var(--texto-2)" }}>
+                {x.veredicto}
+                {x.entrada !== "—" && x.entrada !== "NORMAL" &&
+                  <> <b>{x.entrada_texto}</b></>}
+              </td>
             </tr>))}</tbody>
         </table></div>
+        <div className="pie">
+          Las tres primeras columnas dicen <b>qué</b> tiene viento a favor; el último mes dice
+          <b> a qué precio conviene entrar</b>, y se lee al revés: a un mes no hay momentum,
+          hay reversión — es el mismo efecto que el 12−1 saltea para no ensuciarse. Un papel
+          con tendencia buena que subió 15 % en el mes no deja de ser bueno: está caro hoy.
+        </div>
       </div>
     </>
   );
@@ -1915,8 +1971,10 @@ function BlackLitterman({ bl, actual }) {
   const dRet = delta(bl.ret_bl_pct, actual?.ret_pct);
   const dVol = delta(bl.vol_bl_pct, actual?.vol_pct);
   const dShr = delta(bl.sharpe_bl, actual?.sharpe);
-  const flecha = (v, mejorSiSube = true) => v == null ? "" :
-    (v > 0 ? (mejorSiSube ? "▲ " : "▼ ") : v < 0 ? (mejorSiSube ? "▼ " : "▲ ") : "");
+  // La flecha marca la DIRECCIÓN del cambio; el color dice si eso es bueno o
+  // malo. Mezclar las dos cosas en la flecha hacía que una volatilidad que sube
+  // se mostrara con ▼ — el dato correcto contando exactamente lo contrario.
+  const flecha = (v) => v == null || v === 0 ? "" : (v > 0 ? "▲ " : "▼ ");
   const tono = (v, mejorSiSube = true) => v == null ? "" :
     ((v > 0) === mejorSiSube ? "pos" : v === 0 ? "" : "neg");
 
@@ -1926,7 +1984,7 @@ function BlackLitterman({ bl, actual }) {
         <Kpi etiqueta="Retorno esperado" valor={pct(bl.ret_bl_pct)} tono={tono(dRet)}
              sub={dRet == null ? null : `${flecha(dRet)}${num(Math.abs(dRet), 2)} pp vs tu cartera (${pct(actual?.ret_pct)})`} />
         <Kpi etiqueta="Volatilidad" valor={pct(bl.vol_bl_pct)} tono={tono(dVol, false)}
-             sub={dVol == null ? null : `${flecha(dVol, false)}${num(Math.abs(dVol), 2)} pp vs ${pct(actual?.vol_pct)}`} />
+             sub={dVol == null ? null : `${flecha(dVol)}${num(Math.abs(dVol), 2)} pp vs ${pct(actual?.vol_pct)}`} />
         <Kpi etiqueta="Sharpe" valor={num(bl.sharpe_bl, 3)} tono={tono(dShr)}
              sub={dShr == null ? null : `${flecha(dShr)}${num(Math.abs(dShr), 3)} vs ${num(actual?.sharpe, 3)}`} />
         <Kpi etiqueta="Aversión al riesgo (δ)" valor={num(bl.delta, 2)} sub={bl.delta_label} />
@@ -1949,32 +2007,49 @@ function BlackLitterman({ bl, actual }) {
         <div className="fila f2">
           <div className="panel">
             <h3>De dónde a dónde se mueve cada peso</h3>
-            <Grafico alto={Math.max(300, acc.length * 46)}
-              datos={[
-                // Un gráfico de pendiente: cada activo es una línea entre su peso
-                // de hoy y el que sugiere el modelo. La DIRECCIÓN del movimiento
-                // se lee de un vistazo, que es la pregunta real — un par de barras
-                // obliga a compararlas de a dos y a adivinar el sentido.
-                ...acc.map((a) => ({
-                  type: "scatter", mode: "lines", showlegend: false, hoverinfo: "skip",
-                  x: [0, 1], y: [a.peso_actual_pct, a.peso_bl_pct],
-                  line: { width: 2, color: a.peso_bl_pct >= a.peso_actual_pct ? c.positivo : c.negativo } })),
-                { type: "scatter", mode: "markers+text", name: "hoy",
-                  x: acc.map(() => 0), y: acc.map((a) => a.peso_actual_pct),
-                  text: acc.map((a) => a.ticker), textposition: "middle left",
-                  textfont: { size: 11 }, marker: { size: 9, color: c.texto3 },
-                  hovertemplate: "%{text}: %{y:.1f} % hoy<extra></extra>" },
-                { type: "scatter", mode: "markers+text", name: "Black-Litterman",
-                  x: acc.map(() => 1), y: acc.map((a) => a.peso_bl_pct),
-                  text: acc.map((a) => `${a.peso_bl_pct.toFixed(1)} %`), textposition: "middle right",
-                  textfont: { size: 11 }, marker: { size: 10, color: c.acento },
-                  hovertemplate: "%{y:.1f} % sugerido<extra></extra>" },
-              ]}
-              layout={{ showlegend: false,
-                        xaxis: { tickvals: [0, 1], ticktext: ["hoy", "Black-Litterman"],
-                                 range: [-0.35, 1.35], showgrid: false },
-                        yaxis: { title: "Peso en la cartera", ticksuffix: " %" },
-                        margin: { l: 56, r: 20 } }} />
+            {(() => {
+              // Un activo por fila, con la línea que va del peso de hoy al que
+              // sugiere el modelo. La versión anterior ponía los dos pesos en un
+              // eje vertical compartido y los tickers de pesos parecidos —o dos
+              // activos que van los dos a 0 %— se escribían uno encima del otro.
+              // Con una fila por activo eso no puede pasar, y la dirección del
+              // movimiento se sigue leyendo de un vistazo.
+              const orden = [...acc].sort((a, b) => a.peso_actual_pct - b.peso_actual_pct);
+              const tick = orden.map((a) => a.ticker);
+              const tope = Math.max(...orden.map((a) => Math.max(a.peso_actual_pct, a.peso_bl_pct)));
+              const linea = (arr, color) => ({
+                type: "scatter", mode: "lines", showlegend: false, hoverinfo: "skip",
+                x: arr.flatMap((a) => [a.peso_actual_pct, a.peso_bl_pct, null]),
+                y: arr.flatMap((a) => [a.ticker, a.ticker, null]),
+                line: { width: 3, color },
+              });
+              return (
+                <Grafico alto={Math.max(280, acc.length * 52 + 90)}
+                  datos={[
+                    linea(orden.filter((a) => a.peso_bl_pct >= a.peso_actual_pct), c.positivo),
+                    linea(orden.filter((a) => a.peso_bl_pct < a.peso_actual_pct), c.negativo),
+                    { type: "scatter", mode: "markers", name: "hoy", x: orden.map((a) => a.peso_actual_pct),
+                      y: tick, marker: { size: 10, color: c.texto3 },
+                      hovertemplate: "%{y}: %{x:.1f} % hoy<extra></extra>" },
+                    { type: "scatter", mode: "markers+text", name: "Black-Litterman",
+                      x: orden.map((a) => a.peso_bl_pct), y: tick,
+                      text: orden.map((a) => `${a.peso_bl_pct.toFixed(1)} %`),
+                      textposition: orden.map((a) => a.peso_bl_pct >= a.peso_actual_pct
+                                                     ? "middle right" : "middle left"),
+                      textfont: { size: 11.5 }, marker: { size: 11, color: c.acento },
+                      hovertemplate: "%{y}: %{x:.1f} % sugerido<extra></extra>" },
+                  ]}
+                  layout={{ legend: { orientation: "h", y: -0.14, x: 0.5, xanchor: "center" },
+                            xaxis: { ticksuffix: " %", zeroline: false,
+                                     range: [-tope * 0.14, tope * 1.16] },
+                            // Sin categoryarray Plotly ordena por orden de
+                            // aparición, y como las subidas y las bajadas van en
+                            // traces distintos las filas salían mezcladas.
+                            yaxis: { automargin: true, showgrid: false,
+                                     categoryorder: "array", categoryarray: tick },
+                            margin: { l: 10, r: 16, t: 10, b: 30 } }} />
+              );
+            })()}
             <div className="pie">
               Cada línea es un activo: arranca en su peso de hoy y termina en el que sugiere
               el modelo. En verde lo que sube, en rojo lo que baja.
@@ -2066,10 +2141,17 @@ function Regimenes({ d, cartera }) {
               text: (d.eventos || []).map((e) => e.descripcion),
               hovertemplate: "<b>%{x}</b><br>%{text}<extra></extra>" },
           ]}
-          layout={{ shapes: [...franjas, ...(d.eventos || []).map((e) => ({
+          layout={{ // El eje del VIX vive a la derecha y necesita su propio margen:
+                    // con el de por defecto los números salían cortados por el borde.
+                    margin: { r: 58 },
+                    // Veinticinco líneas a todo lo alto tapaban las dos series que
+                    // el gráfico existe para mostrar. Quedan como marcas tenues; el
+                    // rombo de abajo sigue siendo lo que se lee y se hoverea.
+                    shapes: [...franjas, ...(d.eventos || []).map((e) => ({
                       type: "line", x0: e.fecha, x1: e.fecha, yref: "paper", y0: 0, y1: 1,
+                      opacity: 0.3,
                       line: { color: e.alcance === "AR" ? c.series[3] : c.series[4],
-                              width: 0.9, dash: "dot" } }))],
+                              width: 0.7, dash: "dot" } }))],
                     yaxis: { title: sel === "__cartera__" ? "Volatilidad anual" : "Retorno diario",
                              ticksuffix: " %" },
                     yaxis2: { title: "VIX", overlaying: "y", side: "right", showgrid: false } }} />

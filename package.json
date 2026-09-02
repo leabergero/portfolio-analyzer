@@ -7,6 +7,9 @@
     "watch": "babel --presets @babel/preset-react web/app.jsx -o web/app.js --watch"
   },
   "devDependencies": {
-    "@babel/cli": "^7", "@babel/core": "^7", "@babel/preset-react": "^7"
+    "@babel/cli": "^7",
+    "@babel/core": "^7",
+    "@babel/preset-react": "^7",
+    "puppeteer-core": "^24.43.1"
   }
 }
