@@ -655,10 +655,10 @@ function PnlRealizado({ real, cartera, recargar }) {
       {!abierto ? (
         <>
           <div className="pie" style={{ marginTop: 4 }}>
-            <b className={signo(real.total_activo_usd)}>{usd(real.total_activo_usd)}</b> los
-            papeles {real.total_fx_usd < 0 ? "menos" : "más"}{" "}
-            <b className={signo(real.total_fx_usd)}>{usd(Math.abs(real.total_fx_usd))}</b> del
-            tipo de cambio.
+            <b className={signo(real.total_activo_usd)}>{usd(real.total_activo_usd)}</b> de
+            resultado de inversión {real.total_fx_usd < 0 ? "menos" : "más"}{" "}
+            <b className={signo(real.total_fx_usd)}>{usd(Math.abs(real.total_fx_usd))}</b> de
+            resultado por tipo de cambio.
             {enPesos != null && <> En moneda de origen: <b>{num(enPesos, 2)} ARS</b>
               {enDolar ? <> y <b>{num(enDolar, 2)} USD</b></> : null} — ese es el número que
               se puede cotejar contra el resumen del broker, que no sabe de MEP.</>}
@@ -680,7 +680,8 @@ function PnlRealizado({ real, cartera, recargar }) {
                   <th className="n">Precio compra</th><th className="n">Precio venta</th>
                   <th className="n">MEP compra</th><th className="n">MEP venta</th>
                   <th className="n">Resultado origen</th>
-                  <th className="n">Los papeles</th><th className="n">El dólar</th>
+                  <th className="n">Resultado inversión</th>
+                  <th className="n">Resultado tipo de cambio</th>
                   <th className="n">Resultado USD</th></tr></thead>
                 <tbody>{[...trades].sort((a, b) => (a.sell_date < b.sell_date ? 1 : -1)).map((t, i) => (
                   <tr key={i}>
@@ -705,7 +706,8 @@ function PnlRealizado({ real, cartera, recargar }) {
               <>
                 <thead><tr><th>Ticker</th><th className="n">Operaciones</th>
                   <th className="n">Resultado en su moneda</th>
-                  <th className="n">Los papeles</th><th className="n">El dólar</th>
+                  <th className="n">Resultado inversión</th>
+                  <th className="n">Resultado tipo de cambio</th>
                   <th className="n">Resultado en dólares</th></tr></thead>
                 <tbody>{porTicker.map((x) => (
                   <tr key={x.ticker}>
@@ -731,11 +733,11 @@ function PnlRealizado({ real, cartera, recargar }) {
           </table></div>
           <div className="pie">
             <b>En su moneda</b> es lo que muestra el broker, que no sabe de MEP. El resultado
-            en dólares se abre en dos: <b>los papeles</b> es lo que dejó el activo, y{" "}
-            <b>el dólar</b> lo que el MEP le hizo al capital mientras estuvo invertido. Suman
-            el neto exacto — la ganancia se convierte al MEP de la venta, que es el dólar con
-            el que se cobró. Una operación que ya era en dólares no tiene columna de cambio:
-            no hubo exposición. Neteo FIFO contra las compras más viejas; los splits se
+            en dólares se abre en dos: <b>resultado inversión</b> es lo que dejó el activo, y{" "}
+            <b>resultado tipo de cambio</b> lo que el MEP le hizo al capital mientras estuvo
+            invertido. Suman el neto exacto — la ganancia se convierte al MEP de la venta, que
+            es el dólar con el que se cobró. Una operación que ya era en dólares no tiene
+            resultado de tipo de cambio: no hubo exposición. Neteo FIFO contra las compras más viejas; los splits se
             prorratean sobre lo que había abierto. {ganadores} de {porTicker.length} tickers
             cerraron en verde.
           </div>
