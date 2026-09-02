@@ -189,3 +189,70 @@ def matriz_retornos(posiciones, desde=None, hasta=None):
         return pd.DataFrame(), {}
     df = pd.DataFrame(retornos).ffill(limit=5)
     return df.dropna(thresh=max(1, len(df.columns) // 2)).fillna(0.0), precios
+
+
+def correlaciones(posiciones, ventana: int = 252) -> dict:
+    """Matriz de correlaciones y qué dice sobre el carácter de la cartera.
+
+    La correlación media entre pares es el resumen que responde la pregunta
+    práctica: **¿esta cartera es defensiva o agresiva?** Si todo se mueve junto,
+    en una caída no hay dónde refugiarse — la diversificación es nominal.
+
+    Se agrega la correlación **condicionada a las caídas del mercado**, porque
+    es donde la diversificación se pone a prueba: los pares que se despegan en
+    tiempos normales suelen juntarse justo cuando hace falta que no lo hagan.
+    """
+    ret_df, precios = matriz_retornos(posiciones)
+    if ret_df.shape[1] < 2:
+        return {"error": "Hacen falta al menos dos activos."}
+
+    tickers = list(ret_df.columns)
+    reciente = ret_df.tail(ventana) if len(ret_df) > ventana else ret_df
+    matriz = reciente.corr()
+
+    pares = [(a, b, float(matriz.loc[a, b]))
+             for i, a in enumerate(tickers) for b in tickers[i + 1:]]
+    media = float(np.mean([c for _, _, c in pares])) if pares else 0.0
+
+    # Correlación en el 10 % de días peores de la cartera.
+    w = value_weights(posiciones, precios, tickers)
+    cartera = reciente[tickers].to_numpy() @ w
+    umbral = float(np.percentile(cartera, 10))
+    malos = reciente[cartera <= umbral]
+    matriz_caidas = malos.corr() if len(malos) > 10 else None
+    media_caidas = (float(np.mean([float(matriz_caidas.loc[a, b])
+                                   for i, a in enumerate(tickers) for b in tickers[i + 1:]]))
+                    if matriz_caidas is not None else None)
+
+    if media < 0.3:
+        caracter, lectura = "defensiva", (
+            "Los activos se mueven de forma bastante independiente: cuando uno cae, "
+            "los otros no necesariamente lo acompañan. La diversificación es real.")
+    elif media < 0.6:
+        caracter, lectura = "mixta", (
+            "Hay diversificación, pero parcial: buena parte de la cartera se mueve junta.")
+    else:
+        caracter, lectura = "agresiva", (
+            "Casi todo se mueve junto. La cartera se comporta como una apuesta única "
+            "repartida en varios tickers: en una caída no hay dónde refugiarse.")
+
+    aviso = None
+    if media_caidas is not None and media_caidas - media > 0.15:
+        aviso = (f"En los días peores la correlación media sube de {media:.2f} a "
+                 f"{media_caidas:.2f}: parte de la diversificación desaparece justo "
+                 f"cuando se la necesita.")
+
+    return {
+        "tickers": tickers,
+        "matriz": [[round(float(matriz.loc[a, b]), 3) for b in tickers] for a in tickers],
+        "matriz_caidas": ([[round(float(matriz_caidas.loc[a, b]), 3) for b in tickers]
+                           for a in tickers] if matriz_caidas is not None else None),
+        "correlacion_media": round(media, 3),
+        "correlacion_media_en_caidas": round(media_caidas, 3) if media_caidas is not None else None,
+        "caracter": caracter, "lectura": lectura, "aviso_caidas": aviso,
+        "par_mas_correlacionado": (lambda p: {"a": p[0], "b": p[1], "corr": round(p[2], 3)})(
+            max(pares, key=lambda x: x[2])) if pares else None,
+        "par_menos_correlacionado": (lambda p: {"a": p[0], "b": p[1], "corr": round(p[2], 3)})(
+            min(pares, key=lambda x: x[2])) if pares else None,
+        "ventana_ruedas": len(reciente),
+    }

@@ -207,3 +207,84 @@ def optimizar(posiciones, benchmark: str = "SP500", cap: float = None) -> dict:
         "acciones_max_sharpe": acciones(w_sharpe),
         "acciones_min_varianza": acciones(w_minvar),
     }
+
+
+def backtest(posiciones, meses: int = 6, benchmark: str = "SP500") -> dict:
+    """¿La cartera óptima habría funcionado de verdad?
+
+    Se optimiza con los datos ANTERIORES a la ventana de prueba y se mide qué
+    hizo después. Es la única forma honesta de evaluar Markowitz: optimizar y
+    medir sobre el mismo período siempre da un resultado espectacular y no
+    significa nada.
+
+    Se compara contra dos referencias que no requieren modelo: mantener la
+    cartera como está, y equiponderar.
+    """
+    from core.models.portfolio import matriz_retornos, value_weights
+
+    ret_df, precios = matriz_retornos(posiciones)
+    if ret_df.shape[1] < 2:
+        return {"error": "Hacen falta al menos dos activos."}
+
+    ruedas_prueba = int(meses * 21)
+    if len(ret_df) < ruedas_prueba + 252:
+        return {"error": f"Hace falta al menos un año más de historia para probar "
+                         f"{meses} meses fuera de muestra."}
+
+    entrenamiento = ret_df.iloc[:-ruedas_prueba]
+    prueba = ret_df.iloc[-ruedas_prueba:]
+    tickers = list(ret_df.columns)
+
+    mu = entrenamiento.mean().to_numpy() * RUEDAS
+    cov = entrenamiento.cov().to_numpy() * RUEDAS
+    from core.models.rates import risk_free_para
+    rf, rf_label = risk_free_para(benchmark, "corto")
+
+    estrategias = {
+        "Máximo Sharpe": max_sharpe_weights(mu, cov, rf),
+        "Mínima varianza": min_variance_weights(cov),
+        "Tu cartera": value_weights(posiciones, precios, tickers),
+        "Equiponderada": np.ones(len(tickers)) / len(tickers),
+    }
+
+    from core.models import risk as risk_mod
+    salida, curvas = [], {}
+    for nombre, w in estrategias.items():
+        r = prueba[tickers].to_numpy() @ w
+        acumulado = float(np.prod(1 + r) - 1)
+        salida.append({
+            "estrategia": nombre,
+            "retorno_pct": round(acumulado * 100, 2),
+            "volatilidad_pct": round(float(r.std(ddof=1)) * np.sqrt(RUEDAS) * 100, 2),
+            "sharpe": round(risk_mod.sharpe(r, rf), 3),
+            "max_drawdown_pct": round(risk_mod.max_drawdown(r) * 100, 2),
+            "pesos": {t: round(float(w[i]) * 100, 1) for i, t in enumerate(tickers)},
+        })
+        curvas[nombre] = [round(float(v) * 100, 2) for v in np.cumprod(1 + r)]
+
+    ganadora = max(salida, key=lambda s: s["sharpe"])
+    optima = next(s for s in salida if s["estrategia"] == "Máximo Sharpe")
+    actual = next(s for s in salida if s["estrategia"] == "Tu cartera")
+
+    if ganadora["estrategia"] == "Máximo Sharpe":
+        veredicto = (f"La cartera optimizada habría funcionado: {optima['retorno_pct']} % "
+                     f"contra {actual['retorno_pct']} % de la tuya en estos {meses} meses.")
+    else:
+        veredicto = (f"La optimización NO habría ayudado en este período: ganó "
+                     f"«{ganadora['estrategia']}». Es lo habitual — Markowitz optimiza "
+                     f"sobre retornos pasados, que son el peor insumo del modelo.")
+
+    return {
+        "meses": meses, "ruedas_prueba": len(prueba),
+        "entrenamiento": {"desde": str(entrenamiento.index[0].date()),
+                          "hasta": str(entrenamiento.index[-1].date()),
+                          "ruedas": len(entrenamiento)},
+        "prueba": {"desde": str(prueba.index[0].date()),
+                   "hasta": str(prueba.index[-1].date())},
+        "fechas": [str(f.date()) for f in prueba.index],
+        "curvas": curvas, "resultados": salida,
+        "ganadora": ganadora["estrategia"], "veredicto": veredicto,
+        "rf_label": rf_label,
+        "nota": "Los pesos se calcularon SOLO con datos anteriores al período de prueba. "
+                "Optimizar y medir sobre el mismo período no prueba nada.",
+    }

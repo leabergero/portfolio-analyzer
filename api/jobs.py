@@ -34,7 +34,11 @@ MODELOS = {
     "momentum":     ("Momentum",        momentum.analizar),
     "objetivos":    ("Objetivos",       targets.analizar),
     "regimenes":    ("Regímenes",       regimenes.analizar),
-    "blacklitterman": ("Black-Litterman", lambda p: blacklitterman.analizar(p)),
+    # BL sin views devuelve el punto de partida y no sirve de nada: las views se
+    # arman desde los precios objetivo, recortando confianza donde el momentum
+    # va en contra. Es el uso para el que existe el modelo en esta aplicación.
+    "blacklitterman": ("Black-Litterman", lambda p: blacklitterman.analizar(
+        p, blacklitterman.views_desde_objetivos(targets.analizar(p), momentum.analizar(p)))),
 }
 
 _corridas = {}

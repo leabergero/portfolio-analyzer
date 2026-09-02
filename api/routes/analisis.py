@@ -74,6 +74,49 @@ def riesgo(nombre):
     return _simple(nombre, risk.analizar, request.args.get("benchmark", "SP500"))
 
 
+@bp.get("/riesgo/<nombre>/por-activo")
+def riesgo_activos(nombre):
+    """VaR, CVaR, VaR 99 y peor caída de cada activo, no solo del agregado."""
+    return _simple(nombre, risk.por_activo, request.args.get("benchmark", "SP500"))
+
+
+@bp.get("/riesgo/<nombre>/rolling")
+def riesgo_rolling(nombre):
+    """VaR en ventana móvil con los eventos macro superpuestos."""
+    return _simple(nombre, risk.var_rolling, request.args.get("ventana", 21, type=int))
+
+
+@bp.get("/riesgo/<nombre>/cambiario")
+def riesgo_fx(nombre):
+    """Cuánto del riesgo viene del activo y cuánto del tipo de cambio."""
+    return _simple(nombre, risk.riesgo_cambiario)
+
+
+@bp.get("/riesgo/<nombre>/ajustar")
+def riesgo_ajustar(nombre):
+    """Qué desarmar para que la pérdida de un día malo no supere un límite."""
+    objetivo = request.args.get("var", type=float)
+    if objetivo is None:
+        return jsonify({"error": "Falta el VaR objetivo (parámetro `var`, en %)."}), 400
+    return _simple(nombre, risk.ajustar_a_var, objetivo,
+                   request.args.get("benchmark", "SP500"))
+
+
+@bp.get("/correlaciones/<nombre>")
+def correlaciones(nombre):
+    """Matriz de correlaciones y si la cartera es defensiva o agresiva."""
+    return _simple(nombre, portfolio.correlaciones,
+                   request.args.get("ventana", 252, type=int))
+
+
+@bp.get("/markowitz/<nombre>/backtest")
+def mk_backtest(nombre):
+    """¿La cartera optimizada habría funcionado fuera de muestra?"""
+    return _simple(nombre, markowitz.backtest,
+                   request.args.get("meses", 6, type=int),
+                   request.args.get("benchmark", "SP500"))
+
+
 @bp.get("/stress/<nombre>")
 def stress(nombre):
     return _simple(nombre, risk.stress_test)

@@ -185,17 +185,22 @@ function Barra({ modo, setModo, tema, setTema, carteras, cartera, setCartera }) 
 
 /* ═══════════════ Modo 1 · Análisis ═══════════════ */
 
+// Stress y Momentum viven DENTRO de Riesgo, y Black-Litterman debajo de
+// Objetivos: son lecturas de lo mismo y separarlas obligaba a saltar de pestaña
+// para responder una sola pregunta.
 const PESTANAS = [
   ["posicion", "Posición"], ["composicion", "Composición"], ["riesgo", "Riesgo"],
   ["markowitz", "Markowitz"], ["montecarlo", "Monte Carlo"], ["capm", "Benchmark"],
-  ["momentum", "Momentum"], ["objetivos", "Objetivos"],
-  ["blacklitterman", "Black-Litterman"], ["regimenes", "Regímenes"], ["stress", "Stress"],
+  ["objetivos", "Objetivos"], ["regimenes", "Regímenes"],
 ];
 
-function Analisis({ cartera }) {
+const BENCHMARKS = [["SP500", "S&P 500"], ["MERVAL", "Merval"], ["STOXX600", "STOXX 600"]];
+
+function Analisis({ cartera, recargar }) {
   const [run, setRun] = useState(null);
   const [estado, setEstado] = useState(null);
   const [tab, setTab] = useState("posicion");
+  const [bench, setBench] = useState("SP500");
 
   useEffect(() => {
     if (!cartera) return;
@@ -240,13 +245,20 @@ function Analisis({ cartera }) {
                  : M[k]?.estado === "error" ? "error" : "corriendo")} />
           </button>
         ))}
+        <span style={{ marginLeft: "auto", display: "flex", alignItems: "center",
+                       gap: 7, paddingBottom: 6 }}>
+          <span style={{ fontSize: 12, color: "var(--texto-3)" }}>Comparar contra</span>
+          <select value={bench} onChange={(e) => setBench(e.target.value)}>
+            {BENCHMARKS.map(([k, t]) => <option key={k} value={k}>{t}</option>)}
+          </select>
+        </span>
       </div>
-      <Panel tab={tab} R={R} M={M} cartera={cartera} />
+      <Panel tab={tab} R={R} M={M} cartera={cartera} bench={bench} recargar={recargar} />
     </>
   );
 }
 
-function Panel({ tab, R, M, cartera }) {
+function Panel({ tab, R, M, cartera, bench, recargar }) {
   const d = R[tab];
   if (M[tab]?.estado === "corriendo" || M[tab]?.estado === "en cola")
     return <div className="cargando">Calculando {M[tab]?.nombre}…</div>;
@@ -254,21 +266,103 @@ function Panel({ tab, R, M, cartera }) {
   if (d.error) return <div className="aviso mal"><b>No se pudo calcular.</b> {d.error}</div>;
 
   const vistas = {
-    posicion: <Posicion d={{ ...d, cartera_nombre: cartera }} />, composicion: <Composicion d={d} />,
-    riesgo: <Riesgo d={d} />, markowitz: <Markowitz d={d} />,
-    montecarlo: <MonteCarlo d={d} cartera={cartera} />, capm: <Capm d={d} cartera={cartera} />,
-    momentum: <Momentum d={d} />, objetivos: <Objetivos d={d} />,
-    blacklitterman: <BlackLitterman d={d} />, regimenes: <Regimenes d={d} />,
-    stress: <Stress d={d} />,
+    posicion: <Posicion d={{ ...d, cartera_nombre: cartera }} cartera={cartera} recargar={recargar} />,
+    composicion: <Composicion d={d} />,
+    riesgo: <Riesgo d={d} cartera={cartera}
+                    extras={{ stress: R.stress, momentum: R.momentum }} />,
+    markowitz: <Markowitz d={d} cartera={cartera} bench={bench} />,
+    montecarlo: <MonteCarlo d={d} cartera={cartera} />,
+    capm: <Capm d={d} cartera={cartera} bench={bench} />,
+    objetivos: <Objetivos d={d} bl={R.blacklitterman} />,
+    regimenes: <Regimenes d={d} cartera={cartera} />,
   };
   return vistas[tab] || <div className="cargando">—</div>;
 }
 
 /* ── Posición ── */
-function Posicion({ d }) {
+function AltaRapida({ cartera, recargar }) {
+  const vacio = { ticker: "", buy_date: new Date().toISOString().slice(0, 10),
+                  buy_price: "", qty: "", commissions: "0", source: "" };
+  const [f, setF] = useState(vacio);
+  const [check, setCheck] = useState(null);
+  const [msg, setMsg] = useState(null);
+  const [abierto, setAbierto] = useState(false);
+
+  const validar = async () => {
+    const t = f.ticker.trim().toUpperCase();
+    if (!t) return;
+    setCheck({ cargando: true });
+    setCheck(await api(`/api/validar/${encodeURIComponent(t)}`));
+  };
+  const agregar = async () => {
+    const t = f.ticker.trim().toUpperCase();
+    if (!t || !f.buy_price || !f.qty) { setMsg({ mal: "Faltan ticker, precio o cantidad." }); return; }
+    const actuales = await api(`/api/carteras/${encodeURIComponent(cartera)}`);
+    const nuevas = [...actuales, { ...f, ticker: t, buy_price: +f.buy_price,
+                                   qty: +f.qty, commissions: +f.commissions || 0 }];
+    const r = await api(`/api/carteras/${encodeURIComponent(cartera)}`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ posiciones: nuevas }) });
+    if (r.error) { setMsg({ mal: r.error }); return; }
+    setMsg({ ok: `${t} agregado. Recargá el análisis para verlo reflejado.` });
+    setF(vacio); setCheck(null); recargar && recargar();
+  };
+
+  if (!abierto) return (
+    <button className="btn" style={{ marginBottom: 14 }}
+            onClick={() => setAbierto(true)}>+ Agregar una posición</button>);
+
+  return (
+    <div className="panel" style={{ marginBottom: 14 }}>
+      <h3>Agregar una posición a {cartera}
+        <button className="btn" style={{ marginLeft: "auto", padding: "3px 10px", fontSize: 12 }}
+                onClick={() => setAbierto(false)}>Cerrar</button>
+      </h3>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end", marginTop: 10 }}>
+        {[["ticker", "Ticker", "text", 120, "GGAL.BA"],
+          ["buy_date", "Fecha de compra", "text", 120, "2025-09-19"],
+          ["buy_price", "Precio pagado", "number", 110, ""],
+          ["qty", "Cantidad", "number", 100, ""],
+          ["commissions", "Comisiones", "number", 100, ""]].map(([k, et, tipo, w, ph]) => (
+          <label key={k} style={{ fontSize: 11.5, color: "var(--texto-3)" }}>
+            {et}<br />
+            <input type={tipo} value={f[k]} placeholder={ph} style={{ width: w, marginTop: 3 }}
+                   onChange={(e) => setF({ ...f, [k]: e.target.value })}
+                   onBlur={k === "ticker" ? validar : undefined} />
+          </label>))}
+        <label style={{ fontSize: 11.5, color: "var(--texto-3)" }}>
+          Origen<br />
+          <select value={f.source} style={{ marginTop: 3 }}
+                  onChange={(e) => setF({ ...f, source: e.target.value })}>
+            <option value="">automático</option>
+            <option value="cocos">cocos (bono / ON)</option>
+          </select>
+        </label>
+        <button className="btn primario" onClick={agregar}>Agregar</button>
+      </div>
+      {check && !check.cargando && (
+        <div className={"aviso " + (check.valido && check.alcanza_para_analisis ? "ok"
+                                    : check.valido ? "ojo" : "mal")}>
+          {check.valido
+            ? <>Cotiza en <b>{check.moneda}</b>{check.subyacente !== check.ticker &&
+                <> (subyacente <b>{check.subyacente}</b>)</>}, último <b>{usd(check.ultimo_usd, 4)}</b>,
+               {" "}{check.ruedas} ruedas de historia. {check.detalle}</>
+            : <>{check.detalle} Si es un bono u ON, elegí origen <b>cocos</b>.</>}
+        </div>)}
+      {msg && <div className={"aviso " + (msg.mal ? "mal" : "ok")}>{msg.mal || msg.ok}</div>}
+      <div className="pie">
+        El precio va en la moneda en que cotiza el activo. Se valida el ticker al salir del
+        campo, para no descubrir que no hay historia cuando ya cargaste todo.
+      </div>
+    </div>
+  );
+}
+
+function Posicion({ d, cartera, recargar }) {
   const filas = d.posiciones || [];
   return (
     <>
+      <AltaRapida cartera={cartera} recargar={recargar} />
       <div className="kpis">
         <Kpi etiqueta="Valor total" valor={usd(d.valor_total)} ayuda={AYUDA.valor}
              sub={d.mep_hoy ? `MEP $${d.mep_hoy}` : null} />
@@ -365,56 +459,84 @@ function Composicion({ d }) {
 }
 
 /* ── Riesgo ── */
-function Riesgo({ d }) {
+const SUB_RIESGO = [["resumen","Resumen"],["activos","Por activo"],
+                    ["evolucion","Evolución del riesgo"],["distribucion","Distribución"],
+                    ["cambiario","Tipo de cambio"],["stress","Stress"],
+                    ["limite","Poner un límite"],["momentum","Momentum"]];
+
+function Riesgo({ d, cartera, extras }) {
+  const [sub, setSub] = useState("resumen");
+  return (
+    <>
+      <KpisRiesgo d={d} />
+      <div className="tabs" style={{ marginTop: 4 }}>
+        {SUB_RIESGO.map(([k, t]) => (
+          <button key={k} className={"tab" + (sub === k ? " on" : "")}
+                  onClick={() => setSub(k)}>{t}</button>))}
+      </div>
+      {sub === "resumen" && <RiesgoResumen d={d} cartera={cartera} />}
+      {sub === "activos" && <RiesgoActivos cartera={cartera} />}
+      {sub === "evolucion" && <RiesgoEvolucion cartera={cartera} />}
+      {sub === "distribucion" && <RiesgoDistribucion cartera={cartera} />}
+      {sub === "cambiario" && <RiesgoCambiario cartera={cartera} />}
+      {sub === "stress" && (extras.stress ? <Stress d={extras.stress} /> : <div className="cargando">Calculando…</div>)}
+      {sub === "limite" && <RiesgoLimite cartera={cartera} d={d} />}
+      {sub === "momentum" && (extras.momentum ? <Momentum d={extras.momentum} /> : <div className="cargando">Calculando…</div>)}
+    </>
+  );
+}
+
+function KpisRiesgo({ d }) {
+  return (
+    <div className="kpis">
+      <Kpi etiqueta="Sharpe" valor={num(d.sharpe, 3)} ayuda={AYUDA.sharpe}
+           tono={d.sharpe > 1 ? "pos" : d.sharpe < 0.5 ? "neg" : ""} sub={d.rf_label} />
+      <Kpi etiqueta="Sortino" valor={num(d.sortino, 3)} ayuda={AYUDA.sortino} />
+      <Kpi etiqueta="Calmar" valor={num(d.calmar, 3)} ayuda={AYUDA.calmar} />
+      <Kpi etiqueta="Volatilidad" valor={pct(d.volatilidad_anual_pct)} ayuda={AYUDA.vol} />
+      <Kpi etiqueta="Día malo" valor={usd(d.var95_usd)} tono="neg" ayuda={AYUDA.var95}
+           sub={pct(d.var95_pct) + " · 1 de cada 20"} />
+      <Kpi etiqueta="Día muy malo" valor={usd(d.cvar95_usd)} tono="neg" ayuda={AYUDA.cvar}
+           sub={pct(d.cvar95_pct)} />
+      <Kpi etiqueta="Peor caída" valor={pct(d.max_drawdown_pct)} tono="neg" ayuda={AYUDA.maxdd} />
+      <Kpi etiqueta="Curtosis" valor={num(d.curtosis_exceso)} ayuda={AYUDA.curtosis}
+           tono={d.curtosis_exceso > 3 ? "neg" : ""} sub="en exceso" />
+    </div>
+  );
+}
+
+function RiesgoResumen({ d, cartera }) {
   const c = colores();
+  const [corr, setCorr] = useState(null);
+  useEffect(() => { api(`/api/correlaciones/${encodeURIComponent(cartera)}`).then(setCorr); }, [cartera]);
   const contrib = d.contribucion_riesgo || [];
-  const barras = [{
-    type: "bar", orientation: "h",
-    y: contrib.map((x) => x.ticker).reverse(),
-    x: contrib.map((x) => x.riesgo_pct).reverse(),
-    marker: { color: c.negativo }, name: "aporte al riesgo",
-    hovertemplate: "%{y}: %{x:.1f} % del riesgo<extra></extra>",
-  }, {
-    type: "bar", orientation: "h",
-    y: contrib.map((x) => x.ticker).reverse(),
-    x: contrib.map((x) => x.peso_pct).reverse(),
-    marker: { color: c.series[2] }, name: "peso en la cartera",
-    hovertemplate: "%{y}: %{x:.1f} % de peso<extra></extra>",
-  }];
   const desbalance = contrib.filter((x) => x.ratio && x.ratio > 1.5);
 
   return (
     <>
-      <div className="kpis">
-        <Kpi etiqueta="Sharpe" valor={num(d.sharpe, 3)} ayuda={AYUDA.sharpe}
-             tono={d.sharpe > 1 ? "pos" : d.sharpe < 0.5 ? "neg" : ""} sub={d.rf_label} />
-        <Kpi etiqueta="Sortino" valor={num(d.sortino, 3)} ayuda={AYUDA.sortino} />
-        <Kpi etiqueta="Calmar" valor={num(d.calmar, 3)} ayuda={AYUDA.calmar} />
-        <Kpi etiqueta="Volatilidad" valor={pct(d.volatilidad_anual_pct)} ayuda={AYUDA.vol} />
-        <Kpi etiqueta="Día malo" valor={usd(d.var95_usd)} tono="neg" ayuda={AYUDA.var95}
-             sub={pct(d.var95_pct) + " · 1 de cada 20"} />
-        <Kpi etiqueta="Día muy malo" valor={usd(d.cvar95_usd)} tono="neg" ayuda={AYUDA.cvar}
-             sub={pct(d.cvar95_pct)} />
-        <Kpi etiqueta="Peor caída" valor={pct(d.max_drawdown_pct)} tono="neg" ayuda={AYUDA.maxdd} />
-        <Kpi etiqueta="Curtosis" valor={num(d.curtosis_exceso)} ayuda={AYUDA.curtosis}
-             tono={d.curtosis_exceso > 3 ? "neg" : ""} sub="en exceso" />
-      </div>
-
       <div className="fila f2">
         <div className="panel">
           <h3>Quién trae el riesgo</h3>
-          <Grafico datos={barras} layout={{ barmode: "group", margin: { l: 82 },
-                   xaxis: { ticksuffix: " %" } }} alto={Math.max(220, contrib.length * 46)} />
+          <Grafico alto={Math.max(220, contrib.length * 46)}
+            datos={[
+              { type: "bar", orientation: "h", name: "aporte al riesgo",
+                y: contrib.map((x) => x.ticker).reverse(),
+                x: contrib.map((x) => x.riesgo_pct).reverse(), marker: { color: c.negativo },
+                hovertemplate: "%{y}: %{x:.1f} % del riesgo<extra></extra>" },
+              { type: "bar", orientation: "h", name: "peso en la cartera",
+                y: contrib.map((x) => x.ticker).reverse(),
+                x: contrib.map((x) => x.peso_pct).reverse(), marker: { color: c.series[2] },
+                hovertemplate: "%{y}: %{x:.1f} % de peso<extra></extra>" }]}
+            layout={{ barmode: "group", margin: { l: 82 }, xaxis: { ticksuffix: " %" } }} />
           <div className="pie">
-            Las contribuciones suman exactamente la volatilidad de la cartera
-            (identidad de Euler). Un activo cuya barra roja supera a la azul aporta
-            más riesgo del que su peso sugiere.
+            Las contribuciones suman exactamente la volatilidad de la cartera (identidad
+            de Euler). Barra roja mayor que la azul = aporta más riesgo del que su peso sugiere.
           </div>
         </div>
         <div className="panel">
           <h3>Cuánto esconde suponer normalidad</h3>
           <div className="tabla-wrap"><table>
-            <thead><tr><th>Método</th><th className="n">Pérdida en un día malo</th><th className="n">En dólares</th></tr></thead>
+            <thead><tr><th>Método</th><th className="n">Un día malo</th><th className="n">En dólares</th></tr></thead>
             <tbody>
               <tr><td>Histórico (95 %)</td><td className="n">{pct(d.var95_pct)}</td><td className="n neg">{usd(d.var95_usd)}</td></tr>
               <tr><td>Cornish-Fisher (95 %)</td><td className="n">{pct(d.var95_cornish_fisher_pct)}</td><td className="n neg">{usd(d.var95_cornish_fisher_usd)}</td></tr>
@@ -423,25 +545,342 @@ function Riesgo({ d }) {
           </table></div>
           <div className="pie">
             Cornish-Fisher ajusta el cuantil por la asimetría y las colas gordas reales.
-            La diferencia con el histórico es cuánto riesgo queda oculto si se supone
-            que los retornos se portan como una campana.
+            La diferencia con el histórico es cuánto riesgo queda oculto.
           </div>
         </div>
       </div>
 
       {desbalance.length > 0 && (
-        <div className="aviso ojo">
-          <b>Riesgo concentrado.</b>{" "}
+        <div className="aviso ojo"><b>Riesgo concentrado.</b>{" "}
           {desbalance.map((x) => `${x.ticker} pesa ${x.peso_pct} % y aporta ${x.riesgo_pct} % del riesgo`).join(" · ")}.
         </div>
+      )}
+
+      {corr && !corr.error && <MatrizCorrelaciones corr={corr} />}
+    </>
+  );
+}
+
+function MatrizCorrelaciones({ corr }) {
+  const c = colores();
+  const [enCaidas, setEnCaidas] = useState(false);
+  const m = enCaidas && corr.matriz_caidas ? corr.matriz_caidas : corr.matriz;
+  const tono = { defensiva: "ok", mixta: "ojo", agresiva: "mal" }[corr.caracter];
+  return (
+    <div className="panel" style={{ marginTop: 14 }}>
+      <h3>¿Defensiva o agresiva?
+        <span className={"chip " + tono} style={{ marginLeft: 8 }}>{corr.caracter}</span>
+        {corr.matriz_caidas && (
+          <button className="btn" style={{ marginLeft: "auto", padding: "3px 10px", fontSize: 12 }}
+                  onClick={() => setEnCaidas(!enCaidas)}>
+            {enCaidas ? "Ver días normales" : "Ver solo días de caída"}</button>)}
+      </h3>
+      <div className="fila f2" style={{ marginTop: 10, marginBottom: 0 }}>
+        <Grafico alto={Math.max(260, corr.tickers.length * 44)}
+          datos={[{ type: "heatmap", z: m, x: corr.tickers, y: corr.tickers,
+                    zmin: -1, zmax: 1, colorscale: [[0, c.negativo], [0.5, c.panel], [1, c.acento]],
+                    text: m.map((f) => f.map((v) => v.toFixed(2))),
+                    texttemplate: "%{text}", textfont: { size: 10 },
+                    hovertemplate: "%{y} ↔ %{x}: %{z:.2f}<extra></extra>",
+                    colorbar: { thickness: 10, len: 0.8 } }]}
+          layout={{ margin: { l: 80, b: 70, t: 10, r: 10 } }} />
+        <div>
+          <div className="kpis" style={{ gridTemplateColumns: "1fr 1fr" }}>
+            <Kpi etiqueta="Correlación media" valor={num(corr.correlacion_media, 3)}
+                 ayuda={{ que: "Correlación media entre pares",
+                          como: "Cuánto se mueven juntos tus activos, en promedio. Va de −1 a 1.",
+                          umbral: "Debajo de 0,3 la cartera es defensiva; arriba de 0,6, agresiva: casi todo se mueve junto." }} />
+            <Kpi etiqueta="En días de caída" valor={num(corr.correlacion_media_en_caidas, 3)}
+                 tono={corr.aviso_caidas ? "neg" : ""} sub="el 10 % de días peores" />
+          </div>
+          <div className={"aviso " + tono}>{corr.lectura}</div>
+          {corr.aviso_caidas && <div className="aviso mal">{corr.aviso_caidas}</div>}
+          {corr.par_mas_correlacionado && (
+            <div className="pie">
+              El par que más se mueve junto: <b>{corr.par_mas_correlacionado.a} ↔ {corr.par_mas_correlacionado.b}</b> ({corr.par_mas_correlacionado.corr}).
+              El que menos: <b>{corr.par_menos_correlacionado.a} ↔ {corr.par_menos_correlacionado.b}</b> ({corr.par_menos_correlacionado.corr}).
+            </div>)}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RiesgoActivos({ cartera }) {
+  const c = colores();
+  const [d, setD] = useState(null);
+  const [sel, setSel] = useState("__todos__");
+  useEffect(() => { setD(null); api(`/api/riesgo/${encodeURIComponent(cartera)}/por-activo`).then(setD); }, [cartera]);
+  if (!d) return <div className="cargando">Midiendo el riesgo de cada activo…</div>;
+  if (d.error) return <div className="aviso mal">{d.error}</div>;
+
+  const todos = [...d.por_activo, d.cartera];
+  const serie = sel === "__todos__" ? d.serie_cartera : (d.series[sel] || []);
+  const foco = sel === "__todos__" ? d.cartera : d.por_activo.find((x) => x.ticker === sel);
+
+  return (
+    <>
+      <div className="panel" style={{ marginBottom: 14 }}>
+        <h3>Riesgo de cada activo por separado</h3>
+        <div className="tabla-wrap"><table>
+          <thead><tr><th>Activo</th><th className="n">Peso</th><th className="n">Retorno anual</th>
+            <th className="n">Volatilidad</th><th className="n">Día malo</th><th className="n">Día muy malo</th>
+            <th className="n">1 de 100</th><th className="n">Peor caída</th><th className="n">Sharpe</th></tr></thead>
+          <tbody>{todos.map((f) => (
+            <tr key={f.ticker} style={f.ticker === "CARTERA"
+                  ? { borderTop: "2px solid var(--acento)", fontWeight: 600 } : null}>
+              <td className="mono">{f.ticker}</td>
+              <td className="n">{pct(f.peso_pct, 1)}</td>
+              <td className={"n " + signo(f.retorno_anual_pct)}>{pct(f.retorno_anual_pct, 1)}</td>
+              <td className="n">{pct(f.volatilidad_pct, 1)}</td>
+              <td className="n neg">{pct(f.var95_pct)}</td>
+              <td className="n neg">{pct(f.cvar95_pct)}</td>
+              <td className="n neg">{pct(f.var99_pct)}</td>
+              <td className="n neg">{pct(f.max_drawdown_pct, 1)}</td>
+              <td className="n">{num(f.sharpe, 2)}</td>
+            </tr>))}</tbody>
+        </table></div>
+        <div className="aviso ok">
+          <b>Diversificar ahorra {pct(d.beneficio_diversificacion_pct, 1)} de volatilidad.</b>{" "}
+          El activo más riesgoso cae hasta {pct(d.por_activo[0]?.max_drawdown_pct, 1)} por su cuenta,
+          pero la cartera entera solo {pct(d.cartera.max_drawdown_pct, 1)}: eso es lo que aporta
+          combinarlos. Ventana común: {d.ventana.desde} → {d.ventana.hasta}.
+        </div>
+      </div>
+
+      <div className="panel">
+        <h3>Cómo se comportan los días
+          <select value={sel} onChange={(e) => setSel(e.target.value)} style={{ marginLeft: "auto" }}>
+            <option value="__todos__">Cartera completa</option>
+            {d.por_activo.map((x) => <option key={x.ticker} value={x.ticker}>{x.ticker}</option>)}
+          </select>
+        </h3>
+        <Grafico alto={300}
+          datos={[{ type: "bar", x: serie.map((p) => p.fecha), y: serie.map((p) => p.ret),
+                    marker: { color: serie.map((p) => p.ret >= 0 ? c.positivo : c.negativo) },
+                    hovertemplate: "%{x}: %{y:.2f} %<extra></extra>" }]}
+          layout={{ yaxis: { title: "Retorno diario", ticksuffix: " %" },
+                    shapes: foco ? [{ type: "line", xref: "paper", x0: 0, x1: 1,
+                      y0: foco.var95_pct, y1: foco.var95_pct,
+                      line: { color: c.alerta, width: 1.5, dash: "dash" } }] : [] }} />
+        <div className="pie">
+          Cada barra es una rueda, acotado a la ventana de la cartera. La línea punteada es
+          el umbral del día malo ({pct(foco?.var95_pct)}): todo lo que la cruza es ese 5 % peor.
+        </div>
+      </div>
+    </>
+  );
+}
+
+function RiesgoEvolucion({ cartera }) {
+  const c = colores();
+  const [d, setD] = useState(null);
+  useEffect(() => { setD(null); api(`/api/riesgo/${encodeURIComponent(cartera)}/rolling`).then(setD); }, [cartera]);
+  if (!d) return <div className="cargando">Calculando la ventana móvil…</div>;
+  if (d.error) return <div className="aviso mal">{d.error}</div>;
+
+  const marcas = (d.eventos || []).map((e) => ({
+    type: "line", x0: e.fecha, x1: e.fecha, yref: "paper", y0: 0, y1: 1,
+    line: { color: e.alcance === "AR" ? c.series[3] : c.series[4], width: 1, dash: "dot" },
+  }));
+  return (
+    <>
+      <div className="panel">
+        <h3>Cuándo se disparó el riesgo</h3>
+        <Grafico alto={360}
+          datos={[
+            { type: "scatter", mode: "lines", name: "pérdida en un día malo",
+              x: d.serie.map((p) => p.fecha), y: d.serie.map((p) => p.var95_pct),
+              line: { color: c.negativo, width: 1.8 } },
+            { type: "scatter", mode: "lines", name: "pérdida en un día muy malo",
+              x: d.serie.map((p) => p.fecha), y: d.serie.map((p) => p.cvar95_pct),
+              line: { color: c.alerta, width: 1.2, dash: "dot" } }]}
+          layout={{ shapes: marcas, yaxis: { title: "Pérdida diaria", ticksuffix: " %" } }} />
+        <div className="pie">
+          VaR 95 % sobre las últimas {d.ventana_ruedas} ruedas en cada punto. Las líneas
+          verticales son eventos macro: violeta los argentinos, lila los mundiales.
+        </div>
+      </div>
+      <div className="panel">
+        <h3>Eventos del período</h3>
+        <div className="tabla-wrap"><table>
+          <thead><tr><th>Fecha</th><th>Alcance</th><th>Qué pasó</th></tr></thead>
+          <tbody>{(d.eventos || []).slice().reverse().map((e, i) => (
+            <tr key={i}><td className="mono">{e.fecha}</td>
+              <td><span className="chip">{e.alcance}</span></td><td>{e.descripcion}</td></tr>))}</tbody>
+        </table></div>
+        <div className="pie">{d.nota}</div>
+      </div>
+    </>
+  );
+}
+
+function RiesgoDistribucion({ cartera }) {
+  const c = colores();
+  const [d, setD] = useState(null);
+  useEffect(() => { setD(null); api(`/api/riesgo/${encodeURIComponent(cartera)}/por-activo`).then(setD); }, [cartera]);
+  if (!d) return <div className="cargando">Armando la distribución…</div>;
+  if (d.error) return <div className="aviso mal">{d.error}</div>;
+
+  const rs = d.serie_cartera.map((p) => p.ret);
+  const k = d.cartera;
+  const media = rs.reduce((a, b) => a + b, 0) / rs.length;
+  const sd = Math.sqrt(rs.reduce((a, b) => a + (b - media) ** 2, 0) / (rs.length - 1));
+  // Campana normal con la misma media y desvío: la referencia contra la que se
+  // compara la forma real.
+  const lo = Math.min(...rs), hi = Math.max(...rs);
+  const paso = (hi - lo) / 60;
+  const xs = Array.from({ length: 61 }, (_, i) => lo + i * paso);
+  const normal = xs.map((x) => rs.length * paso *
+    Math.exp(-((x - media) ** 2) / (2 * sd * sd)) / (sd * Math.sqrt(2 * Math.PI)));
+  const linea = (x, color, texto) => ({
+    type: "line", x0: x, x1: x, yref: "paper", y0: 0, y1: 0.92,
+    line: { color, width: 1.6, dash: "dash" },
+  });
+  return (
+    <div className="panel">
+      <h3>Distribución de los retornos diarios</h3>
+      <Grafico alto={380}
+        datos={[
+          { type: "histogram", x: rs, nbinsx: 60, name: "días reales",
+            marker: { color: c.series[2], opacity: 0.75 },
+            hovertemplate: "%{x:.2f} %: %{y} días<extra></extra>" },
+          { type: "scatter", mode: "lines", x: xs, y: normal, name: "si fuera una campana normal",
+            line: { color: c.alerta, width: 2 } }]}
+        layout={{
+          shapes: [linea(k.var95_pct, c.negativo), linea(k.var99_pct, c.negativo),
+                   linea(media, c.texto3)],
+          annotations: [
+            { x: k.var95_pct, y: 1, yref: "paper", text: "día malo", showarrow: false,
+              font: { size: 10, color: c.negativo }, yanchor: "bottom" },
+            { x: k.var99_pct, y: 1, yref: "paper", text: "1 de 100", showarrow: false,
+              font: { size: 10, color: c.negativo }, yanchor: "bottom" }],
+          xaxis: { title: "Retorno diario", ticksuffix: " %" },
+          yaxis: { title: "Cantidad de días" }, bargap: 0.02 }} />
+      <div className="pie">
+        Las barras son los días que realmente pasaron; la curva, cómo se verían si los
+        retornos siguieran una campana normal. <b>Donde las barras superan a la curva en los
+        extremos, esos son los días que un modelo normal no ve venir</b> — la curtosis en
+        exceso de esta cartera es {num(k.curtosis_exceso)}.
+      </div>
+    </div>
+  );
+}
+
+function RiesgoCambiario({ cartera }) {
+  const c = colores();
+  const [d, setD] = useState(null);
+  useEffect(() => { setD(null); api(`/api/riesgo/${encodeURIComponent(cartera)}/cambiario`).then(setD); }, [cartera]);
+  if (!d) return <div className="cargando">Separando el riesgo del activo del riesgo del dólar…</div>;
+  if (d.error) return <div className="aviso mal">{d.error}</div>;
+  const enPesos = d.por_activo.filter((x) => x.moneda === "ARS");
+  return (
+    <>
+      <div className="kpis">
+        <Kpi etiqueta="Riesgo del tipo de cambio" valor={pct(d.fx_pct, 1)}
+             tono={d.fx_pct > 50 ? "neg" : ""}
+             ayuda={{ que: "Riesgo cambiario",
+                      como: "De todo lo que hace oscilar tu cartera medida en dólares, cuánto viene del movimiento del MEP y no de los activos.",
+                      umbral: "Arriba del 50 % estás apostando más al dólar que a las empresas." }} />
+        <Kpi etiqueta="Riesgo de los activos" valor={pct(d.activo_pct, 1)} />
+        <Kpi etiqueta="Expuesto al peso" valor={pct(d.pct_expuesto_al_peso, 1)}
+             sub={`${usd(d.valor_en_pesos)} de ${usd(d.valor_en_pesos + d.valor_en_dolares)}`} />
+      </div>
+      {enPesos.length > 0 && (
+        <div className="panel">
+          <h3>De dónde viene el riesgo de cada activo en pesos</h3>
+          <Grafico alto={Math.max(200, enPesos.length * 46)}
+            datos={[
+              { type: "bar", orientation: "h", name: "el activo",
+                y: enPesos.map((x) => x.ticker).reverse(), x: enPesos.map((x) => x.activo_pct).reverse(),
+                marker: { color: c.series[2] } },
+              { type: "bar", orientation: "h", name: "el dólar",
+                y: enPesos.map((x) => x.ticker).reverse(), x: enPesos.map((x) => x.fx_pct).reverse(),
+                marker: { color: c.alerta } }]}
+            layout={{ barmode: "stack", margin: { l: 82 }, xaxis: { ticksuffix: " %" } }} />
+          <div className="pie">{d.nota}</div>
+        </div>
+      )}
+      <div className="panel">
+        <h3>Detalle</h3>
+        <div className="tabla-wrap"><table>
+          <thead><tr><th>Activo</th><th>Moneda</th><th className="n">Valor</th>
+            <th className="n">Del activo</th><th className="n">Del dólar</th>
+            <th className="n">Correlación con el MEP</th></tr></thead>
+          <tbody>{d.por_activo.map((x) => (
+            <tr key={x.ticker}><td className="mono">{x.ticker}</td><td>{x.moneda}</td>
+              <td className="n">{usd(x.valor_usd)}</td><td className="n">{pct(x.activo_pct, 1)}</td>
+              <td className="n">{pct(x.fx_pct, 1)}</td>
+              <td className="n">{x.correlacion_con_mep == null ? "—" : num(x.correlacion_con_mep, 2)}</td>
+            </tr>))}</tbody>
+        </table></div>
+      </div>
+    </>
+  );
+}
+
+function RiesgoLimite({ cartera, d }) {
+  const [objetivo, setObjetivo] = useState(Math.abs(d.var95_pct * 0.7).toFixed(2));
+  const [r, setR] = useState(null);
+  const [cargando, setCargando] = useState(false);
+  const calcular = async () => {
+    setCargando(true);
+    setR(await api(`/api/riesgo/${encodeURIComponent(cartera)}/ajustar?var=${objetivo}`));
+    setCargando(false);
+  };
+  return (
+    <>
+      <div className="panel">
+        <h3>¿Cuánto tendría que desarmar para no perder más de…?</h3>
+        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginTop: 10 }}>
+          <span>No quiero perder más de</span>
+          <input type="number" step="0.05" min="0.05" value={objetivo}
+                 onChange={(e) => setObjetivo(e.target.value)} style={{ width: 90 }} />
+          <span>% en un día malo.</span>
+          <button className="btn primario" onClick={calcular} disabled={cargando}>
+            {cargando ? "Calculando…" : "Calcular"}</button>
+          <span className="pie" style={{ marginTop: 0 }}>
+            Hoy: {pct(d.var95_pct)} ({usd(d.var95_usd)})</span>
+        </div>
+      </div>
+      {r?.error && <div className="aviso mal">{r.error}</div>}
+      {r && !r.error && r.ya_cumple && <div className="aviso ok">{r.mensaje}</div>}
+      {r && !r.error && !r.ya_cumple && (
+        <>
+          <div className="kpis">
+            <Kpi etiqueta="Mantener invertido" valor={pct(r.invertido_pct, 1)} />
+            <Kpi etiqueta="Pasar a dólares" valor={pct(r.liquidez_pct, 1)} tono="neg"
+                 sub={usd(r.a_liquidar_usd)} />
+            <Kpi etiqueta="Día malo pasaría a ser" valor={usd(r.var_objetivo_usd)}
+                 sub={`desde ${usd(r.var_actual_usd)}`} />
+          </div>
+          <div className="panel">
+            <h3>Qué vender de cada posición</h3>
+            <div className="tabla-wrap"><table>
+              <thead><tr><th>Activo</th><th className="n">Peso hoy</th><th className="n">Peso nuevo</th>
+                <th className="n">Vender</th><th className="n">Unidades</th></tr></thead>
+              <tbody>{r.ajustes.map((a) => (
+                <tr key={a.ticker}><td className="mono">{a.ticker}</td>
+                  <td className="n">{pct(a.peso_actual_pct, 1)}</td>
+                  <td className="n">{pct(a.peso_nuevo_pct, 1)}</td>
+                  <td className="n neg">{usd(a.vender_usd)}</td>
+                  <td className="n">{a.vender_unidades == null ? "—" : num(a.vender_unidades, 2)}</td>
+                </tr>))}</tbody>
+            </table></div>
+            <div className="pie">{r.nota}</div>
+          </div>
+        </>
       )}
     </>
   );
 }
 
 /* ── Markowitz ── */
-function Markowitz({ d }) {
+function Markowitz({ d, cartera, bench }) {
   const c = colores();
+  const [bt, setBt] = useState(null);
+  const [meses, setMeses] = useState(6);
+  const [objetivo, setObjetivo] = useState("max_sharpe");
   const f = d.frontera || [];
   const nube = d.nube || {};
   const datos = [
@@ -484,11 +923,41 @@ function Markowitz({ d }) {
           </div>
         </div>
         <div className="panel">
-          <h3>Para llegar a la cartera de máximo Sharpe</h3>
+          <h3>Cómo quedarían los pesos</h3>
+          <Grafico alto={Math.max(230, d.tickers.length * 50)}
+            datos={[
+              { type: "bar", orientation: "h", name: "hoy",
+                y: d.tickers.slice().reverse(), x: d.actual.pesos.slice().reverse(),
+                marker: { color: c.texto3 } },
+              { type: "bar", orientation: "h", name: "máximo Sharpe",
+                y: d.tickers.slice().reverse(), x: d.max_sharpe.pesos.slice().reverse(),
+                marker: { color: c.positivo } },
+              { type: "bar", orientation: "h", name: "mínima varianza",
+                y: d.tickers.slice().reverse(), x: d.min_varianza.pesos.slice().reverse(),
+                marker: { color: c.series[1] } }]}
+            layout={{ barmode: "group", margin: { l: 82 }, xaxis: { ticksuffix: " %" } }} />
+          <div className="pie">
+            Máximo Sharpe busca el mejor retorno por unidad de riesgo; mínima varianza,
+            la cartera más tranquila sin mirar el retorno esperado —que es el dato peor
+            estimado del modelo, y por eso suele ser la más robusta—.
+          </div>
+        </div>
+      </div>
+
+      <div className="fila f2">
+        <div className="panel">
+          <h3>Qué habría que operar
+            <select value={objetivo} onChange={(e) => setObjetivo(e.target.value)}
+                    style={{ marginLeft: "auto" }}>
+              <option value="max_sharpe">para máximo Sharpe</option>
+              <option value="min_varianza">para mínima varianza</option>
+            </select>
+          </h3>
           <div className="tabla-wrap"><table>
             <thead><tr><th>Ticker</th><th className="n">Hoy</th><th className="n">Objetivo</th>
                        <th className="n">Diferencia</th><th>Acción</th></tr></thead>
-            <tbody>{(d.acciones_max_sharpe || []).map((a) => (
+            <tbody>{((objetivo === "max_sharpe" ? d.acciones_max_sharpe
+                                                : d.acciones_min_varianza) || []).map((a) => (
               <tr key={a.ticker}>
                 <td className="mono">{a.ticker}</td>
                 <td className="n">{pct(a.peso_actual_pct, 1)}</td>
@@ -499,8 +968,52 @@ function Markowitz({ d }) {
           </table></div>
           <div className="pie">
             Markowitz optimiza sobre retornos pasados: son el peor insumo del modelo.
-            Leelo como una dirección, no como una instrucción.
+            Leelo como una dirección, no como una instrucción — y mirá el backtest.
           </div>
+        </div>
+
+        <div className="panel">
+          <h3>¿Habría funcionado?
+            <span style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "center" }}>
+              <select value={meses} onChange={(e) => setMeses(+e.target.value)}>
+                {[3, 6, 12].map((m) => <option key={m} value={m}>{m} meses</option>)}
+              </select>
+              <button className="btn" style={{ padding: "4px 11px", fontSize: 12.5 }}
+                      onClick={async () => { setBt("cargando");
+                        setBt(await api(`/api/markowitz/${encodeURIComponent(cartera)}/backtest?meses=${meses}&benchmark=${bench}`)); }}>
+                Probar</button>
+            </span>
+          </h3>
+          {bt === "cargando" ? <div className="cargando">Optimizando con datos viejos y midiendo después…</div>
+           : !bt ? <div className="pie" style={{ marginTop: 10 }}>
+               Optimiza con los datos ANTERIORES al período de prueba y mide qué pasó
+               después. Es la única forma honesta de evaluar Markowitz: optimizar y medir
+               sobre el mismo período siempre da un resultado espectacular que no significa nada.
+             </div>
+           : bt.error ? <div className="aviso mal">{bt.error}</div> : (
+            <>
+              <Grafico alto={230}
+                datos={Object.entries(bt.curvas).map(([n, v], i) => ({
+                  type: "scatter", mode: "lines", name: n, x: bt.fechas, y: v,
+                  line: { width: n === bt.ganadora ? 2.6 : 1.4,
+                          color: c.series[i % c.series.length] } }))}
+                layout={{ yaxis: { title: "Base 100", tickprefix: "" }, margin: { t: 6 } }} />
+              <div className="tabla-wrap"><table>
+                <thead><tr><th>Estrategia</th><th className="n">Retorno</th>
+                  <th className="n">Sharpe</th><th className="n">Peor caída</th></tr></thead>
+                <tbody>{bt.resultados.map((r) => (
+                  <tr key={r.estrategia} style={r.estrategia === bt.ganadora ? { fontWeight: 600 } : null}>
+                    <td>{r.estrategia}{r.estrategia === bt.ganadora && " ★"}</td>
+                    <td className={"n " + signo(r.retorno_pct)}>{pct(r.retorno_pct)}</td>
+                    <td className="n">{num(r.sharpe, 3)}</td>
+                    <td className="n neg">{pct(r.max_drawdown_pct)}</td>
+                  </tr>))}</tbody>
+              </table></div>
+              <div className={"aviso " + (bt.ganadora === "Máximo Sharpe" ? "ok" : "ojo")}>
+                {bt.veredicto}
+              </div>
+              <div className="pie">{bt.nota}</div>
+            </>)}
         </div>
       </div>
     </>
@@ -552,6 +1065,7 @@ function MonteCarlo({ d, cartera }) {
           escenarios; la clara, nueve de cada diez. Motor: <b>{d.motor}</b>.
         </div>
       </div>
+      <DistribucionFinal d={d} />
       <div className="panel">
         <h3>¿Cambia según el supuesto de distribución?</h3>
         {!motores ? (
@@ -583,11 +1097,109 @@ function MonteCarlo({ d, cartera }) {
   );
 }
 
-/* ── Benchmark (CAPM) ── */
-function Capm({ d, cartera }) {
+function DistribucionFinal({ d }) {
   const c = colores();
+  const [paso, setPaso] = useState(null);          // null = animación apagada
+  const dist = d.distribucion || {};
+  const a = d.abanico || {};
+
+  // Animación en bucle sobre el abanico: muestra cómo se va abriendo el rango de
+  // resultados rueda a rueda. Se puede parar — una animación que no se detiene
+  // molesta más de lo que explica.
+  useEffect(() => {
+    if (paso === null) return;
+    const id = setTimeout(() => setPaso((p) => (p + 1) % (a.dias?.length || 1)), 90);
+    return () => clearTimeout(id);
+  }, [paso, a.dias]);
+
+  const hasta = paso === null ? (a.dias?.length || 0) : paso + 1;
+  const corte = (arr) => (arr || []).slice(0, hasta);
+
+  return (
+    <>
+      <div className="panel">
+        <h3>Cómo se abre el abanico
+          <button className="btn" style={{ marginLeft: "auto", padding: "3px 11px", fontSize: 12.5 }}
+                  onClick={() => setPaso(paso === null ? 0 : null)}>
+            {paso === null ? "▶ Reproducir" : "⏸ Detener"}</button>
+        </h3>
+        <Grafico alto={320}
+          datos={[
+            { type: "scatter", x: corte(a.dias), y: corte(a.p95), mode: "lines",
+              line: { width: 0 }, showlegend: false, hoverinfo: "skip" },
+            { type: "scatter", x: corte(a.dias), y: corte(a.p5), mode: "lines", line: { width: 0 },
+              fill: "tonexty", fillcolor: c.acento + "22", name: "9 de cada 10 casos" },
+            { type: "scatter", x: corte(a.dias), y: corte(a.p75), mode: "lines",
+              line: { width: 0 }, showlegend: false, hoverinfo: "skip" },
+            { type: "scatter", x: corte(a.dias), y: corte(a.p25), mode: "lines", line: { width: 0 },
+              fill: "tonexty", fillcolor: c.acento + "44", name: "la mitad de los casos" },
+            { type: "scatter", x: corte(a.dias), y: corte(a.p50), mode: "lines",
+              name: "mediana", line: { color: c.acento, width: 2.5 } },
+          ]}
+          layout={{ xaxis: { title: "Ruedas hacia adelante",
+                             range: [0, a.dias?.[a.dias.length - 1] || 1] },
+                    yaxis: { title: "Valor en dólares",
+                             range: [Math.min(...(a.p5 || [0])) * 0.95,
+                                     Math.max(...(a.p95 || [1])) * 1.05] },
+                    shapes: [{ type: "line", xref: "paper", x0: 0, x1: 1,
+                               y0: d.valor_inicial, y1: d.valor_inicial,
+                               line: { color: c.texto3, width: 2, dash: "dot" } }] }} />
+        <div className="pie">
+          La incertidumbre no crece de golpe: se abre con la raíz del tiempo. La línea
+          punteada es lo que vale hoy.{" "}
+          {paso !== null && <b>Rueda {a.dias?.[paso]} de {a.dias?.[a.dias.length - 1]}.</b>}
+        </div>
+      </div>
+
+      <div className="panel">
+        <h3>Dónde puede terminar</h3>
+        <Grafico alto={340}
+          datos={[
+            { type: "bar", x: dist.x, y: dist.y, name: "escenarios simulados",
+              marker: { color: c.series[2], opacity: 0.75 },
+              hovertemplate: "$%{x:,.0f}: %{y} escenarios<extra></extra>" },
+            { type: "scatter", mode: "lines", x: dist.x, y: dist.normal,
+              name: "ajuste normal", line: { color: c.alerta, width: 2 } },
+            { type: "scatter", mode: "lines", x: dist.x, y: dist.lognormal,
+              name: "ajuste lognormal", line: { color: c.positivo, width: 2, dash: "dot" } },
+          ]}
+          layout={{ bargap: 0.02, xaxis: { title: "Valor final", tickprefix: "$" },
+                    yaxis: { title: "Escenarios" },
+                    shapes: [d.final.var95, d.final.var99, d.valor_inicial].map((x, i) => ({
+                      type: "line", x0: x, x1: x, yref: "paper", y0: 0, y1: 0.9,
+                      line: { color: i === 2 ? c.texto3 : c.negativo, width: 1.6, dash: "dash" } })),
+                    annotations: [
+                      { x: d.final.var95, y: 1, yref: "paper", text: "5 % peor", showarrow: false,
+                        font: { size: 10, color: c.negativo }, yanchor: "bottom" },
+                      { x: d.valor_inicial, y: 1, yref: "paper", text: "hoy", showarrow: false,
+                        font: { size: 10, color: c.texto3 }, yanchor: "bottom" }] }} />
+        <div className="pie">
+          Las barras son los {d.n_simulaciones.toLocaleString("es-AR")} escenarios simulados.
+          El mejor ajuste teórico es <b>{dist.mejor_ajuste}</b> — que sea lognormal y no normal
+          es lo esperable: un precio no puede ser negativo, así que la distribución de valores
+          finales está sesgada hacia arriba.
+        </div>
+      </div>
+    </>
+  );
+}
+
+/* ── Benchmark (CAPM) ── */
+function Capm({ d: inicial, cartera, bench }) {
+  const c = colores();
+  const [d, setD] = useState(inicial);
   const [todos, setTodos] = useState(null);
+  // El selector global manda: si cambia, se recalcula contra ese índice.
+  useEffect(() => {
+    if (bench === (d?.benchmark || "SP500")) return;
+    setD(null);
+    api(`/api/capm/${encodeURIComponent(cartera)}?benchmark=${bench}`).then(setD);
+  }, [bench, cartera]);
+  if (!d) return <div className="cargando">Comparando contra el índice…</div>;
+  if (d.error) return <div className="aviso mal">{d.error}</div>;
   const nivel = d.diagnostico_r2?.nivel;
+  const gana = d.retorno_cartera_pct > d.retorno_benchmark_pct;
+  const defensiva = d.beta < 0.8, agresiva = d.beta > 1.2;
   const datos = [
     { type: "scattergl", mode: "markers", name: "ruedas",
       x: (d.nube || []).map((p) => p.b), y: (d.nube || []).map((p) => p.p),
@@ -613,6 +1225,41 @@ function Capm({ d, cartera }) {
 
       <div className={"aviso " + (nivel === "alto" ? "ok" : nivel === "bajo" ? "mal" : "ojo")}>
         <b>R² = {d.r2}.</b> {d.diagnostico_r2?.texto}
+      </div>
+
+      <div className="panel" style={{ marginBottom: 14 }}>
+        <h3>Qué dice todo esto, en una lectura</h3>
+        <div style={{ fontSize: 14.5, color: "var(--texto-2)", lineHeight: 1.7, marginTop: 8 }}>
+          <p style={{ margin: "0 0 10px" }}>
+            Sobre {d.n_ruedas} ruedas, tu cartera rindió <b className={gana ? "pos" : "neg"}>
+            {pct(d.retorno_cartera_pct)}</b> anual contra <b>{pct(d.retorno_benchmark_pct)}</b> del{" "}
+            {d.benchmark_nombre}.
+          </p>
+          <p style={{ margin: "0 0 10px" }}>
+            Con <b>beta {num(d.beta, 2)}</b>, cuando el índice sube 10 % tu cartera tiende a{" "}
+            {d.beta >= 0 ? "subir" : "bajar"} <b>{num(Math.abs(d.beta * 10), 1)} %</b>.{" "}
+            {defensiva ? "Se mueve MENOS que el mercado: es defensiva frente a ese índice."
+             : agresiva ? "Se mueve MÁS que el mercado: amplifica sus movimientos, para bien y para mal."
+             : "Se mueve prácticamente al ritmo del mercado."}
+          </p>
+          <p style={{ margin: "0 0 10px" }}>
+            El <b>alpha de {pct(d.alpha_anual_pct)}</b> es lo que rendiste por encima de lo que
+            te correspondía por el riesgo de mercado que asumiste.{" "}
+            {d.alpha_anual_pct > 0
+              ? "Positivo: la cartera aportó algo que el índice no explica."
+              : "Negativo: asumiendo ese riesgo, el índice te habría dado más."}
+            {nivel === "bajo" && <> <b>Pero con R² de {d.r2} este número no se sostiene</b>: el
+              índice no explica lo que hace tu cartera, así que beta y alpha están midiendo ruido.</>}
+          </p>
+          <p style={{ margin: 0 }}>
+            El <b>tracking error de {pct(d.tracking_error_pct)}</b> es cuánto te despegás del
+            índice en un año típico, y el <b>information ratio de {num(d.information_ratio, 2)}</b>{" "}
+            dice si ese despegue te pagó: {d.information_ratio > 0.5
+              ? "es una diferencia consistente, no un golpe de suerte"
+              : d.information_ratio > 0 ? "apenas positivo, poco consistente"
+              : "te despegaste del índice para peor"}.
+          </p>
+        </div>
       </div>
 
       <div className="fila f2">
@@ -696,7 +1343,7 @@ function Momentum({ d }) {
 }
 
 /* ── Objetivos ── */
-function Objetivos({ d }) {
+function Objetivos({ d, bl }) {
   const a = d.por_activo || [];
   return (
     <>
@@ -728,6 +1375,17 @@ function Objetivos({ d }) {
           Un objetivo alto con la acción cayendo no es una compra: es esperar el giro.
         </div>
       </div>
+
+      <h3 style={{ margin: "22px 0 4px", fontSize: 16 }}>
+        Y si llevo estos objetivos a la cartera: Black-Litterman</h3>
+      <div className="pie" style={{ marginBottom: 12, marginTop: 0 }}>
+        Toma los precios objetivo de arriba como opiniones sobre el futuro, les asigna
+        confianza según cuántos analistas los sostienen —recortándola donde el momentum va
+        en contra— y las combina con lo que el mercado ya tiene implícito en tu cartera.
+      </div>
+      {!bl ? <div className="cargando">Calculando Black-Litterman…</div>
+       : bl.error ? <div className="aviso mal">{bl.error}</div>
+       : <BlackLitterman d={bl} />}
     </>
   );
 }
@@ -768,8 +1426,11 @@ function BlackLitterman({ d }) {
 }
 
 /* ── Regímenes ── */
-function Regimenes({ d }) {
+function Regimenes({ d, cartera }) {
   const c = colores();
+  const [activos, setActivos] = useState(null);
+  const [sel, setSel] = useState("__cartera__");
+  useEffect(() => { api(`/api/riesgo/${encodeURIComponent(cartera)}/por-activo`).then(setActivos); }, [cartera]);
   const t = d.linea_tiempo || [];
   const franjas = [];
   let inicio = null;
@@ -791,22 +1452,48 @@ function Regimenes({ d }) {
         <Kpi etiqueta="Cambios de régimen" valor={d.transiciones?.length ?? 0} />
       </div>
       <div className="panel">
-        <h3>Volatilidad de la cartera y miedo del mercado</h3>
-        <Grafico alto={340}
+        <h3>Volatilidad y miedo del mercado
+          <select value={sel} onChange={(e) => setSel(e.target.value)} style={{ marginLeft: "auto" }}>
+            <option value="__cartera__">Cartera completa</option>
+            {(activos?.por_activo || []).map((x) =>
+              <option key={x.ticker} value={x.ticker}>{x.ticker}</option>)}
+          </select>
+        </h3>
+        <Grafico alto={380}
           datos={[
-            { type: "scatter", mode: "lines", name: "volatilidad de tu cartera",
-              x: t.map((p) => p.fecha), y: t.map((p) => p.vol_cartera),
-              line: { color: c.acento, width: 1.8 } },
-            { type: "scatter", mode: "lines", name: "umbral de tensión",
+            sel === "__cartera__"
+              ? { type: "scatter", mode: "lines", name: "volatilidad de tu cartera",
+                  x: t.map((p) => p.fecha), y: t.map((p) => p.vol_cartera),
+                  line: { color: c.acento, width: 1.8 } }
+              : { type: "scatter", mode: "lines", name: `retorno diario · ${sel}`,
+                  x: (activos.series[sel] || []).map((p) => p.fecha),
+                  y: (activos.series[sel] || []).map((p) => p.ret),
+                  line: { color: c.acento, width: 0.9 } },
+            ...(sel === "__cartera__" ? [{ type: "scatter", mode: "lines", name: "umbral de tensión",
               x: t.map((p) => p.fecha), y: t.map((p) => p.umbral),
-              line: { color: c.texto3, width: 1, dash: "dot" } },
+              line: { color: c.texto3, width: 1, dash: "dot" } }] : []),
             { type: "scatter", mode: "lines", name: "VIX (miedo global)",
               x: t.map((p) => p.fecha), y: t.map((p) => p.vix),
               yaxis: "y2", line: { color: c.series[3], width: 1.2 } },
+            { type: "scatter", mode: "markers", name: "eventos",
+              x: (d.eventos || []).map((e) => e.fecha),
+              y: (d.eventos || []).map(() => 0), yaxis: "y2",
+              marker: { symbol: "diamond", size: 9,
+                        color: (d.eventos || []).map((e) => e.alcance === "AR" ? c.series[3] : c.series[4]) },
+              text: (d.eventos || []).map((e) => e.descripcion),
+              hovertemplate: "<b>%{x}</b><br>%{text}<extra></extra>" },
           ]}
-          layout={{ shapes: franjas, yaxis: { title: "Volatilidad anual", ticksuffix: " %" },
+          layout={{ shapes: [...franjas, ...(d.eventos || []).map((e) => ({
+                      type: "line", x0: e.fecha, x1: e.fecha, yref: "paper", y0: 0, y1: 1,
+                      line: { color: e.alcance === "AR" ? c.series[3] : c.series[4],
+                              width: 0.9, dash: "dot" } }))],
+                    yaxis: { title: sel === "__cartera__" ? "Volatilidad anual" : "Retorno diario",
+                             ticksuffix: " %" },
                     yaxis2: { title: "VIX", overlaying: "y", side: "right", showgrid: false } }} />
-        <div className="pie">{d.metodo}</div>
+        <div className="pie">
+          {d.metodo} Las líneas verticales son los eventos macro —pasá el mouse por los rombos
+          para leerlos—; las franjas rojas, los períodos de tensión.
+        </div>
       </div>
       <div className="panel">
         <h3>Qué pasaba alrededor</h3>
@@ -892,6 +1579,60 @@ function Comparacion({ carteras }) {
   );
 }
 
+function VeredictoComparacion({ d, concluyente }) {
+  const lider = d.lider_por_criterios;
+  const m = d.metricas[lider];
+  const gana = d.criterios_ganados[lider];
+  const rivales = d.pruebas_sharpe || [];
+  const sostenidas = rivales.filter((r) => r.concluyente).map((r) => r.contra);
+  const dudosas = rivales.filter((r) => !r.concluyente).map((r) => r.contra);
+
+  return (
+    <div className="panel" style={{ marginBottom: 14,
+         borderLeft: `4px solid var(--${concluyente ? "positivo" : "alerta"})` }}>
+      <h3 style={{ fontSize: 16 }}>
+        {concluyente ? `Gana ${lider}` : `${lider} lidera, pero con reparos`}
+        <span className={"chip " + (concluyente ? "ok" : "ojo")} style={{ marginLeft: 8 }}>
+          {concluyente ? "diferencia demostrable" : "no concluyente"}</span>
+      </h3>
+
+      <div style={{ fontSize: 14.5, color: "var(--texto-2)", lineHeight: 1.7, marginTop: 10 }}>
+        <p style={{ margin: "0 0 10px" }}>
+          <b>{lider}</b> gana {gana.puntos} de 8 criterios: {gana.cuales.join(", ")}. Rindió{" "}
+          <b>{pct(m.retorno_anual_pct)}</b> anual con <b>{pct(m.volatilidad_anual_pct)}</b> de
+          volatilidad, o sea <b>{num(m.sharpe, 2)}</b> de Sharpe, y su peor caída fue{" "}
+          <b className="neg">{pct(m.max_drawdown_pct)}</b>.
+        </p>
+
+        {sostenidas.length > 0 && (
+          <p style={{ margin: "0 0 10px" }}>
+            <b className="pos">La ventaja se sostiene</b> contra {sostenidas.join(" y ")}: la
+            probabilidad de que esa diferencia sea casualidad es menor al 5 %.
+          </p>)}
+
+        {dudosas.length > 0 && (
+          <p style={{ margin: "0 0 10px" }}>
+            <b className="neg">Pero contra {dudosas.join(" y ")} no se puede afirmar nada.</b>{" "}
+            {rivales.filter((r) => !r.concluyente).map((r) => (
+              <span key={r.contra}>
+                Le saca {num(r.diferencia_anual, 2)} de Sharpe, pero las dos se mueven casi
+                igual (correlación {num(r.correlacion, 2)}) y con {r.n_ruedas} ruedas esa
+                diferencia aparece por azar {pct(r.p_valor * 100, 0)} de las veces.{" "}
+              </span>))}
+          </p>)}
+
+        <p style={{ margin: 0, color: "var(--texto-3)", fontSize: 13.5 }}>
+          {concluyente
+            ? "Con estos datos, elegir esa cartera está respaldado por la evidencia."
+            : "Cuando dos carteras comparten activos, sus resultados se parecen y hace falta " +
+              "mucha más historia para separarlas. Si tenés que elegir igual, mirá la que menos " +
+              "cae y la que menos depende de un solo activo — eso se sostiene aunque el Sharpe no."}
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function ResultadoComparacion({ d, c }) {
   const nombres = d.carteras;
   const p = d.periodo_comun;
@@ -910,9 +1651,7 @@ function ResultadoComparacion({ d, c }) {
 
   return (
     <>
-      <div className={"aviso " + (concluyente ? "ok" : "ojo")}>
-        <b>{d.veredicto}</b>
-      </div>
+      <VeredictoComparacion d={d} concluyente={concluyente} />
 
       <div className="fila f2">
         <div className="panel">
