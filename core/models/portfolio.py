@@ -146,14 +146,18 @@ def pnl_realizado(trades) -> dict:
     """
     serie_mep = mep_mod.serie()
     salida, total = [], 0.0
+    por_moneda = {}
     for t in trades:
         ticker = t["ticker"].upper()
         moneda = sources.ticker_currency(ticker)
         div = 100.0 if sources.is_bond(ticker) else 1.0
         compra, venta = t["buy_price"] / div, t["sell_price"] / div
         c_compra, c_venta = t.get("buy_comm", 0) / div, t.get("sell_comm", 0) / div
+        mep_c = mep_v = None
 
         if moneda == "ARS":
+            mep_c = mep_mod.valor(t["buy_date"], serie_mep)
+            mep_v = mep_mod.valor(t["sell_date"], serie_mep)
             compra = mep_mod.a_usd(compra, t["buy_date"], serie_mep)
             venta = mep_mod.a_usd(venta, t["sell_date"], serie_mep)
             c_compra = mep_mod.a_usd(c_compra, t["buy_date"], serie_mep) or 0.0
@@ -163,9 +167,19 @@ def pnl_realizado(trades) -> dict:
 
         pnl = t["qty"] * (venta - compra) - c_compra - c_venta
         total += pnl
-        salida.append({**t, "moneda": moneda, "pnl_usd": round(pnl, 2)})
+        # El resultado en la moneda de la operación viaja al lado del de dólares:
+        # es el único número que se puede cotejar contra el resumen del broker,
+        # que no sabe nada de MEP.
+        origen = t.get("pnl")
+        if origen is not None:
+            por_moneda[moneda] = round(por_moneda.get(moneda, 0.0) + origen, 2)
+        salida.append({**t, "moneda": moneda, "pnl_usd": round(pnl, 2),
+                       "pnl_origen": origen,
+                       "mep_compra": round(mep_c, 2) if mep_c else None,
+                       "mep_venta": round(mep_v, 2) if mep_v else None})
 
-    return {"trades": salida, "total_usd": round(total, 2), "n": len(salida)}
+    return {"trades": salida, "total_usd": round(total, 2), "n": len(salida),
+            "total_origen": por_moneda}
 
 
 def matriz_retornos(posiciones, desde=None, hasta=None):

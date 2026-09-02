@@ -471,6 +471,50 @@ def test_ida_y_vuelta_del_csv_no_pierde_nada():
             assert casi(a[k], b[k], 1e-9), f"{k}: {a[k]} != {b[k]}"
 
 
+def test_split_reparte_el_costo_en_vez_de_regalar_acciones():
+    """Un split no es una compra a precio cero: es el mismo costo en más papeles.
+
+    Compra 100 a 200 y recibe 100 por un split 2×1. Debe quedar UN lote de 200
+    unidades a 100 —el costo total sigue siendo 20.000—, no dos lotes donde uno
+    figura gratis. Si después se vende la mitad a 120, la ganancia es
+    100 × (120 − 100) = 2.000, y no los 12.000 que daría aparear la venta contra
+    un lote regalado.
+    """
+    import io
+    parse_yahoo = require("core.io.csv_yahoo", "parse_yahoo")
+    csv_split = (
+        "Symbol,Trade Date,Purchase Price,Quantity,Commission,Comment,Transaction Type\n"
+        "COME.BA,2025-05-14,200.00,100,0,,Buy\n"
+        "COME.BA,2025-08-14,0,100,0,split,Buy\n"
+        "COME.BA,2026-02-27,120.00,100,0,,Sell\n"
+    )
+    abiertas, realizadas = parse_yahoo(io.StringIO(csv_split))
+    assert len(abiertas) == 1, f"un solo lote abierto, hay {len(abiertas)}"
+    assert casi(abiertas[0]["qty"], 100.0), "quedan 100 de las 200 post-split"
+    assert casi(abiertas[0]["buy_price"], 100.0), "200 repartido en el doble de papeles"
+    assert casi(sum(t["pnl"] for t in realizadas), 2000.0), \
+        "100 × (120 − 100); un lote a costo cero daría 12.000"
+
+
+def test_dividendo_es_resultado_realizado_sin_compra():
+    """Un dividendo cobrado entra al P&L realizado y no toca la posición.
+
+    Sin esto el resultado realizado queda corto contra el resumen del broker, y
+    la diferencia es invisible: no hay ninguna operación que la explique.
+    """
+    import io
+    parse_yahoo = require("core.io.csv_yahoo", "parse_yahoo")
+    csv_div = (
+        "Symbol,Trade Date,Purchase Price,Quantity,Commission,Comment,Transaction Type\n"
+        "METR.BA,2025-01-10,2000.00,500,0,,Buy\n"
+        "METR.BA,2025-06-20,70.00,500,0,dividendo en efectivo,Dividend\n"
+    )
+    abiertas, realizadas = parse_yahoo(io.StringIO(csv_div))
+    assert casi(sum(a["qty"] for a in abiertas), 500.0), "el dividendo no agrega papeles"
+    assert len(realizadas) == 1 and realizadas[0].get("tipo") == "dividendo"
+    assert casi(realizadas[0]["pnl"], 35000.0), "500 × 70"
+
+
 def test_yahoo_netea_ventas_fifo():
     """Del CSV de Yahoo solo entra lo que sigue ABIERTO; lo cerrado va al P&L.
 

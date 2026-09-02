@@ -490,67 +490,106 @@ function Posicion({ d, cartera, recargar, extras, bench }) {
 }
 
 function PnlRealizado({ real }) {
+  const [abierto, setAbierto] = useState(false);
   const [detalle, setDetalle] = useState(false);
-  // Setenta y tres operaciones sueltas no dicen nada; agrupadas por ticker sí:
-  // qué papel dejó plata y cuál se la llevó.
-  const porTicker = Object.values((real.trades || []).reduce((acc, t) => {
-    const x = acc[t.ticker] || (acc[t.ticker] = { ticker: t.ticker, n: 0, pnl: 0, moneda: t.moneda });
-    x.n += 1; x.pnl += t.pnl_usd;
+  const trades = real.trades || [];
+  const porTicker = Object.values(trades.reduce((acc, t) => {
+    const x = acc[t.ticker] || (acc[t.ticker] = { ticker: t.ticker, n: 0, usd: 0,
+                                                  origen: 0, moneda: t.moneda });
+    x.n += 1; x.usd += t.pnl_usd; x.origen += t.pnl_origen || 0;
     return acc;
-  }, {})).sort((a, b) => b.pnl - a.pnl);
-  const ganadores = porTicker.filter((x) => x.pnl > 0);
-  const acierto = porTicker.length ? ganadores.length / porTicker.length * 100 : 0;
+  }, {})).sort((a, b) => b.usd - a.usd);
+  const ganadores = porTicker.filter((x) => x.usd > 0).length;
+  const enPesos = (real.total_origen || {}).ARS;
+  const enDolar = (real.total_origen || {}).USD;
 
   return (
     <div className="panel">
-      <h3>Posiciones cerradas
-        <button className="btn" style={{ marginLeft: "auto", padding: "3px 11px", fontSize: 12.5 }}
-                onClick={() => setDetalle(!detalle)}>
-          {detalle ? "Ver resumen" : `Ver las ${real.n} operaciones`}</button>
+      <h3 style={{ cursor: "pointer" }} onClick={() => setAbierto(!abierto)}>
+        <span style={{ display: "flex", alignItems: "center", gap: 9 }}>
+          <span style={{ fontSize: 11, color: "var(--texto-3)" }}>{abierto ? "▾" : "▸"}</span>
+          Posiciones cerradas
+        </span>
+        <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 14 }}>
+          <span style={{ fontSize: 12.5, color: "var(--texto-3)" }}>
+            {real.n} operaciones</span>
+          <span className={"mono " + signo(real.total_usd)} style={{ fontSize: 16, fontWeight: 700 }}>
+            {usd(real.total_usd)}</span>
+        </span>
       </h3>
-      <div className="tabla-wrap"><table>
-        {detalle ? (
-          <>
-            <thead><tr><th>Ticker</th><th>Compra</th><th>Venta</th><th className="n">Cantidad</th>
-              <th className="n">Precio compra</th><th className="n">Precio venta</th>
-              <th>Moneda</th><th className="n">Resultado</th></tr></thead>
-            <tbody>{[...real.trades].sort((a, b) => (a.sell_date < b.sell_date ? 1 : -1)).map((t, i) => (
-              <tr key={i}>
-                <td className="mono">{t.ticker}</td>
-                <td className="mono">{t.buy_date}</td>
-                <td className="mono">{t.sell_date}</td>
-                <td className="n">{num(t.qty, 2)}</td>
-                <td className="n">{num(t.buy_price, 2)}</td>
-                <td className="n">{num(t.sell_price, 2)}</td>
-                <td>{t.moneda}</td>
-                <td className={"n " + signo(t.pnl_usd)}>{usd(t.pnl_usd)}</td>
-              </tr>))}</tbody>
-          </>
-        ) : (
-          <>
-            <thead><tr><th>Ticker</th><th className="n">Operaciones</th>
-              <th className="n">Resultado neto</th></tr></thead>
-            <tbody>{porTicker.map((x) => (
-              <tr key={x.ticker}>
-                <td className="mono">{x.ticker}</td>
-                <td className="n">{x.n}</td>
-                <td className={"n " + signo(x.pnl)}>{usd(x.pnl)}</td>
-              </tr>))}
-              <tr style={{ fontWeight: 700 }}>
-                <td>NETO</td><td className="n">{real.n}</td>
-                <td className={"n " + signo(real.total_usd)}>{usd(real.total_usd)}</td>
-              </tr>
-            </tbody>
-          </>
-        )}
-      </table></div>
-      <div className="pie">
-        Cada operación se convierte a dólares con el MEP de <b>su propia fecha</b>: el de la
-        compra para la compra y el de la venta para la venta, así el resultado no mezcla el
-        movimiento del tipo de cambio con el del activo. Neteo FIFO contra las compras más
-        viejas. {num(ganadores.length, 0)} de {porTicker.length} tickers cerraron en verde
-        ({num(acierto, 0)} %).
-      </div>
+
+      {!abierto ? (
+        <div className="pie" style={{ marginTop: 4 }}>
+          Neto de todo lo vendido, convertido con el MEP de cada operación.
+          {enPesos != null && <> En moneda de origen: <b>{num(enPesos, 2)} ARS</b>
+            {enDolar ? <> y <b>{num(enDolar, 2)} USD</b></> : null} — ese es el número que
+            se puede cotejar contra el resumen del broker, que no sabe de MEP.</>}
+        </div>
+      ) : (
+        <>
+          <div style={{ display: "flex", gap: 8, margin: "10px 0 4px" }}>
+            <div className="modos">
+              {[[false, "Por activo"], [true, `Las ${real.n} operaciones`]].map(([k, txt]) => (
+                <button key={String(k)} className={"modo" + (detalle === k ? " on" : "")}
+                        onClick={() => setDetalle(k)}>{txt}</button>))}
+            </div>
+          </div>
+          <div className="tabla-wrap"><table>
+            {detalle ? (
+              <>
+                <thead><tr><th>Ticker</th><th>Compra</th><th>Venta</th><th className="n">Cantidad</th>
+                  <th className="n">Precio compra</th><th className="n">Precio venta</th>
+                  <th className="n">MEP compra</th><th className="n">MEP venta</th>
+                  <th className="n">Resultado origen</th><th className="n">Resultado USD</th></tr></thead>
+                <tbody>{[...trades].sort((a, b) => (a.sell_date < b.sell_date ? 1 : -1)).map((t, i) => (
+                  <tr key={i}>
+                    <td className="mono">{t.ticker}{t.tipo === "dividendo" &&
+                      <span className="chip ok" style={{ marginLeft: 6, minWidth: 0 }}>div</span>}</td>
+                    <td className="mono">{t.buy_date}</td>
+                    <td className="mono">{t.sell_date}</td>
+                    <td className="n">{num(t.qty, 2)}</td>
+                    <td className="n">{num(t.buy_price, 2)}</td>
+                    <td className="n">{num(t.sell_price, 2)}</td>
+                    <td className="n">{t.mep_compra ? num(t.mep_compra, 2) : "—"}</td>
+                    <td className="n">{t.mep_venta ? num(t.mep_venta, 2) : "—"}</td>
+                    <td className={"n " + signo(t.pnl_origen)}>
+                      {num(t.pnl_origen, 2)} {t.moneda}</td>
+                    <td className={"n " + signo(t.pnl_usd)}>{usd(t.pnl_usd)}</td>
+                  </tr>))}</tbody>
+              </>
+            ) : (
+              <>
+                <thead><tr><th>Ticker</th><th className="n">Operaciones</th>
+                  <th className="n">Resultado en su moneda</th>
+                  <th className="n">Resultado en dólares</th></tr></thead>
+                <tbody>{porTicker.map((x) => (
+                  <tr key={x.ticker}>
+                    <td className="mono">{x.ticker}</td>
+                    <td className="n">{x.n}</td>
+                    <td className={"n " + signo(x.origen)}>{num(x.origen, 2)} {x.moneda}</td>
+                    <td className={"n " + signo(x.usd)}>{usd(x.usd)}</td>
+                  </tr>))}
+                  <tr style={{ fontWeight: 700 }}>
+                    <td>NETO</td><td className="n">{real.n}</td>
+                    <td className="n">{enPesos != null ? `${num(enPesos, 2)} ARS` : ""}
+                      {enDolar != null ? ` · ${num(enDolar, 2)} USD` : ""}</td>
+                    <td className={"n " + signo(real.total_usd)}>{usd(real.total_usd)}</td>
+                  </tr>
+                </tbody>
+              </>
+            )}
+          </table></div>
+          <div className="pie">
+            Las dos columnas dicen cosas distintas y las dos son ciertas. La de la izquierda es
+            el resultado en la moneda en que operaste, que es lo que muestra el broker. La de
+            dólares convierte <b>cada pata con el MEP de su propia fecha</b>: comprar con
+            dólares de mayo y vender con dólares de febrero no es lo mismo aunque el número en
+            pesos sea el mismo. Neteo FIFO contra las compras más viejas; los splits se
+            prorratean sobre lo que había abierto. {ganadores} de {porTicker.length} tickers
+            cerraron en verde.
+          </div>
+        </>
+      )}
     </div>
   );
 }

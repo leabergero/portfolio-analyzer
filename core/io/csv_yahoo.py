@@ -89,7 +89,32 @@ def leer_filas(origen) -> list:
     return filas
 
 
-def _netear_fifo(compras: list, ventas: list):
+def _aplicar_entrega(compras: list, entrega: dict) -> bool:
+    """Reparte acciones recibidas sin pagar (split, dividendo en acciones).
+
+    Un split NO es una compra a precio cero. Tratarlo así deja lotes con costo 0
+    que el FIFO consume al final: mientras se liquide todo da el mismo resultado,
+    pero con posición abierta el costo queda mal repartido —los lotes "gratis"
+    figuran con 100 % de ganancia y los viejos con todo el costo encima—.
+
+    Lo correcto es lo que hace el mercado: la misma plata pasa a estar repartida
+    en más acciones. Se prorratea sobre los lotes abiertos a la fecha, en
+    proporción a lo que cada uno tiene vivo, y baja el precio unitario de cada
+    uno. El costo total no cambia; la cantidad, sí.
+    """
+    vivos = [c for c in compras if c["resta"] > 1e-9 and c["fecha"] <= entrega["fecha"]]
+    base = sum(c["resta"] for c in vivos)
+    if base <= 1e-9:
+        return False                      # nada abierto: no hay dónde repartirlo
+    factor = 1 + entrega["qty"] / base
+    for c in vivos:
+        c["resta"] *= factor
+        c["qty"] *= factor
+        c["precio"] /= factor
+    return True
+
+
+def _netear_fifo(compras: list, ventas: list, entregas: list = None):
     """Aparea ventas contra las compras más viejas. Devuelve (abiertos, cerrados).
 
     Las comisiones se prorratean por la fracción del lote que se vende: vender
@@ -97,9 +122,14 @@ def _netear_fifo(compras: list, ventas: list):
     """
     compras = [dict(c, resta=c["qty"]) for c in sorted(compras, key=lambda x: (x["fecha"], x["orden"]))]
     ventas = sorted(ventas, key=lambda x: (x["fecha"], x["orden"]))
+    entregas = sorted(entregas or [], key=lambda x: (x["fecha"], x["orden"]))
 
     cerrados, i = [], 0
     for venta in ventas:
+        # Las entregas anteriores a esta venta ya tienen que estar repartidas:
+        # se vende la cantidad post-split contra el costo post-split.
+        while entregas and entregas[0]["fecha"] <= venta["fecha"]:
+            _aplicar_entrega(compras, entregas.pop(0))
         pendiente = venta["qty"]
         while pendiente > 1e-9 and i < len(compras):
             lote = compras[i]
@@ -120,6 +150,9 @@ def _netear_fifo(compras: list, ventas: list):
         # (posición abierta antes del historial exportado). Se ignora el resto:
         # inventar un lote de compra sería inventar un precio.
 
+    for entrega in entregas:                       # las que quedaron sin ventas
+        _aplicar_entrega(compras, entrega)
+
     abiertos = [{"fecha": c["fecha"], "precio": c["precio"],
                  "qty": round(c["resta"], 6),
                  "comision": round(c["comision"] * c["resta"] / c["qty"], 4)}
@@ -136,13 +169,13 @@ def parse_yahoo(origen):
     """
     filas = leer_filas(origen)
 
-    compras, ventas = {}, {}
+    compras, ventas, entregas, dividendos = {}, {}, {}, []
     for orden, fila in enumerate(filas):
         ticker = (fila.get("symbol") or "").strip().upper()
         if not ticker or ticker.startswith("$$"):
             continue                                  # depósitos, retiros, intereses
         fecha = fila.get("trade date") or ""
-        if not fecha or not fila.get("purchase price"):
+        if not fecha or fila.get("purchase price") in (None, ""):
             continue                                  # watchlist: nunca se operó
         try:
             precio = float(fila["purchase price"])
@@ -157,11 +190,27 @@ def parse_yahoo(origen):
                     "qty": qty, "comision": comision, "orden": orden}
         # Las exportaciones viejas de Yahoo no traen la columna: se asume compra.
         tipo = (fila.get("transaction type") or "BUY").strip().upper()
-        (ventas if tipo == "SELL" else compras).setdefault(ticker, []).append(registro)
+        nota = (fila.get("comment") or "").strip().lower()
+
+        if tipo in ("DIVIDEND", "DIV", "DIVIDENDO") or "dividendo" in nota:
+            # Cobrado, no invertido: es resultado realizado del día que se cobró.
+            dividendos.append({"ticker": ticker, "fecha": normalizar_fecha(fecha),
+                               "qty": qty, "importe_unitario": precio,
+                               "importe": round(qty * precio - comision, 4)})
+        elif tipo in ("SPLIT", "STOCK DIVIDEND") or precio == 0:
+            # Acciones que entraron sin pagar nada. Un precio de compra de cero
+            # no existe: es un split o un dividendo en acciones, y se reparte
+            # sobre lo que ya se tenía en vez de crear un lote regalado.
+            entregas.setdefault(ticker, []).append(registro)
+        elif tipo == "SELL":
+            ventas.setdefault(ticker, []).append(registro)
+        else:
+            compras.setdefault(ticker, []).append(registro)
 
     abiertas, realizadas = [], []
-    for ticker in sorted(set(compras) | set(ventas)):
-        quedan, cerrados = _netear_fifo(compras.get(ticker, []), ventas.get(ticker, []))
+    for ticker in sorted(set(compras) | set(ventas) | set(entregas)):
+        quedan, cerrados = _netear_fifo(compras.get(ticker, []), ventas.get(ticker, []),
+                                        entregas.get(ticker, []))
         for lote in quedan:
             abiertas.append({
                 "ticker": ticker, "buy_date": lote["fecha"],
@@ -172,5 +221,14 @@ def parse_yahoo(origen):
         for t in cerrados:
             pnl = t["qty"] * (t["sell_price"] - t["buy_price"]) - t["buy_comm"] - t["sell_comm"]
             realizadas.append({"ticker": ticker, **t, "pnl": round(pnl, 4)})
+
+    # Los dividendos viajan con los trades cerrados: son resultado realizado
+    # igual, solo que sin contrapartida de compra.
+    for d in dividendos:
+        realizadas.append({"ticker": d["ticker"], "tipo": "dividendo",
+                           "buy_date": d["fecha"], "sell_date": d["fecha"],
+                           "buy_price": 0.0, "sell_price": d["importe_unitario"],
+                           "qty": d["qty"], "buy_comm": 0.0, "sell_comm": 0.0,
+                           "pnl": d["importe"]})
 
     return abiertas, realizadas
