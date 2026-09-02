@@ -28,6 +28,42 @@ que lo sustentan → comparar contra benchmarks y entre carteras.
 | Caché de mercado | Se reconstruye de cero | Las dos bases viejas se descartan |
 | Control de versiones | git desde el primer commit | Ninguno de los dos proyectos anteriores lo tenía |
 
+## Fuentes de datos y qué pasa sin cada una
+
+Solo dos fuentes piden credencial, y las dos son **opcionales**. Ninguna
+funcionalidad central puede depender de ellas.
+
+| Fuente | Requiere | Aporta | Sin ella |
+|---|---|---|---|
+| ArgentinaDatos · dolarapi | nada | Serie del dólar MEP | No hay valuación en USD — por eso son públicas |
+| yfinance | nada | Acciones, CEDEARs, ETFs, benchmarks, sector/industria | No hay renta variable |
+| **Cocos Capital** | cuenta de broker | Bonos soberanos, ONs, letras | Todo lo demás anda; falta el precio de renta fija |
+| **FMP** | API key gratuita | Precios objetivo de analistas (EE.UU.) | Los objetivos salen de yfinance, con menos cobertura |
+
+Las credenciales del broker van cifradas en el vault (pueden mover dinero); la
+API key de FMP va en `data/connectors.json` con permisos 600 y fuera de git (es
+de solo lectura, y meterla en el vault obligaría a desbloquear el broker para
+consultar un precio objetivo).
+
+### FMP: la cuota manda el diseño
+
+El plan gratuito son **250 consultas por día** y cada símbolo cuesta 3
+(cotización + consenso + grados). Diez posiciones son 30 consultas por pantalla,
+y el código anterior gastaba 3 más **cada vez que se dibujaba el panel de
+conectores**. La cuota se agota sola: pasó, y al portar el conector la
+encontramos agotada.
+
+Por eso las respuestas se cachean 24 h en la tabla `respuestas`. Un consenso de
+analistas se mueve de semana en semana; la caché no pierde nada y es lo único
+que hace usable el plan gratuito. La misma tabla sirve para cachear el `.info`
+de yfinance (sector, industria, tipo), que cambia una vez al año y se pedía en
+cada request.
+
+El estado del conector distingue **cuota agotada** (se repone mañana solo) de
+**key rechazada** (hay que hacer algo). Decir "revisá el plan" cuando en
+realidad hay que esperar al día siguiente manda a buscar un problema que no
+existe.
+
 ## Cocos es la excepción, no la fuente por defecto
 
 **La aplicación tiene que funcionar completa sin cuenta de broker.** Cocos

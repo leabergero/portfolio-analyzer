@@ -24,6 +24,11 @@ CREATE TABLE IF NOT EXISTS mep (
     valor REAL NOT NULL,
     fuente TEXT
 );
+CREATE TABLE IF NOT EXISTS respuestas (
+    clave TEXT PRIMARY KEY,
+    valor TEXT NOT NULL,
+    guardado_en REAL NOT NULL
+);
 CREATE INDEX IF NOT EXISTS ix_precios_fecha ON precios(fecha);
 """
 
@@ -154,3 +159,48 @@ def ultima_fecha_mep():
     with conectar() as con:
         r = con.execute("SELECT MAX(fecha) f FROM mep").fetchone()
     return r["f"] if r and r["f"] else None
+
+
+# ── Respuestas de APIs externas ───────────────────────────────────────────────
+# Caché con vencimiento para datos que cambian lento pero se piden seguido.
+# Dos consumidores concretos, los dos con motivo medido:
+#
+#   · FMP — el plan gratuito son 250 consultas por día y cada símbolo cuesta 3.
+#     Sin caché, abrir la pestaña de objetivos con diez posiciones gasta 30, y
+#     el panel de conectores gastaba 3 más cada vez que se dibujaba. Se agotaba
+#     sola.
+#   · yfinance `.info` — sector, industria y tipo de instrumento cambian una vez
+#     al año; se pedían en cada request.
+
+def guardar_respuesta(clave: str, valor, ttl_horas: float = 24) -> None:
+    import json
+    import time
+    with conectar() as con:
+        con.execute("INSERT OR REPLACE INTO respuestas VALUES (?,?,?)",
+                    (clave, json.dumps(valor), time.time()))
+
+
+def leer_respuesta(clave: str, ttl_horas: float = 24, default=None):
+    """Devuelve lo guardado si no venció, si no `default`.
+
+    El TTL se pasa al leer, no al escribir: el mismo dato puede tolerar
+    distinta antigüedad según para qué se lo pida.
+    """
+    import json
+    import time
+    with conectar() as con:
+        r = con.execute("SELECT valor, guardado_en FROM respuestas WHERE clave=?",
+                        (clave,)).fetchone()
+    if not r:
+        return default
+    if (time.time() - r["guardado_en"]) > ttl_horas * 3600:
+        return default
+    try:
+        return json.loads(r["valor"])
+    except Exception:
+        return default
+
+
+def limpiar_respuestas() -> int:
+    with conectar() as con:
+        return con.execute("DELETE FROM respuestas").rowcount
