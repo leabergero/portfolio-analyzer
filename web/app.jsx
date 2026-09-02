@@ -194,8 +194,8 @@ function Barra({ modo, setModo, tema, setTema, carteras, cartera, setCartera }) 
 // que profundiza. Menos pestañas, y cada una con una pregunta entera adentro.
 const PESTANAS = [
   ["posicion", "Posición"], ["riesgo", "Riesgo"],
-  ["markowitz", "Markowitz"], ["montecarlo", "Monte Carlo"], ["capm", "Benchmark"],
-  ["objetivos", "Objetivos"], ["regimenes", "Regímenes"],
+  ["markowitz", "Optimización"], ["montecarlo", "Monte Carlo"],
+  ["capm", "Benchmark"], ["regimenes", "Regímenes"],
 ];
 
 const BENCHMARKS = [["SP500", "S&P 500"], ["MERVAL", "Merval"], ["STOXX600", "STOXX 600"]];
@@ -274,10 +274,11 @@ function Panel({ tab, R, M, cartera, bench, recargar }) {
                         recargar={recargar} extras={{ composicion: R.composicion,
                         riesgo: R.riesgo, momentum: R.momentum }} />,
     riesgo: <Riesgo d={d} cartera={cartera} extras={{ stress: R.stress }} />,
-    markowitz: <Markowitz d={d} cartera={cartera} bench={bench} />,
+    markowitz: <Markowitz d={d} cartera={cartera} bench={bench}
+                          extras={{ objetivos: R.objetivos, bl: R.blacklitterman,
+                                    momentum: R.momentum }} />,
     montecarlo: <MonteCarlo d={d} cartera={cartera} />,
     capm: <Capm d={d} cartera={cartera} bench={bench} />,
-    objetivos: <Objetivos d={d} bl={R.blacklitterman} />,
     regimenes: <Regimenes d={d} cartera={cartera} />,
   };
   return vistas[tab] || <div className="cargando">—</div>;
@@ -1091,20 +1092,35 @@ function RiesgoLimite({ cartera, d }) {
   );
 }
 
-/* ── Markowitz ── */
-function Markowitz({ d, cartera, bench }) {
+/* ── Optimización ──
+   Markowitz, precios objetivo y Black-Litterman en una sola pestaña. Eran tres
+   lecturas del mismo problema —cómo debería estar repartida la cartera— y
+   tenerlas separadas obligaba a comparar de memoria entre pantallas. */
+function Markowitz({ d, cartera, bench, extras }) {
   const c = colores();
+  const [objetivo, setObjetivo] = useState("max_sharpe");
   const [bt, setBt] = useState(null);
   const [meses, setMeses] = useState(6);
-  const [objetivo, setObjetivo] = useState("max_sharpe");
-  const f = d.frontera || [];
-  const nube = d.nube || {};
-  const datos = [
+
+  // El backtest se dispara solo: hacerlo esperar un clic escondía justamente el
+  // dato que relativiza todo lo demás de esta pestaña.
+  useEffect(() => {
+    let vivo = true;
+    setBt(null);
+    api(`/api/markowitz/${encodeURIComponent(cartera)}/backtest?meses=${meses}&benchmark=${bench}`)
+      .then((r) => vivo && setBt(r));
+    return () => { vivo = false; };
+  }, [cartera, meses, bench]);
+
+  const acciones = objetivo === "max_sharpe" ? d.acciones_max_sharpe : d.acciones_min_varianza;
+  const destino = objetivo === "max_sharpe" ? d.max_sharpe : d.min_varianza;
+
+  const frontera = [
     { type: "scattergl", mode: "markers", name: "carteras posibles",
-      x: nube.vol, y: nube.ret, marker: { size: 3, color: c.texto3, opacity: 0.28 },
+      x: d.nube?.vol, y: d.nube?.ret, marker: { size: 3, color: c.texto3, opacity: 0.28 },
       hoverinfo: "skip" },
     { type: "scatter", mode: "lines", name: "frontera eficiente",
-      x: f.map((p) => p.vol), y: f.map((p) => p.ret),
+      x: (d.frontera || []).map((p) => p.vol), y: (d.frontera || []).map((p) => p.ret),
       line: { color: c.acento, width: 2.5 } },
     { type: "scatter", mode: "markers+text", name: "tu cartera",
       x: [d.actual.vol_pct], y: [d.actual.ret_pct], text: ["actual"], textposition: "top center",
@@ -1113,49 +1129,53 @@ function Markowitz({ d, cartera, bench }) {
       x: [d.max_sharpe.vol_pct], y: [d.max_sharpe.ret_pct], text: ["óptima"], textposition: "top center",
       marker: { size: 13, color: c.positivo, symbol: "triangle-up" } },
     { type: "scatter", mode: "markers+text", name: "mínima varianza",
-      x: [d.min_varianza.vol_pct], y: [d.min_varianza.ret_pct], text: ["mín. riesgo"], textposition: "bottom center",
-      marker: { size: 12, color: c.series[1], symbol: "diamond" } },
+      x: [d.min_varianza.vol_pct], y: [d.min_varianza.ret_pct], text: ["mín. riesgo"],
+      textposition: "bottom center", marker: { size: 12, color: c.series[1], symbol: "diamond" } },
   ];
+
   return (
     <>
       <div className="kpis">
-        <Kpi etiqueta="Tu Sharpe" valor={num(d.actual.sharpe, 3)} sub={`${pct(d.actual.ret_pct)} / ${pct(d.actual.vol_pct)}`} />
+        <Kpi etiqueta="Tu Sharpe" valor={num(d.actual.sharpe, 3)}
+             sub={`${pct(d.actual.ret_pct)} / ${pct(d.actual.vol_pct)}`} />
         <Kpi etiqueta="Sharpe óptimo" valor={num(d.max_sharpe.sharpe, 3)} tono="pos"
              sub={`${pct(d.max_sharpe.ret_pct)} / ${pct(d.max_sharpe.vol_pct)}`} />
         <Kpi etiqueta="Mínima varianza" valor={pct(d.min_varianza.vol_pct)}
              sub={`retorno ${pct(d.min_varianza.ret_pct)}`} />
         <Kpi etiqueta="Tasa libre" valor={pct(d.rf * 100)} sub={d.rf_label} />
       </div>
+
       <div className="fila f2">
         <div className="panel">
           <h3>Frontera eficiente</h3>
-          <Grafico datos={datos} alto={380}
+          <Grafico datos={frontera} alto={380}
                    layout={{ xaxis: { title: "Volatilidad anual", ticksuffix: " %" },
                              yaxis: { title: "Retorno anual", ticksuffix: " %" } }} />
           <div className="pie">
-            La nube gris son carteras posibles con tus mismos activos; la línea es lo
-            mejor alcanzable para cada nivel de riesgo. Tu cartera nunca puede quedar
-            por encima de la línea.
+            La nube gris son carteras posibles con tus mismos activos; la línea es lo mejor
+            alcanzable para cada nivel de riesgo. Tu cartera nunca puede quedar por encima.
           </div>
         </div>
+
         <div className="panel">
           <h3>Cómo quedarían los pesos</h3>
-          <Grafico alto={Math.max(230, d.tickers.length * 50)}
+          <Grafico alto={340}
             datos={[
-              { type: "bar", orientation: "h", name: "hoy",
-                y: d.tickers.slice().reverse(), x: d.actual.pesos.slice().reverse(),
-                marker: { color: c.texto3 } },
-              { type: "bar", orientation: "h", name: "máximo Sharpe",
-                y: d.tickers.slice().reverse(), x: d.max_sharpe.pesos.slice().reverse(),
-                marker: { color: c.positivo } },
-              { type: "bar", orientation: "h", name: "mínima varianza",
-                y: d.tickers.slice().reverse(), x: d.min_varianza.pesos.slice().reverse(),
-                marker: { color: c.series[1] } }]}
-            layout={{ barmode: "group", margin: { l: 82 }, xaxis: { ticksuffix: " %" } }} />
+              { type: "bar", name: "hoy", x: d.tickers, y: d.actual.pesos,
+                marker: { color: c.texto3 },
+                hovertemplate: "%{x}: %{y:.1f} %<extra>hoy</extra>" },
+              { type: "bar", name: "máximo Sharpe", x: d.tickers, y: d.max_sharpe.pesos,
+                marker: { color: c.positivo },
+                hovertemplate: "%{x}: %{y:.1f} %<extra>máx Sharpe</extra>" },
+              { type: "bar", name: "mínima varianza", x: d.tickers, y: d.min_varianza.pesos,
+                marker: { color: c.series[1] },
+                hovertemplate: "%{x}: %{y:.1f} %<extra>mín varianza</extra>" }]}
+            layout={{ barmode: "group", yaxis: { title: "Peso en la cartera", ticksuffix: " %" },
+                      xaxis: { tickangle: -35 } }} />
           <div className="pie">
-            Máximo Sharpe busca el mejor retorno por unidad de riesgo; mínima varianza,
-            la cartera más tranquila sin mirar el retorno esperado —que es el dato peor
-            estimado del modelo, y por eso suele ser la más robusta—.
+            Máximo Sharpe busca el mejor retorno por unidad de riesgo; mínima varianza, la
+            cartera más tranquila sin mirar el retorno esperado —que es el dato peor estimado
+            del modelo, y por eso suele ser la más robusta—.
           </div>
         </div>
       </div>
@@ -1163,17 +1183,21 @@ function Markowitz({ d, cartera, bench }) {
       <div className="fila f2">
         <div className="panel">
           <h3>Qué habría que operar
-            <select value={objetivo} onChange={(e) => setObjetivo(e.target.value)}
-                    style={{ marginLeft: "auto" }}>
-              <option value="max_sharpe">para máximo Sharpe</option>
-              <option value="min_varianza">para mínima varianza</option>
-            </select>
+            <span style={{ marginLeft: "auto", display: "flex", gap: 3,
+                           background: "var(--panel-2)", padding: 3, borderRadius: 8 }}>
+              {[["max_sharpe", "Máximo Sharpe"], ["min_varianza", "Mínima varianza"]].map(([k, t]) => (
+                <button key={k} className={"modo" + (objetivo === k ? " on" : "")}
+                        onClick={() => setObjetivo(k)}>{t}</button>))}
+            </span>
           </h3>
+          <div className="pie" style={{ marginTop: 2, marginBottom: 8 }}>
+            Destino: {pct(destino.ret_pct)} de retorno con {pct(destino.vol_pct)} de
+            volatilidad — Sharpe {num(destino.sharpe, 3)}.
+          </div>
           <div className="tabla-wrap"><table>
             <thead><tr><th>Ticker</th><th className="n">Hoy</th><th className="n">Objetivo</th>
                        <th className="n">Diferencia</th><th>Acción</th></tr></thead>
-            <tbody>{((objetivo === "max_sharpe" ? d.acciones_max_sharpe
-                                                : d.acciones_min_varianza) || []).map((a) => (
+            <tbody>{(acciones || []).map((a) => (
               <tr key={a.ticker}>
                 <td className="mono">{a.ticker}</td>
                 <td className="n">{pct(a.peso_actual_pct, 1)}</td>
@@ -1182,38 +1206,26 @@ function Markowitz({ d, cartera, bench }) {
                 <td><span className={"chip " + (a.accion === "COMPRAR" ? "ok" : a.accion === "VENDER" ? "mal" : "")}>{a.accion}</span></td>
               </tr>))}</tbody>
           </table></div>
-          <div className="pie">
-            Markowitz optimiza sobre retornos pasados: son el peor insumo del modelo.
-            Leelo como una dirección, no como una instrucción — y mirá el backtest.
-          </div>
         </div>
 
         <div className="panel">
           <h3>¿Habría funcionado?
-            <span style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "center" }}>
-              <select value={meses} onChange={(e) => setMeses(+e.target.value)}>
-                {[3, 6, 12].map((m) => <option key={m} value={m}>{m} meses</option>)}
-              </select>
-              <button className="btn" style={{ padding: "4px 11px", fontSize: 12.5 }}
-                      onClick={async () => { setBt("cargando");
-                        setBt(await api(`/api/markowitz/${encodeURIComponent(cartera)}/backtest?meses=${meses}&benchmark=${bench}`)); }}>
-                Probar</button>
+            <span style={{ marginLeft: "auto", display: "flex", gap: 3,
+                           background: "var(--panel-2)", padding: 3, borderRadius: 8 }}>
+              {[3, 6, 12].map((m) => (
+                <button key={m} className={"modo" + (meses === m ? " on" : "")}
+                        onClick={() => setMeses(m)}>{m} m</button>))}
             </span>
           </h3>
-          {bt === "cargando" ? <div className="cargando">Optimizando con datos viejos y midiendo después…</div>
-           : !bt ? <div className="pie" style={{ marginTop: 10 }}>
-               Optimiza con los datos ANTERIORES al período de prueba y mide qué pasó
-               después. Es la única forma honesta de evaluar Markowitz: optimizar y medir
-               sobre el mismo período siempre da un resultado espectacular que no significa nada.
-             </div>
+          {!bt ? <div className="cargando">Optimizando con datos viejos y midiendo después…</div>
            : bt.error ? <div className="aviso mal">{bt.error}</div> : (
             <>
-              <Grafico alto={230}
+              <Grafico alto={210}
                 datos={Object.entries(bt.curvas).map(([n, v], i) => ({
                   type: "scatter", mode: "lines", name: n, x: bt.fechas, y: v,
                   line: { width: n === bt.ganadora ? 2.6 : 1.4,
                           color: c.series[i % c.series.length] } }))}
-                layout={{ yaxis: { title: "Base 100", tickprefix: "" }, margin: { t: 6 } }} />
+                layout={{ yaxis: { title: "Base 100" }, margin: { t: 6 } }} />
               <div className="tabla-wrap"><table>
                 <thead><tr><th>Estrategia</th><th className="n">Retorno</th>
                   <th className="n">Sharpe</th><th className="n">Peor caída</th></tr></thead>
@@ -1232,6 +1244,9 @@ function Markowitz({ d, cartera, bench }) {
             </>)}
         </div>
       </div>
+
+      <Seccion titulo="¿Y si además uso los precios objetivo?" />
+      <ObjetivosYBL cartera={cartera} extras={extras} d={d} bench={bench} />
     </>
   );
 }
@@ -1746,83 +1761,247 @@ function Momentum({ d }) {
   );
 }
 
-/* ── Objetivos ── */
-function Objetivos({ d, bl }) {
-  const a = d.por_activo || [];
+/* ── Precios objetivo + Black-Litterman ── */
+
+function ObjetivosYBL({ cartera, extras, d, bench }) {
+  const [manuales, setManuales] = useState({});
+  const [bl, setBl] = useState(null);
+  const [editando, setEditando] = useState(null);
+  const obj = extras?.objetivos;
+
+  // BL corre solo, con las views de analistas, y se recalcula cuando el usuario
+  // impone una opinión propia. No hay botón: es el modo normal de uso.
+  useEffect(() => {
+    let vivo = true;
+    if (Object.keys(manuales).length === 0) { setBl(extras?.bl || null); return; }
+    setBl("cargando");
+    api(`/api/blacklitterman/${encodeURIComponent(cartera)}`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ manuales, benchmark: bench }) })
+      .then((r) => vivo && setBl(r));
+    return () => { vivo = false; };
+  }, [manuales, cartera, bench, extras?.bl]);
+
+  if (!obj) return <div className="cargando">Buscando precios objetivo…</div>;
+  if (obj.error) return <div className="aviso mal">{obj.error}</div>;
+
+  const guardar = (ticker, cfg) => {
+    setManuales((m) => ({ ...m, [ticker]: cfg }));
+    setEditando(null);
+  };
+  const borrar = (ticker) =>
+    setManuales((m) => { const n = { ...m }; delete n[ticker]; return n; });
+
   return (
     <>
-      <div className="kpis">
-        <Kpi etiqueta="Upside promedio" valor={pct(d.upside_promedio_pct, 1)}
-             tono={signo(d.upside_promedio_pct)} sub="según analistas" />
-        <Kpi etiqueta="Con cobertura" valor={`${d.con_cobertura} / ${d.total}`}
-             sub="activos con consenso" />
-      </div>
       <div className="panel">
         <h3>Precio objetivo y momento de entrada</h3>
         <div className="tabla-wrap"><table>
           <thead><tr><th>Ticker</th><th className="n">Hoy</th><th className="n">Objetivo</th>
-                     <th className="n">Upside</th><th>Momentum</th><th>Combinada</th>
-                     <th>Qué hacer</th></tr></thead>
-          <tbody>{a.map((x) => (
-            <tr key={x.ticker}>
-              <td className="mono">{x.ticker}{x.reexpresado && <span className="chip" style={{marginLeft:6}} title={`consenso de ${x.origen_consenso}`}>{x.origen_consenso}</span>}</td>
-              <td className="n">{usd(x.actual)}</td>
-              <td className="n">{x.objetivo_medio ? usd(x.objetivo_medio) : "—"}</td>
-              <td className={"n " + signo(x.upside_pct)}>{x.upside_pct == null ? "—" : pct(x.upside_pct, 1)}</td>
-              <td style={{ fontSize: 12.5 }}>{x.momentum || "—"}</td>
-              <td><span className={"chip " + (x.combinada === "COMPRAR" ? "ok" : x.combinada === "CARO" || x.combinada === "REDUCIR" ? "mal" : x.combinada === "ESPERAR GIRO" ? "ojo" : "")}>{x.combinada}</span></td>
-              <td style={{ fontSize: 12.5, color: "var(--texto-2)" }}>{x.combinada_texto}</td>
-            </tr>))}</tbody>
+            <th className="n">Upside</th><th>Momentum</th><th>Combinada</th>
+            <th>Tu opinión</th></tr></thead>
+          <tbody>{(obj.por_activo || []).map((x) => {
+            const mv = manuales[x.ticker];
+            return (
+              <tr key={x.ticker}>
+                <td className="mono">{x.ticker}</td>
+                <td className="n">{usd(x.actual)}</td>
+                <td className="n">{x.objetivo_medio ? usd(x.objetivo_medio) : "—"}</td>
+                <td className={"n " + signo(x.upside_pct)}>
+                  {x.upside_pct == null ? "—" : pct(x.upside_pct, 1)}</td>
+                <td style={{ fontSize: 12.5 }}>{x.momentum || "—"}</td>
+                <td><span className={"chip " + (x.combinada === "COMPRAR" ? "ok"
+                      : x.combinada === "CARO" || x.combinada === "REDUCIR" ? "mal"
+                      : x.combinada === "ESPERAR GIRO" ? "ojo" : "")}>{x.combinada}</span></td>
+                <td>
+                  {mv ? (
+                    <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                      <span className="chip ojo">{mv.modo === "B2" ? `evento ${mv.meses} m` : "propia"}</span>
+                      <span className="mono" style={{ fontSize: 11.5 }}>{mv.bajo}–{mv.alto}</span>
+                      <button className="btn" style={{ padding: "1px 7px", fontSize: 11 }}
+                              onClick={() => borrar(x.ticker)}>✕</button>
+                    </span>
+                  ) : (
+                    <button className="btn" style={{ padding: "2px 9px", fontSize: 12 }}
+                            onClick={() => setEditando(x)}>Fijar</button>)}
+                </td>
+              </tr>);
+          })}</tbody>
         </table></div>
         <div className="pie">
-          El precio objetivo dice <b>cuánto</b> puede valer; el momentum, <b>cuándo</b>.
-          Un objetivo alto con la acción cayendo no es una compra: es esperar el giro.
+          El precio objetivo dice <b>cuánto</b> puede valer; el momentum, <b>cuándo</b>. Un
+          objetivo alto con la acción cayendo no es una compra: es esperar el giro. Si tenés una
+          opinión propia sobre un papel —o si no hay cobertura de analistas, como pasa con las
+          small caps argentinas— fijala vos y pisa al consenso.
         </div>
       </div>
 
-      <h3 style={{ margin: "22px 0 4px", fontSize: 16 }}>
-        Y si llevo estos objetivos a la cartera: Black-Litterman</h3>
-      <div className="pie" style={{ marginBottom: 12, marginTop: 0 }}>
-        Toma los precios objetivo de arriba como opiniones sobre el futuro, les asigna
-        confianza según cuántos analistas los sostienen —recortándola donde el momentum va
-        en contra— y las combina con lo que el mercado ya tiene implícito en tu cartera.
-      </div>
-      {!bl ? <div className="cargando">Calculando Black-Litterman…</div>
+      {editando && <EditorView activo={editando} onGuardar={guardar}
+                               onCerrar={() => setEditando(null)} />}
+
+      {bl === "cargando" ? <div className="cargando">Recalculando con tu opinión…</div>
+       : !bl ? <div className="cargando">Calculando Black-Litterman…</div>
        : bl.error ? <div className="aviso mal">{bl.error}</div>
-       : <BlackLitterman d={bl} />}
+       : <BlackLitterman bl={bl} actual={d.actual} />}
     </>
   );
 }
 
-/* ── Black-Litterman ── */
-function BlackLitterman({ d }) {
+function EditorView({ activo, onGuardar, onCerrar }) {
+  const [modo, setModo] = useState("B1");
+  const [bajo, setBajo] = useState((activo.actual * 0.9).toFixed(2));
+  const [alto, setAlto] = useState((activo.actual * 1.2).toFixed(2));
+  const [meses, setMeses] = useState(3);
+
+  const medio = (parseFloat(bajo) + parseFloat(alto)) / 2;
+  const bruto = activo.actual ? medio / activo.actual - 1 : 0;
+  const anualizado = modo === "B2" ? Math.pow(1 + bruto, 12 / Math.max(1, meses)) - 1 : bruto;
+  const anchoPct = medio > 0 ? (parseFloat(alto) - parseFloat(bajo)) / medio * 100 : 100;
+  const confianza = Math.round(Math.max(10, Math.min(90, 90 - anchoPct)));
+
+  return (
+    <div className="panel" style={{ borderLeft: "4px solid var(--acento)" }}>
+      <h3>Tu opinión sobre {activo.ticker}
+        <button className="btn" style={{ marginLeft: "auto", padding: "3px 10px", fontSize: 12 }}
+                onClick={onCerrar}>Cancelar</button>
+      </h3>
+      <div className="modos" style={{ width: "fit-content", margin: "10px 0" }}>
+        {[["B1", "Opinión propia"], ["B2", "Evento corporativo"]].map(([k, t]) => (
+          <button key={k} className={"modo" + (modo === k ? " on" : "")}
+                  onClick={() => setModo(k)}>{t}</button>))}
+      </div>
+      <div style={{ display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap" }}>
+        <label style={{ fontSize: 11.5, color: "var(--texto-3)" }}>Precio piso<br />
+          <input type="number" step="0.01" value={bajo} style={{ width: 110, marginTop: 3 }}
+                 onChange={(e) => setBajo(e.target.value)} /></label>
+        <label style={{ fontSize: 11.5, color: "var(--texto-3)" }}>Precio techo<br />
+          <input type="number" step="0.01" value={alto} style={{ width: 110, marginTop: 3 }}
+                 onChange={(e) => setAlto(e.target.value)} /></label>
+        {modo === "B2" && (
+          <label style={{ fontSize: 11.5, color: "var(--texto-3)" }}>Meses hasta que se resuelve<br />
+            <input type="number" min="1" max="60" value={meses} style={{ width: 110, marginTop: 3 }}
+                   onChange={(e) => setMeses(+e.target.value)} /></label>)}
+        <button className="btn primario"
+                onClick={() => onGuardar(activo.ticker, { modo, bajo: +bajo, alto: +alto, meses })}>
+          Aplicar</button>
+      </div>
+      <div className="aviso ok">
+        Hoy cotiza {usd(activo.actual)}. Tu rango da un precio medio de {usd(medio)},
+        o sea <b>{pct(bruto * 100, 1)}</b>
+        {modo === "B2" && <> en {meses} {meses === 1 ? "mes" : "meses"}, que anualizado
+          compuesto son <b>{pct(anualizado * 100, 1)}</b></>}.
+        {" "}Confianza estimada: <b>{confianza} %</b>.
+      </div>
+      <div className="pie">
+        La confianza sale del <b>ancho del rango</b>, no se pide como número: nadie sabe
+        responder "¿qué tan seguro estás del 0 al 100?", pero todos saben entre qué precios
+        creen que va a estar. Un rango angosto es una opinión firme. El tope es 90 % aunque
+        el rango sea de un centavo — con certeza total el modelo concentra todo en ese activo.
+        {modo === "B2" && <> El modo <b>evento corporativo</b> existe para casos como una OPA:
+          el plazo real cambia el retorno anualizado y por lo tanto el peso que el modelo le da.</>}
+      </div>
+    </div>
+  );
+}
+
+function BlackLitterman({ bl, actual }) {
   const c = colores();
-  const acc = d.acciones || [];
+  const acc = bl.acciones || [];
+  const manuales = (bl.views_aplicadas || []).filter((v) => v.manual);
+
+  // Comparación contra la cartera de hoy: un retorno esperado suelto no dice
+  // nada si no se ve contra qué se compara.
+  const delta = (nuevo, viejo) => nuevo == null || viejo == null ? null : nuevo - viejo;
+  const dRet = delta(bl.ret_bl_pct, actual?.ret_pct);
+  const dVol = delta(bl.vol_bl_pct, actual?.vol_pct);
+  const dShr = delta(bl.sharpe_bl, actual?.sharpe);
+  const flecha = (v, mejorSiSube = true) => v == null ? "" :
+    (v > 0 ? (mejorSiSube ? "▲ " : "▼ ") : v < 0 ? (mejorSiSube ? "▼ " : "▲ ") : "");
+  const tono = (v, mejorSiSube = true) => v == null ? "" :
+    ((v > 0) === mejorSiSube ? "pos" : v === 0 ? "" : "neg");
+
   return (
     <>
       <div className="kpis">
-        <Kpi etiqueta="Retorno esperado" valor={pct(d.ret_bl_pct)} />
-        <Kpi etiqueta="Volatilidad" valor={pct(d.vol_bl_pct)} />
-        <Kpi etiqueta="Sharpe" valor={num(d.sharpe_bl, 3)} />
-        <Kpi etiqueta="Aversión al riesgo (δ)" valor={num(d.delta, 2)} sub={d.delta_label} />
-        <Kpi etiqueta="Incertidumbre (τ)" valor={num(d.tau, 5)} sub={d.tau_label} />
+        <Kpi etiqueta="Retorno esperado" valor={pct(bl.ret_bl_pct)} tono={tono(dRet)}
+             sub={dRet == null ? null : `${flecha(dRet)}${num(Math.abs(dRet), 2)} pp vs tu cartera (${pct(actual?.ret_pct)})`} />
+        <Kpi etiqueta="Volatilidad" valor={pct(bl.vol_bl_pct)} tono={tono(dVol, false)}
+             sub={dVol == null ? null : `${flecha(dVol, false)}${num(Math.abs(dVol), 2)} pp vs ${pct(actual?.vol_pct)}`} />
+        <Kpi etiqueta="Sharpe" valor={num(bl.sharpe_bl, 3)} tono={tono(dShr)}
+             sub={dShr == null ? null : `${flecha(dShr)}${num(Math.abs(dShr), 3)} vs ${num(actual?.sharpe, 3)}`} />
+        <Kpi etiqueta="Aversión al riesgo (δ)" valor={num(bl.delta, 2)} sub={bl.delta_label} />
+        <Kpi etiqueta="Incertidumbre (τ)" valor={num(bl.tau, 5)} sub={bl.tau_label} />
       </div>
-      <div className="aviso">{d.equilibrio_nota}</div>
+
+      {manuales.length > 0 && (
+        <div className="aviso ok">
+          <b>Con tu opinión aplicada:</b>{" "}
+          {manuales.map((v) => `${v.ticker} ${v.ret > 0 ? "+" : ""}${v.ret} % anual` +
+            (v.modo === "B2" ? ` (evento a ${v.meses} meses)` : "") +
+            `, confianza ${v.confidence} %`).join(" · ")}.
+        </div>)}
+
+      <div className="aviso">{bl.equilibrio_nota}</div>
+
       {acc.length === 0 ? (
-        <div className="aviso ojo">{d.nota || "Sin views: el modelo devuelve el punto de partida."}</div>
+        <div className="aviso ojo">{bl.nota || "Sin views: el modelo devuelve el punto de partida."}</div>
       ) : (
-        <div className="panel">
-          <h3>Pesos sugeridos</h3>
-          <Grafico alto={Math.max(230, acc.length * 44)}
-            datos={[
-              { type: "bar", orientation: "h", name: "hoy",
-                y: acc.map((a) => a.ticker).reverse(), x: acc.map((a) => a.peso_actual_pct).reverse(),
-                marker: { color: c.texto3 } },
-              { type: "bar", orientation: "h", name: "Black-Litterman",
-                y: acc.map((a) => a.ticker).reverse(), x: acc.map((a) => a.peso_bl_pct).reverse(),
-                marker: { color: c.acento } },
-            ]}
-            layout={{ barmode: "group", margin: { l: 82 }, xaxis: { ticksuffix: " %" } }} />
+        <div className="fila f2">
+          <div className="panel">
+            <h3>De dónde a dónde se mueve cada peso</h3>
+            <Grafico alto={Math.max(300, acc.length * 46)}
+              datos={[
+                // Un gráfico de pendiente: cada activo es una línea entre su peso
+                // de hoy y el que sugiere el modelo. La DIRECCIÓN del movimiento
+                // se lee de un vistazo, que es la pregunta real — un par de barras
+                // obliga a compararlas de a dos y a adivinar el sentido.
+                ...acc.map((a) => ({
+                  type: "scatter", mode: "lines", showlegend: false, hoverinfo: "skip",
+                  x: [0, 1], y: [a.peso_actual_pct, a.peso_bl_pct],
+                  line: { width: 2, color: a.peso_bl_pct >= a.peso_actual_pct ? c.positivo : c.negativo } })),
+                { type: "scatter", mode: "markers+text", name: "hoy",
+                  x: acc.map(() => 0), y: acc.map((a) => a.peso_actual_pct),
+                  text: acc.map((a) => a.ticker), textposition: "middle left",
+                  textfont: { size: 11 }, marker: { size: 9, color: c.texto3 },
+                  hovertemplate: "%{text}: %{y:.1f} % hoy<extra></extra>" },
+                { type: "scatter", mode: "markers+text", name: "Black-Litterman",
+                  x: acc.map(() => 1), y: acc.map((a) => a.peso_bl_pct),
+                  text: acc.map((a) => `${a.peso_bl_pct.toFixed(1)} %`), textposition: "middle right",
+                  textfont: { size: 11 }, marker: { size: 10, color: c.acento },
+                  hovertemplate: "%{y:.1f} % sugerido<extra></extra>" },
+              ]}
+              layout={{ showlegend: false,
+                        xaxis: { tickvals: [0, 1], ticktext: ["hoy", "Black-Litterman"],
+                                 range: [-0.35, 1.35], showgrid: false },
+                        yaxis: { title: "Peso en la cartera", ticksuffix: " %" },
+                        margin: { l: 56, r: 20 } }} />
+            <div className="pie">
+              Cada línea es un activo: arranca en su peso de hoy y termina en el que sugiere
+              el modelo. En verde lo que sube, en rojo lo que baja.
+            </div>
+          </div>
+
+          <div className="panel">
+            <h3>Qué operar</h3>
+            <div className="tabla-wrap"><table>
+              <thead><tr><th>Ticker</th><th className="n">Hoy</th><th className="n">Sugerido</th>
+                <th className="n">Monto</th><th className="n">Retorno esperado</th>
+                <th>Acción</th></tr></thead>
+              <tbody>{acc.map((a) => (
+                <tr key={a.ticker}>
+                  <td className="mono">{a.ticker}</td>
+                  <td className="n">{pct(a.peso_actual_pct, 1)}</td>
+                  <td className="n">{pct(a.peso_bl_pct, 1)}</td>
+                  <td className={"n " + signo(a.delta_usd)}>{usd(a.delta_usd)}</td>
+                  <td className={"n " + signo(a.ret_bl_pct)}>{pct(a.ret_bl_pct, 1)}</td>
+                  <td><span className={"chip " + (a.accion === "COMPRAR" ? "ok" : a.accion === "VENDER" ? "mal" : "")}>{a.accion}</span></td>
+                </tr>))}</tbody>
+            </table></div>
+            <div className="pie">
+              "Retorno esperado" es el posterior del modelo: la mezcla entre lo que estaba
+              implícito en tu cartera y lo que dicen las views, pesada por confianza.
+            </div>
+          </div>
         </div>
       )}
     </>

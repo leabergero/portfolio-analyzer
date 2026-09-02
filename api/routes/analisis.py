@@ -212,11 +212,13 @@ def bl(nombre):
     cuerpo = request.json or {}
     views = cuerpo.get("views")
 
-    # Sin views explícitas se arman desde los precios objetivo, recortando la
-    # confianza donde el momentum va en contra.
-    if views is None and cuerpo.get("desde_objetivos"):
-        views = blacklitterman.views_desde_objetivos(
-            targets.analizar(pos), momentum.analizar(pos))
+    # Sin views explícitas se arman desde los precios objetivo, dejando que las
+    # manuales pisen activo por activo. Es el uso normal: BL automático, con la
+    # posibilidad de imponer una opinión propia donde el usuario la tenga.
+    if views is None:
+        views = blacklitterman.views_combinadas(
+            targets.analizar(pos), momentum.analizar(pos),
+            cuerpo.get("manuales"))
 
     return jsonify(blacklitterman.analizar(
         pos, views, cuerpo.get("benchmark", "SP500"), cuerpo.get("max_weight")))

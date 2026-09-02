@@ -38,7 +38,7 @@ MODELOS = {
     # arman desde los precios objetivo, recortando confianza donde el momentum
     # va en contra. Es el uso para el que existe el modelo en esta aplicación.
     "blacklitterman": ("Black-Litterman", lambda p: blacklitterman.analizar(
-        p, blacklitterman.views_desde_objetivos(targets.analizar(p), momentum.analizar(p)))),
+        p, blacklitterman.views_combinadas(targets.analizar(p), momentum.analizar(p)))),
 }
 
 _corridas = {}

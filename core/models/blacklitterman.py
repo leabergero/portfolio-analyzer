@@ -177,3 +177,101 @@ def views_desde_objetivos(resultado_objetivos, resultado_momentum=None) -> list:
                       "confidence": confianza, "n_analistas": a.get("n_analistas"),
                       "momentum": momentos.get(a["ticker"])})
     return views
+
+
+# ── Views manuales ────────────────────────────────────────────────────────────
+
+def _confianza_por_rango(bajo: float, alto: float, medio: float) -> int:
+    """La confianza sale del ANCHO del rango, no se pide como número.
+
+    Nadie sabe responder "¿qué tan seguro estás, del 0 al 100?". Todos saben
+    responder "¿entre qué precios creés que va a estar?". Un rango angosto es
+    una opinión firme; uno ancho, una corazonada — y eso es información que el
+    usuario sí tiene.
+
+    Tope de 90 % aunque el rango sea de un centavo: con Ω → 0 la solución
+    degenera y Black-Litterman concentra toda la cartera en ese activo.
+    """
+    if medio <= 0:
+        return 50
+    ancho_pct = (alto - bajo) / medio * 100
+    return int(round(max(10, min(90, 90 - ancho_pct))))
+
+
+def view_manual(ticker: str, modo: str, bajo: float, alto: float,
+                precio_actual: float, meses: int = 12,
+                momentum: str = None) -> dict:
+    """Convierte una opinión propia en una view de Black-Litterman.
+
+    modo "B1" — opinión propia
+        "Creo que va a estar entre X e Y". Se compara contra una ventana de doce
+        meses, la misma que usa el consenso de analistas, para que las views
+        automáticas y las manuales sean comparables entre sí.
+
+    modo "B2" — evento corporativo
+        Mismo rango, pero con los meses REALES hasta que se resuelve: una OPA que
+        cierra en tres meses no es lo mismo que una expectativa a un año. El
+        retorno se anualiza compuesto según ese plazo, así entra a la
+        optimización en la misma escala que todo lo demás.
+    """
+    if not precio_actual or precio_actual <= 0 or bajo <= 0 or alto <= 0:
+        return None
+    medio = (bajo + alto) / 2
+    bruto = medio / precio_actual - 1
+
+    if modo == "B2":
+        m = max(1, int(meses or 12))
+        ret = ((1 + bruto) ** (12 / m) - 1) * 100
+    else:
+        ret = bruto * 100
+
+    confianza = _confianza_por_rango(bajo, alto, medio)
+    if momentum in ("EVITAR", "ESPERAR"):
+        confianza = max(10, confianza - 35)
+
+    return {"ticker": ticker.upper(), "ret": round(ret, 1), "confidence": confianza,
+            "modo": modo, "manual": True, "rango": [bajo, alto],
+            "meses": (meses if modo == "B2" else 12), "momentum": momentum,
+            "precio_referencia": precio_actual}
+
+
+def views_combinadas(resultado_objetivos, resultado_momentum=None,
+                     manuales: dict = None) -> list:
+    """Views de analistas, con las manuales pisando activo por activo.
+
+    manuales: {ticker: {"modo": "B1"|"B2", "bajo": x, "alto": y, "meses": n}}
+
+    Una view manual reemplaza a la automática para ese activo: si el usuario
+    tiene una opinión propia sobre un papel, es porque sabe algo que el consenso
+    no recoge —o porque no hay consenso, que es el caso de las small caps
+    argentinas—.
+    """
+    manuales = {k.upper(): v for k, v in (manuales or {}).items()}
+    momentos = {m["ticker"]: m.get("señal")
+                for m in (resultado_momentum or {}).get("por_activo", [])}
+    por_ticker = {a["ticker"]: a for a in resultado_objetivos.get("por_activo", [])}
+
+    views = []
+    for ticker, cfg in manuales.items():
+        actual = (por_ticker.get(ticker) or {}).get("actual") or cfg.get("precio_actual")
+        v = view_manual(ticker, cfg.get("modo", "B1"),
+                        float(cfg.get("bajo", 0)), float(cfg.get("alto", 0)),
+                        actual, cfg.get("meses"), momentos.get(ticker))
+        if v:
+            views.append(v)
+
+    for a in resultado_objetivos.get("por_activo", []):
+        if a["ticker"] in manuales or not a.get("disponible") or a.get("upside_pct") is None:
+            continue
+        if a.get("es_futuro"):
+            confianza = 55        # la curva de futuros es costo de acarreo, no dirección
+        else:
+            n = a.get("n_analistas") or 1
+            confianza = min(85, 35 + 8 * n)
+        señal = momentos.get(a["ticker"])
+        if señal in ("EVITAR", "ESPERAR"):
+            confianza = max(10, confianza - 35)
+        views.append({"ticker": a["ticker"], "ret": a["upside_pct"],
+                      "confidence": confianza, "modo": "analistas", "manual": False,
+                      "n_analistas": a.get("n_analistas"), "momentum": señal})
+    return views
