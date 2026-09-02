@@ -627,8 +627,10 @@ function PnlRealizado({ real, cartera, recargar }) {
   const trades = real.trades || [];
   const porTicker = Object.values(trades.reduce((acc, t) => {
     const x = acc[t.ticker] || (acc[t.ticker] = { ticker: t.ticker, n: 0, usd: 0,
-                                                  origen: 0, moneda: t.moneda });
+                                                  origen: 0, activo: 0, fx: 0,
+                                                  moneda: t.moneda });
     x.n += 1; x.usd += t.pnl_usd; x.origen += t.pnl_origen || 0;
+    x.activo += t.pnl_activo_usd || 0; x.fx += t.pnl_fx_usd || 0;
     return acc;
   }, {})).sort((a, b) => b.usd - a.usd);
   const ganadores = porTicker.filter((x) => x.usd > 0).length;
@@ -651,12 +653,17 @@ function PnlRealizado({ real, cartera, recargar }) {
       </h3>
 
       {!abierto ? (
-        <div className="pie" style={{ marginTop: 4 }}>
-          Neto de todo lo vendido, convertido con el MEP de cada operación.
-          {enPesos != null && <> En moneda de origen: <b>{num(enPesos, 2)} ARS</b>
-            {enDolar ? <> y <b>{num(enDolar, 2)} USD</b></> : null} — ese es el número que
-            se puede cotejar contra el resumen del broker, que no sabe de MEP.</>}
-        </div>
+        <>
+          <div className="pie" style={{ marginTop: 4 }}>
+            <b className={signo(real.total_activo_usd)}>{usd(real.total_activo_usd)}</b> los
+            papeles {real.total_fx_usd < 0 ? "menos" : "más"}{" "}
+            <b className={signo(real.total_fx_usd)}>{usd(Math.abs(real.total_fx_usd))}</b> del
+            tipo de cambio.
+            {enPesos != null && <> En moneda de origen: <b>{num(enPesos, 2)} ARS</b>
+              {enDolar ? <> y <b>{num(enDolar, 2)} USD</b></> : null} — ese es el número que
+              se puede cotejar contra el resumen del broker, que no sabe de MEP.</>}
+          </div>
+        </>
       ) : (
         <>
           <div style={{ display: "flex", gap: 8, margin: "10px 0 4px" }}>
@@ -672,7 +679,9 @@ function PnlRealizado({ real, cartera, recargar }) {
                 <thead><tr><th>Ticker</th><th>Compra</th><th>Venta</th><th className="n">Cantidad</th>
                   <th className="n">Precio compra</th><th className="n">Precio venta</th>
                   <th className="n">MEP compra</th><th className="n">MEP venta</th>
-                  <th className="n">Resultado origen</th><th className="n">Resultado USD</th></tr></thead>
+                  <th className="n">Resultado origen</th>
+                  <th className="n">Los papeles</th><th className="n">El dólar</th>
+                  <th className="n">Resultado USD</th></tr></thead>
                 <tbody>{[...trades].sort((a, b) => (a.sell_date < b.sell_date ? 1 : -1)).map((t, i) => (
                   <tr key={i}>
                     <td className="mono">{t.ticker}{t.tipo === "dividendo" &&
@@ -686,6 +695,9 @@ function PnlRealizado({ real, cartera, recargar }) {
                     <td className="n">{t.mep_venta ? num(t.mep_venta, 2) : "—"}</td>
                     <td className={"n " + signo(t.pnl_origen)}>
                       {num(t.pnl_origen, 2)} {t.moneda}</td>
+                    <td className={"n " + signo(t.pnl_activo_usd)}>{usd(t.pnl_activo_usd)}</td>
+                    <td className={"n " + (t.pnl_fx_usd ? signo(t.pnl_fx_usd) : "")}>
+                      {t.pnl_fx_usd ? usd(t.pnl_fx_usd) : "—"}</td>
                     <td className={"n " + signo(t.pnl_usd)}>{usd(t.pnl_usd)}</td>
                   </tr>))}</tbody>
               </>
@@ -693,18 +705,24 @@ function PnlRealizado({ real, cartera, recargar }) {
               <>
                 <thead><tr><th>Ticker</th><th className="n">Operaciones</th>
                   <th className="n">Resultado en su moneda</th>
+                  <th className="n">Los papeles</th><th className="n">El dólar</th>
                   <th className="n">Resultado en dólares</th></tr></thead>
                 <tbody>{porTicker.map((x) => (
                   <tr key={x.ticker}>
                     <td className="mono">{x.ticker}</td>
                     <td className="n">{x.n}</td>
                     <td className={"n " + signo(x.origen)}>{num(x.origen, 2)} {x.moneda}</td>
+                    <td className={"n " + signo(x.activo)}>{usd(x.activo)}</td>
+                    <td className={"n " + (x.fx ? signo(x.fx) : "")}>
+                      {x.fx ? usd(x.fx) : "—"}</td>
                     <td className={"n " + signo(x.usd)}>{usd(x.usd)}</td>
                   </tr>))}
                   <tr style={{ fontWeight: 700 }}>
                     <td>NETO</td><td className="n">{real.n}</td>
                     <td className="n">{enPesos != null ? `${num(enPesos, 2)} ARS` : ""}
                       {enDolar != null ? ` · ${num(enDolar, 2)} USD` : ""}</td>
+                    <td className={"n " + signo(real.total_activo_usd)}>{usd(real.total_activo_usd)}</td>
+                    <td className={"n " + signo(real.total_fx_usd)}>{usd(real.total_fx_usd)}</td>
                     <td className={"n " + signo(real.total_usd)}>{usd(real.total_usd)}</td>
                   </tr>
                 </tbody>
@@ -712,11 +730,12 @@ function PnlRealizado({ real, cartera, recargar }) {
             )}
           </table></div>
           <div className="pie">
-            Las dos columnas dicen cosas distintas y las dos son ciertas. La de la izquierda es
-            el resultado en la moneda en que operaste, que es lo que muestra el broker. La de
-            dólares convierte <b>cada pata con el MEP de su propia fecha</b>: comprar con
-            dólares de mayo y vender con dólares de febrero no es lo mismo aunque el número en
-            pesos sea el mismo. Neteo FIFO contra las compras más viejas; los splits se
+            <b>En su moneda</b> es lo que muestra el broker, que no sabe de MEP. El resultado
+            en dólares se abre en dos: <b>los papeles</b> es lo que dejó el activo, y{" "}
+            <b>el dólar</b> lo que el MEP le hizo al capital mientras estuvo invertido. Suman
+            el neto exacto — la ganancia se convierte al MEP de la venta, que es el dólar con
+            el que se cobró. Una operación que ya era en dólares no tiene columna de cambio:
+            no hubo exposición. Neteo FIFO contra las compras más viejas; los splits se
             prorratean sobre lo que había abierto. {ganadores} de {porTicker.length} tickers
             cerraron en verde.
           </div>

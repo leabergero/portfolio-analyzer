@@ -474,6 +474,45 @@ def test_ida_y_vuelta_del_csv_no_pierde_nada():
             assert casi(a[k], b[k], 1e-9), f"{k}: {a[k]} != {b[k]}"
 
 
+def test_papel_y_dolar_suman_el_resultado_exacto():
+    """El realizado se abre en dos y los dos suman el neto, sin residuo.
+
+    Caso de manual: se gana 50 % en pesos mientras el MEP sube 50 %. El
+    resultado en dólares es CERO, y esa forma de cero es lo que hay que poder
+    leer: +33,33 que dejó el papel y −33,33 que se llevó el dólar.
+
+    La ganancia se convierte al MEP de la VENTA, que es el dólar con el que se
+    cobró. Valuarla a la de la compra deja un tercer término suelto que no
+    cierra con nada.
+    """
+    pnl_realizado = require("core.models.portfolio", "pnl_realizado")
+    mep = require("core.data.mep", "valor")
+
+    trade = [{"ticker": "METR.BA", "buy_date": "2024-11-13", "sell_date": "2025-10-27",
+              "buy_price": 100.0, "sell_price": 150.0, "qty": 1000.0,
+              "buy_comm": 0.0, "sell_comm": 0.0, "pnl": 50000.0}]
+    r = pnl_realizado(trade)
+    mc = mep("2024-11-13")
+    mv = mep("2025-10-27")
+    if not mc or not mv:
+        raise Pendiente("sin serie de MEP para las fechas del caso")
+
+    esperado_activo = (150000.0 - 100000.0) / mv
+    esperado_fx = 100000.0 * (1 / mv - 1 / mc)
+    assert casi(r["total_activo_usd"], round(esperado_activo, 2), tol=0.02)
+    assert casi(r["total_fx_usd"], round(esperado_fx, 2), tol=0.02)
+    assert casi(r["total_activo_usd"] + r["total_fx_usd"], r["total_usd"], tol=0.02), \
+        "papel + dólar tiene que dar el neto, sin término suelto"
+
+    # Lo que ya estaba en dólares no tuvo exposición: todo es del papel.
+    en_usd = pnl_realizado([{"ticker": "AAPLD.BA", "buy_date": "2025-01-10",
+                             "sell_date": "2025-06-10", "buy_price": 10.0,
+                             "sell_price": 12.0, "qty": 100.0, "buy_comm": 0.0,
+                             "sell_comm": 0.0, "pnl": 200.0}])
+    assert casi(en_usd["total_fx_usd"], 0.0), "un CEDEAR D no tiene riesgo de cambio acá"
+    assert casi(en_usd["total_activo_usd"], en_usd["total_usd"])
+
+
 def test_la_moneda_del_dividendo_manda_sobre_la_del_ticker():
     """Un CEDEAR D cotiza en dólares y su dividendo se acredita en pesos.
 

@@ -146,6 +146,7 @@ def pnl_realizado(trades) -> dict:
     """
     serie_mep = mep_mod.serie()
     salida, total = [], 0.0
+    total_activo = total_fx = 0.0
     por_moneda = {}
     for t in trades:
         ticker = t["ticker"].upper()
@@ -169,7 +170,27 @@ def pnl_realizado(trades) -> dict:
             continue
 
         pnl = t["qty"] * (venta - compra) - c_compra - c_venta
+
+        # De dónde salió ese número: el papel y el dólar, por separado.
+        #
+        #     P&L = ingreso/MEP_v − costo/MEP_c
+        #         = (ingreso − costo)/MEP_v  +  costo × (1/MEP_v − 1/MEP_c)
+        #           └── el papel ───────────┘  └── el tipo de cambio ──────┘
+        #
+        # La ganancia se convierte al MEP de la VENTA, que es el dólar con el
+        # que se cobró: valuarla a la de compra deja un tercer término suelto.
+        # Los dos suman el neto exacto, sin residuo.
+        if moneda == "ARS" and mep_c and mep_v:
+            costo_ars = t["qty"] * t["buy_price"] / div + t.get("buy_comm", 0) / div
+            ingreso_ars = t["qty"] * t["sell_price"] / div - t.get("sell_comm", 0) / div
+            pnl_activo = (ingreso_ars - costo_ars) / mep_v
+            pnl_fx = costo_ars * (1 / mep_v - 1 / mep_c)
+        else:
+            pnl_activo, pnl_fx = pnl, 0.0      # sin exposición: ya estaba en dólares
+
         total += pnl
+        total_activo += pnl_activo
+        total_fx += pnl_fx
         # El resultado en la moneda de la operación viaja al lado del de dólares:
         # es el único número que se puede cotejar contra el resumen del broker,
         # que no sabe nada de MEP.
@@ -177,12 +198,16 @@ def pnl_realizado(trades) -> dict:
         if origen is not None:
             por_moneda[moneda] = round(por_moneda.get(moneda, 0.0) + origen, 2)
         salida.append({**t, "moneda": moneda, "pnl_usd": round(pnl, 2),
+                       "pnl_activo_usd": round(pnl_activo, 2),
+                       "pnl_fx_usd": round(pnl_fx, 2),
                        "pnl_origen": origen,
                        "mep_compra": round(mep_c, 2) if mep_c else None,
                        "mep_venta": round(mep_v, 2) if mep_v else None})
 
     return {"trades": salida, "total_usd": round(total, 2), "n": len(salida),
-            "total_origen": por_moneda}
+            "total_origen": por_moneda,
+            "total_activo_usd": round(total_activo, 2),
+            "total_fx_usd": round(total_fx, 2)}
 
 
 def matriz_retornos(posiciones, desde=None, hasta=None):
