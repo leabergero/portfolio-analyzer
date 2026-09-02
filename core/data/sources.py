@@ -149,6 +149,36 @@ def _suficiente(df: pd.DataFrame, hasta: str) -> bool:
     return (date.fromisoformat(hasta) - ultimo).days <= 3
 
 
+def info(ticker: str, ttl_horas: float = 24 * 7):
+    """Ficha del instrumento en yfinance (sector, industria, tipo, categoría).
+
+    Cacheada una semana. Sector, industria y tipo de instrumento cambian una vez
+    al año como mucho, y en las apps anteriores se pedían **en cada request**:
+    la pantalla de composición tardaba 12 segundos, casi todos gastados en
+    volver a preguntar lo mismo.
+    """
+    clave = f"yf:info:{ticker.upper()}"
+    guardado = cache.leer_respuesta(clave, ttl_horas, default="__falta__")
+    if guardado != "__falta__":
+        return guardado or {}
+
+    datos = {}
+    try:
+        import yfinance as yf
+        crudo = yf.Ticker(ticker).info or {}
+        # Solo lo que se usa: el .info completo son cientos de campos y no tiene
+        # sentido guardarlos ni arrastrarlos.
+        datos = {k: crudo.get(k) for k in
+                 ("quoteType", "sector", "industry", "category",
+                  "longName", "shortName", "currency", "marketCap")
+                 if crudo.get(k) is not None}
+    except Exception:
+        datos = {}
+
+    cache.guardar_respuesta(clave, datos)
+    return datos
+
+
 def precios_usd(ticker: str, desde: str = None, hasta: str = None,
                 source: str = None) -> pd.Series:
     """Serie de cierres YA convertida a dólares, lista para calcular retornos.
