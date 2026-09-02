@@ -1,2 +1,180 @@
-<!doctype html><meta charset="utf-8"><title>Portfolio Analyzer</title>
-<p style="font-family:system-ui;padding:40px">Interfaz en construcción. La API responde en <code>/api/salud</code>.</p>
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Portfolio Analyzer</title>
+
+<!--
+  Sin @babel/standalone. El JSX se precompila a app.js con un comando
+  (`npm run build` → babel web/app.jsx). Cargar el compilador en el navegador
+  cuesta 2.914 KB que no dibujan nada: más que Plotly entero.
+-->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/plotly.js/2.27.0/plotly.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+
+<style>
+/*
+  Tema por tokens, con los TRES estados que tiene un usuario:
+    · eligió claro       → [data-theme="light"]
+    · eligió oscuro      → [data-theme="dark"]
+    · no eligió (inicial)→ nada marcado, manda prefers-color-scheme
+
+  Ningún componente escribe un color literal: todos salen de estas variables,
+  Plotly incluido. Es la única forma de que agregar un gráfico nuevo no rompa
+  uno de los dos temas.
+*/
+:root {
+  --fondo:      #F4F6F8;
+  --panel:      #FFFFFF;
+  --panel-2:    #EDF1F4;
+  --borde:      #D8E0E6;
+  --borde-suave:#E8EDF1;
+  --texto:      #16202A;
+  --texto-2:    #4C5B66;
+  --texto-3:    #7A8894;
+  --acento:     #12695A;
+  --acento-2:   #0E8F7A;
+  --acento-suave:#DFEFEA;
+  --positivo:   #1F7A4D;
+  --negativo:   #B23B24;
+  --alerta:     #9A6712;
+  --sombra:     0 1px 2px rgba(22,32,42,.05), 0 8px 22px -14px rgba(22,32,42,.20);
+  --serie-1:#12695A; --serie-2:#C07A2A; --serie-3:#3D6CA8; --serie-4:#9A4257;
+  --serie-5:#6B5B95; --serie-6:#2E8B8B; --serie-7:#8A7B3E; --serie-8:#5A6B7A;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --fondo:#0E1418; --panel:#161F25; --panel-2:#1E2A31; --borde:#2A3841;
+    --borde-suave:#212D35; --texto:#E6EDF2; --texto-2:#A6B4BF; --texto-3:#78868F;
+    --acento:#4FC3A8; --acento-2:#6FD9BE; --acento-suave:#10302A;
+    --positivo:#5FBF8B; --negativo:#E0765C; --alerta:#DDA95E;
+    --sombra:0 1px 2px rgba(0,0,0,.45), 0 8px 22px -14px rgba(0,0,0,.7);
+    --serie-1:#4FC3A8; --serie-2:#DFA45E; --serie-3:#78A6DD; --serie-4:#E08098;
+    --serie-5:#AE9BD8; --serie-6:#5FC3C3; --serie-7:#C6B36A; --serie-8:#93A5B3;
+  }
+}
+[data-theme="dark"] {
+  --fondo:#0E1418; --panel:#161F25; --panel-2:#1E2A31; --borde:#2A3841;
+  --borde-suave:#212D35; --texto:#E6EDF2; --texto-2:#A6B4BF; --texto-3:#78868F;
+  --acento:#4FC3A8; --acento-2:#6FD9BE; --acento-suave:#10302A;
+  --positivo:#5FBF8B; --negativo:#E0765C; --alerta:#DDA95E;
+  --sombra:0 1px 2px rgba(0,0,0,.45), 0 8px 22px -14px rgba(0,0,0,.7);
+  --serie-1:#4FC3A8; --serie-2:#DFA45E; --serie-3:#78A6DD; --serie-4:#E08098;
+  --serie-5:#AE9BD8; --serie-6:#5FC3C3; --serie-7:#C6B36A; --serie-8:#93A5B3;
+}
+
+*{box-sizing:border-box}
+body{margin:0;background:var(--fondo);color:var(--texto);
+     font:15px/1.55 "Public Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+     -webkit-font-smoothing:antialiased}
+.mono{font-family:"IBM Plex Mono",ui-monospace,Menlo,monospace;font-variant-numeric:tabular-nums}
+
+/* ── Barra superior ── */
+.barra{position:sticky;top:0;z-index:50;background:var(--panel);
+       border-bottom:1px solid var(--borde);display:flex;align-items:center;
+       gap:18px;padding:0 20px;height:56px;flex-wrap:wrap}
+.marca{font-weight:700;letter-spacing:-.02em;font-size:16px;white-space:nowrap}
+.marca span{color:var(--acento)}
+.modos{display:flex;gap:2px;background:var(--panel-2);padding:3px;border-radius:8px}
+.modo{border:0;background:transparent;color:var(--texto-2);font:inherit;font-size:13.5px;
+      font-weight:500;padding:6px 14px;border-radius:6px;cursor:pointer}
+.modo.on{background:var(--panel);color:var(--texto);box-shadow:var(--sombra)}
+.barra .der{margin-left:auto;display:flex;align-items:center;gap:10px}
+
+select,input,button{font:inherit}
+select,input[type=text],input[type=number]{background:var(--panel);color:var(--texto);
+  border:1px solid var(--borde);border-radius:7px;padding:6px 10px;font-size:13.5px}
+.btn{background:var(--panel);color:var(--texto);border:1px solid var(--borde);
+     border-radius:7px;padding:6px 12px;font-size:13.5px;cursor:pointer}
+.btn:hover{border-color:var(--acento)}
+.btn.primario{background:var(--acento);color:var(--fondo);border-color:var(--acento);font-weight:600}
+.btn.peligro{color:var(--negativo);border-color:var(--negativo)}
+.btn:disabled{opacity:.5;cursor:default}
+.tema{width:36px;height:32px;display:grid;place-items:center;padding:0}
+
+/* ── Estructura ── */
+.hoja{max-width:1400px;margin:0 auto;padding:20px}
+.fila{display:grid;gap:14px;margin-bottom:14px}
+.f2{grid-template-columns:repeat(auto-fit,minmax(380px,1fr))}
+.f3{grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}
+.panel{background:var(--panel);border:1px solid var(--borde);border-radius:10px;
+       padding:16px 18px;box-shadow:var(--sombra)}
+.panel h3{margin:0 0 3px;font-size:14px;font-weight:600;letter-spacing:-.01em;
+          display:flex;align-items:center;gap:7px}
+.pie{font-size:12.5px;color:var(--texto-3);margin-top:9px;line-height:1.45}
+
+/* ── KPI con explicación ── */
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(158px,1fr));gap:10px;margin-bottom:14px}
+.kpi{background:var(--panel);border:1px solid var(--borde);border-radius:10px;
+     padding:12px 14px;position:relative;box-shadow:var(--sombra)}
+.kpi .et{font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--texto-3);
+         font-weight:600;display:flex;align-items:center;gap:5px}
+.kpi .val{font-size:22px;font-weight:600;letter-spacing:-.02em;margin-top:3px}
+.kpi .sub{font-size:12px;color:var(--texto-3);margin-top:1px}
+.kpi.pos .val{color:var(--positivo)} .kpi.neg .val{color:var(--negativo)}
+
+/* El popup se abre al pasar el mouse Y al hacer clic: en tablet no hay hover,
+   y esta herramienta se usa en tablet. */
+.ayuda{width:14px;height:14px;border-radius:50%;border:1px solid var(--texto-3);
+       color:var(--texto-3);font-size:9px;display:grid;place-items:center;cursor:help;
+       background:transparent;padding:0;flex:0 0 auto}
+.globo{position:absolute;z-index:60;top:calc(100% + 6px);left:0;width:min(300px,80vw);
+       background:var(--panel);border:1px solid var(--borde);border-radius:9px;
+       padding:11px 13px;box-shadow:0 10px 30px -8px rgba(0,0,0,.35);
+       font-size:12.5px;line-height:1.5;color:var(--texto-2);text-transform:none;
+       letter-spacing:0;font-weight:400}
+.globo b{color:var(--texto);display:block;margin-bottom:3px;font-size:12.5px}
+.globo .umbral{margin-top:6px;color:var(--texto-3);font-size:11.5px}
+
+/* ── Tablas ── */
+.tabla-wrap{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:13.5px}
+th{text-align:left;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;
+   color:var(--texto-3);font-weight:600;padding:7px 10px;border-bottom:1px solid var(--borde);
+   white-space:nowrap;background:var(--panel-2)}
+td{padding:7px 10px;border-bottom:1px solid var(--borde-suave)}
+tr:last-child td{border-bottom:0}
+td.n,th.n{text-align:right;font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums;white-space:nowrap}
+.pos{color:var(--positivo)} .neg{color:var(--negativo)}
+
+/* ── Pestañas ── */
+.tabs{display:flex;gap:3px;flex-wrap:wrap;margin-bottom:14px;border-bottom:1px solid var(--borde)}
+.tab{border:0;background:transparent;color:var(--texto-2);font:inherit;font-size:13.5px;
+     padding:9px 13px;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px}
+.tab.on{color:var(--acento);border-bottom-color:var(--acento);font-weight:600}
+.tab .pin{display:inline-block;width:6px;height:6px;border-radius:50%;margin-left:6px}
+.pin.listo{background:var(--positivo)} .pin.corriendo{background:var(--alerta)}
+.pin.error{background:var(--negativo)}
+
+/* ── Avisos ── */
+.aviso{border-left:3px solid var(--borde);background:var(--panel);padding:11px 14px;
+       border-radius:0 8px 8px 0;font-size:13px;color:var(--texto-2);margin:10px 0}
+.aviso.ok{border-left-color:var(--positivo);background:var(--acento-suave);color:var(--texto)}
+.aviso.mal{border-left-color:var(--negativo)}
+.aviso.ojo{border-left-color:var(--alerta)}
+.aviso b{color:var(--texto)}
+.vacio{padding:44px 20px;text-align:center;color:var(--texto-3);font-size:14px}
+.cargando{padding:26px;text-align:center;color:var(--texto-3);font-size:13px}
+
+.chip{display:inline-block;font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;
+      font-weight:600;padding:2px 8px;border-radius:100px;border:1px solid currentColor}
+.chip.ok{color:var(--positivo)} .chip.mal{color:var(--negativo)} .chip.ojo{color:var(--alerta)}
+
+footer{max-width:1400px;margin:26px auto 0;padding:18px 20px 40px;border-top:1px solid var(--borde);
+       color:var(--texto-3);font-size:12.5px;display:flex;justify-content:space-between;
+       gap:12px;flex-wrap:wrap}
+footer a{color:var(--acento);text-decoration:none}
+footer a:hover{text-decoration:underline}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<div id="raiz"><div class="cargando">Cargando…</div></div>
+<script src="app.js"></script>
+</body>
+</html>

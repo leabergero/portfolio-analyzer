@@ -1,0 +1,12 @@
+{
+  "name": "portfolio-analyzer-web",
+  "private": true,
+  "description": "Interfaz de Portfolio Analyzer. Precompila el JSX a web/app.js: sin compilador en el navegador.",
+  "scripts": {
+    "build": "babel --presets @babel/preset-react web/app.jsx -o web/app.js",
+    "watch": "babel --presets @babel/preset-react web/app.jsx -o web/app.js --watch"
+  },
+  "devDependencies": {
+    "@babel/cli": "^7", "@babel/core": "^7", "@babel/preset-react": "^7"
+  }
+}
