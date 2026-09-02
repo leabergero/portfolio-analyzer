@@ -163,7 +163,8 @@ function Barra({ modo, setModo, tema, setTema, carteras, cartera, setCartera }) 
       <div className="marca">Portfolio <span>Analyzer</span></div>
       <div className="modos">
         {[["analisis", "Análisis"], ["comparacion", "Comparación"],
-          ["carteras", "Carteras"], ["conectores", "Conectores"]].map(([k, t]) => (
+          ["carteras", "Carteras"], ["mercado", "Mercado"],
+          ["conectores", "Conectores"]].map(([k, t]) => (
           <button key={k} className={"modo" + (modo === k ? " on" : "")}
                   onClick={() => setModo(k)}>{t}</button>
         ))}
@@ -253,7 +254,7 @@ function Panel({ tab, R, M, cartera }) {
   if (d.error) return <div className="aviso mal"><b>No se pudo calcular.</b> {d.error}</div>;
 
   const vistas = {
-    posicion: <Posicion d={d} />, composicion: <Composicion d={d} />,
+    posicion: <Posicion d={{ ...d, cartera_nombre: cartera }} />, composicion: <Composicion d={d} />,
     riesgo: <Riesgo d={d} />, markowitz: <Markowitz d={d} />,
     montecarlo: <MonteCarlo d={d} cartera={cartera} />, capm: <Capm d={d} cartera={cartera} />,
     momentum: <Momentum d={d} />, objetivos: <Objetivos d={d} />,
@@ -283,7 +284,10 @@ function Posicion({ d }) {
         </div>
       )}
       <div className="panel">
-        <h3>Tenencias</h3>
+        <h3>Tenencias
+          <a className="btn" style={{ marginLeft: "auto", textDecoration: "none", fontSize: 12.5 }}
+             href={`/api/reporte/${encodeURIComponent(d.cartera_nombre || "")}`}>Descargar PDF</a>
+        </h3>
         <div className="tabla-wrap"><table>
           <thead><tr>
             <th>Ticker</th><th>Compra</th><th className="n">Cantidad</th>
@@ -1183,6 +1187,84 @@ function Conectores() {
   );
 }
 
+/* ═══════════════ Mercado · MEP y noticias ═══════════════ */
+
+function Mercado() {
+  const [mep, setMep] = useState(null);
+  const [news, setNews] = useState(null);
+  const [rango, setRango] = useState("2024-01-01");
+  const c = colores();
+
+  useEffect(() => { api(`/api/mep?desde=${rango}`).then(setMep); }, [rango]);
+  useEffect(() => { api("/api/noticias?limite=30").then(setNews); }, []);
+
+  const RANGOS = [["2026-01-01", "este año"], ["2024-01-01", "2 años"],
+                  ["2020-01-01", "todo"]];
+
+  return (
+    <>
+      {mep?.error && <div className="aviso mal">{mep.error}</div>}
+      {mep && !mep.error && mep.serie && (
+        <>
+          <div className="kpis">
+            <Kpi etiqueta="Dólar MEP hoy" valor={usd(mep.hoy)} sub={mep.fuente} />
+            <Kpi etiqueta="Ruedas en la serie" valor={mep.ruedas.toLocaleString("es-AR")} />
+          </div>
+          <div className="panel">
+            <h3>Dólar MEP
+              <span style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
+                {RANGOS.map(([v, t]) => (
+                  <button key={v} className={"btn" + (rango === v ? " primario" : "")}
+                          style={{ padding: "3px 10px", fontSize: 12 }}
+                          onClick={() => setRango(v)}>{t}</button>))}
+              </span>
+            </h3>
+            <Grafico alto={340}
+              datos={[{ type: "scatter", mode: "lines", name: "MEP",
+                        x: mep.serie.map((p) => p.fecha), y: mep.serie.map((p) => p.valor),
+                        line: { color: c.acento, width: 1.8 },
+                        hovertemplate: "%{x}<br>$%{y:,.2f}<extra></extra>" }]}
+              layout={{ yaxis: { title: "Pesos por dólar", tickprefix: "$" } }} />
+            <div className="pie">
+              Esta es la serie con la que se convierte toda la cartera a dólares, usando
+              el valor de la fecha de cada operación. Fuentes públicas, sin credencial.
+            </div>
+          </div>
+        </>
+      )}
+
+      <div className="panel" style={{ marginTop: 14 }}>
+        <h3>Qué está pasando</h3>
+        {!news ? <div className="cargando">Buscando titulares…</div>
+         : news.error || !news.noticias
+         ? <div className="aviso mal">No se pudieron traer titulares. {news.error || ""}</div> : (
+          <>
+            {news.fuentes_caidas?.length > 0 && (
+              <div className="aviso ojo" style={{ marginTop: 4 }}>
+                Sin respuesta de: {news.fuentes_caidas.join(", ")}. Se muestran las demás.
+              </div>
+            )}
+            <div className="tabla-wrap"><table>
+              <thead><tr><th>Fecha</th><th>Fuente</th><th>Titular</th></tr></thead>
+              <tbody>{news.noticias.map((n, i) => (
+                <tr key={i}>
+                  <td className="mono" style={{ fontSize: 12, whiteSpace: "nowrap" }}>
+                    {n.fecha ? n.fecha.slice(0, 16).replace("T", " ") : "—"}</td>
+                  <td style={{ fontSize: 12, color: "var(--texto-3)", whiteSpace: "nowrap" }}>{n.fuente}</td>
+                  <td>{n.enlace
+                    ? <a href={n.enlace} target="_blank" rel="noopener"
+                         style={{ color: "var(--texto)", textDecoration: "none" }}>{n.titulo}</a>
+                    : n.titulo}</td>
+                </tr>))}</tbody>
+            </table></div>
+            <div className="pie">{news.nota}</div>
+          </>
+        )}
+      </div>
+    </>
+  );
+}
+
 /* ═══════════════ Raíz ═══════════════ */
 
 function App() {
@@ -1213,6 +1295,7 @@ function App() {
         {modo === "analisis" && <Analisis cartera={cartera} />}
         {modo === "comparacion" && <Comparacion carteras={carteras} />}
         {modo === "carteras" && <Carteras carteras={carteras} recargar={recargar} />}
+        {modo === "mercado" && <Mercado />}
         {modo === "conectores" && <Conectores />}
       </div>
       <footer>

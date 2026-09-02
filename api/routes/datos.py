@@ -3,7 +3,7 @@
 from flask import Blueprint, Response, jsonify, request
 
 from core.broker import cocos, vault
-from core.data import cache, connectors, fmp, mep, sources
+from core.data import cache, connectors, fmp, mep, noticias, sources
 from core.io import csv_native, store
 from core.models import comparacion
 
@@ -95,6 +95,41 @@ def comparar():
         return jsonify({"error": "Al menos dos de esas carteras no existen o están vacías."}), 400
     return jsonify(comparacion.comparar(
         carteras, (request.json or {}).get("benchmark", "SP500")))
+
+
+# ── Noticias ──────────────────────────────────────────────────────────────────
+
+@bp.get("/noticias")
+def titulares():
+    return jsonify(noticias.ultimas(request.args.get("limite", 40, type=int),
+                                    request.args.get("seccion")))
+
+
+@bp.get("/noticias/<cartera>")
+def titulares_cartera(cartera):
+    """Titulares que mencionan alguno de tus activos, por nombre de la empresa."""
+    pos = store.cargar(cartera)
+    if not pos:
+        return jsonify({"error": f'La cartera "{cartera}" no existe.'}), 404
+    return jsonify(noticias.por_cartera(pos))
+
+
+# ── Reporte PDF ───────────────────────────────────────────────────────────────
+
+@bp.get("/reporte/<cartera>")
+def reporte(cartera):
+    """PDF con los gráficos dibujados en el servidor: no necesita navegador."""
+    from core.models import reporte as rep
+    pos = store.cargar(cartera)
+    if not pos:
+        return jsonify({"error": f'La cartera "{cartera}" no existe.'}), 404
+    try:
+        pdf = rep.generar(cartera, pos)
+    except Exception as e:
+        return jsonify({"error": f"No se pudo generar el reporte: {e}"}), 500
+    from datetime import date as _d
+    return Response(pdf, mimetype="application/pdf", headers={
+        "Content-Disposition": f'attachment; filename="{cartera}_{_d.today()}.pdf"'})
 
 
 # ── Conectores ────────────────────────────────────────────────────────────────
