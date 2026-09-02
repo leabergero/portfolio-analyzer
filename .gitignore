@@ -15,3 +15,6 @@ connectors.json
 
 # Frontend compilado (se genera desde web/app.jsx)
 web/app.js
+
+# entorno local
+.venv/

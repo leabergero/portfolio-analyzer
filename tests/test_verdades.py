@@ -62,14 +62,14 @@ def test_cedears_dolar_son_usd():
     número concreto no sirve de test porque cambia con el precio; la verdad
     durable es la moneda.
     """
-    ticker_currency = require("core.data.sources", "ticker_currency")
+    ticker_currency = require("core.data.symbols","ticker_currency")
     for t in ("KOD.BA", "GLDD.BA", "SLVD.BA", "QQQD.BA", "NVDAD.BA", "MSFTD.BA"):
         assert ticker_currency(t) == "USD", f"{t} debería ser USD"
 
 
 def test_acciones_ars_son_ars():
     """Contrapartida: sin la "D", cotiza en pesos y sí lleva conversión MEP."""
-    ticker_currency = require("core.data.sources", "ticker_currency")
+    ticker_currency = require("core.data.symbols","ticker_currency")
     for t in ("METR.BA", "COME.BA", "GGAL.BA", "PAMP.BA"):
         assert ticker_currency(t) == "ARS", f"{t} debería ser ARS"
 
@@ -81,7 +81,7 @@ def test_ypfd_no_es_variante_dolar():
     USD. Si aparece otro caso así, va a la lista de excepciones — no se toca
     la regla general.
     """
-    ticker_currency = require("core.data.sources", "ticker_currency")
+    ticker_currency = require("core.data.symbols","ticker_currency")
     assert ticker_currency("YPFD.BA") == "ARS"
 
 
@@ -92,7 +92,7 @@ def test_bono_dolar_sigue_circuito_ars():
     CEDEAR significa "cotiza en dólares", pero la "D" de un bono es solo el
     nombre de la especie; el precio que llega sigue siendo ARS.
     """
-    ticker_currency = require("core.data.sources", "ticker_currency")
+    ticker_currency = require("core.data.symbols","ticker_currency")
     for t in ("AL30D.BA", "GD30D.BA"):
         assert ticker_currency(t) == "ARS", f"{t} viene de Cocos en pesos"
 
@@ -103,7 +103,7 @@ def test_base_del_cedear_no_come_letras_de_mas():
     Bug original: se usaba rstrip("D"), que borra TODAS las D finales. El
     subyacente de GLDD.BA quedaba en "GL" y no resolvía contra nada.
     """
-    base_symbol = require("core.data.sources", "base_symbol")
+    base_symbol = require("core.data.symbols","base_symbol")
     assert base_symbol("GLDD.BA") == "GLD"
     assert base_symbol("KOD.BA") == "KO"
     assert base_symbol("AL30D.BA") == "AL30"
@@ -116,7 +116,7 @@ def test_base_del_cedear_no_come_letras_de_mas():
 
 def test_bono_conocido_es_bono():
     """Los bonos y ONs de la tabla se reconocen por nombre."""
-    is_bond = require("core.data.sources", "is_bond")
+    is_bond = require("core.data.symbols","is_bond")
     for t in ("AL30.BA", "GD30.BA", "AN29.BA", "PLC4O.BA", "RUCDO.BA", "VSCXO.BA"):
         assert is_bond(t), f"{t} es un bono"
 
@@ -132,7 +132,7 @@ def test_source_cocos_manda_sobre_la_tabla():
     La ruta de PRECIOS ya respetaba el source explícito; la de NORMALIZACIÓN
     no. Las dos tienen que mirar el mismo dato.
     """
-    is_bond = require("core.data.sources", "is_bond")
+    is_bond = require("core.data.symbols","is_bond")
     assert is_bond("TLCPO.BA", source="cocos"), "source=cocos manda"
     assert not is_bond("AAPL", source=None)
 
