@@ -23,25 +23,39 @@ entre sí, con el ganador justificado por criterios explícitos.
 
 ## Estado
 
-**Fase 0 — esqueleto y verdades.** El núcleo todavía no existe.
+**Fase 2 terminada** — 18 de 23 verdades en verde, 0 en rojo.
 
 ```bash
-python3 tests/test_verdades.py
+python3 tests/test_verdades.py          # la suite corre sin instalar nada
 ```
 
 `tests/test_verdades.py` es la red de seguridad de la reescritura: cada caso es
 un bug real que ya se pagó una vez en las apps anteriores. Se escribió **antes**
-que los modelos, así que arranca casi todo en *pendiente* — esa lista es el plan
-de trabajo, y cuando algo pasa de pendiente a verde, esa pieza está terminada.
+que los modelos, así que lo que sigue en *pendiente* es el plan de trabajo — y
+cuando un caso pasa a verde, esa pieza está terminada.
 
 | Fase | Qué entrega | Estado |
 |---|---|---|
 | 0 | Esqueleto, git, suite de verdades | ✅ |
-| 1 | Núcleo de datos: precios, caché, MEP, Cocos + vault | — |
-| 2 | Carteras y CSV (propio + Yahoo), verificado contra la app vieja | — |
+| 1 | Núcleo de datos: precios, caché, MEP, Cocos + vault, FMP | ✅ |
+| 2 | Carteras y CSV (propio + Yahoo), verificado contra la app vieja | ✅ |
 | 3 | Modo Análisis | — |
 | 4 | Modo Comparación | — |
 | 5 | PDF, noticias, MEP, conectores; se archivan las apps viejas | — |
+
+### Verificación de la fase 2
+
+Las mismas carteras, valuadas por las dos aplicaciones el mismo día:
+
+| Cartera | Portfolio Analyzer | Terminal Financiera |
+|---|---|---|
+| KARIN | $21.680,60 | $21.680,60 |
+| LEANDRO | $8.225,54 | $8.225,54 |
+| MAMI | $14.122,85 | $14.122,85 |
+
+La cartera de bonos no valúa sin Cocos conectado, y se reporta como
+`sin_precio` en vez de darla en cero: un total silenciosamente incompleto es
+peor que un total ausente.
 
 ## Estructura
 
