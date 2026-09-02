@@ -186,6 +186,7 @@ def read_realizado(origen) -> list:
                 "buy_price": 0.0, "sell_price": unitario,
                 "qty": qty or 1.0, "buy_comm": 0.0, "sell_comm": comision,
                 "pnl": round((qty or 1.0) * unitario - comision, 4),
+                "moneda": (d.get("currency") or "").strip().upper() or None,
                 "notes": (d.get("notes") or "").strip(),
             })
         else:
@@ -236,7 +237,7 @@ def write_todo(destino, posiciones, realizadas=None) -> int:
                 "sell_date": t.get("sell_date", ""),
                 "sell_price": _numero(t.get("sell_price")),
                 "sell_commissions": _numero(t.get("sell_comm")),
-                "source": "", "currency": "", "asset_type": "",
+                "source": "", "currency": t.get("moneda") or "", "asset_type": "",
                 "notes": t.get("notes", ""),
             })
             n += 1

@@ -492,11 +492,22 @@ function Posicion({ d, cartera, recargar, extras, bench }) {
 
 function AltaDividendo({ cartera, recargar }) {
   const linea = (base) => ({ ticker: base?.ticker || "", fecha: "", importe: "",
-                             qty: base?.qty || "", por_accion: base?.por_accion ?? true });
+                             qty: base?.qty || "", por_accion: base?.por_accion ?? true,
+                             moneda: base?.moneda || "" });
   const [filas, setFilas] = useState([linea()]);
   const [msg, setMsg] = useState(null);
   const [abierto, setAbierto] = useState(false);
   const set = (i, k, v) => setFilas((f) => f.map((x, j) => (j === i ? { ...x, [k]: v } : x)));
+
+  // Al escribir el ticker se pregunta en qué moneda cotiza y se propone esa,
+  // pero queda editable: un CEDEAR D cotiza en dólares y sin embargo su
+  // dividendo suele acreditarse en pesos. Darlo por sentado multiplica el
+  // importe por el MEP y nadie se entera.
+  const sugerirMoneda = async (i, ticker) => {
+    if (!ticker || filas[i]?.moneda) return;
+    const r = await api(`/api/validar/${encodeURIComponent(ticker)}`);
+    if (r?.moneda) set(i, "moneda", r.moneda);
+  };
   // La fila nueva hereda ticker, cantidad y modo de la anterior: seis cobros de
   // un mismo papel se cargan cambiando nada más que la fecha y el importe.
   const sumar = () => setFilas((f) => [...f, linea(f[f.length - 1])]);
@@ -529,7 +540,7 @@ function AltaDividendo({ cartera, recargar }) {
       </h3>
       <div className="tabla-wrap"><table>
         <thead><tr><th>Ticker</th><th>Fecha de cobro</th><th className="n">Importe</th>
-          <th>El importe es</th><th className="n">Acciones</th>
+          <th>Moneda</th><th>El importe es</th><th className="n">Acciones</th>
           <th className="n">Resultado</th><th></th></tr></thead>
         <tbody>
           {filas.map((f, i) => {
@@ -540,11 +551,20 @@ function AltaDividendo({ cartera, recargar }) {
               <tr key={i}>
                 <td><input type="text" value={f.ticker} style={{ width: 110 }}
                            placeholder="METR.BA"
+                           onBlur={(e) => sugerirMoneda(i, e.target.value.trim().toUpperCase())}
                            onChange={(e) => set(i, "ticker", e.target.value.toUpperCase())} /></td>
                 <td><input type="date" value={f.fecha} style={{ width: 140 }}
                            onChange={(e) => set(i, "fecha", e.target.value)} /></td>
                 <td><input type="number" step="0.0001" value={f.importe} style={{ width: 110 }}
                            onChange={(e) => set(i, "importe", e.target.value)} /></td>
+                <td>
+                  <select value={f.moneda || ""} style={{ width: 90 }}
+                          onChange={(e) => set(i, "moneda", e.target.value)}>
+                    <option value="">auto</option>
+                    <option value="ARS">ARS</option>
+                    <option value="USD">USD</option>
+                  </select>
+                </td>
                 <td>
                   <select value={f.por_accion ? "unit" : "total"} style={{ width: 130 }}
                           onChange={(e) => set(i, "por_accion", e.target.value === "unit")}>
@@ -555,7 +575,7 @@ function AltaDividendo({ cartera, recargar }) {
                 <td><input type="number" value={f.qty} style={{ width: 100 }}
                            disabled={!f.por_accion} placeholder={f.por_accion ? "" : "—"}
                            onChange={(e) => set(i, "qty", e.target.value)} /></td>
-                <td className="n mono">{total ? num(total, 2) : "—"}</td>
+                <td className="n mono">{total ? `${num(total, 2)} ${f.moneda || ""}` : "—"}</td>
                 <td><button className="btn" style={{ padding: "2px 9px", fontSize: 12 }}
                             onClick={() => quitar(i)}>✕</button></td>
               </tr>);
@@ -577,9 +597,12 @@ function AltaDividendo({ cartera, recargar }) {
       {msg && <div className={"aviso " + (msg.mal ? "mal" : "ok")}>{msg.mal || msg.ok}</div>}
       <div className="pie">
         Un dividendo <b>no toca la posición</b>: no suma papeles ni cambia el costo de nada.
-        Entra como resultado del día que se cobró y se convierte a dólares con el MEP de esa
-        fecha. Cargá todos los cobros juntos —de un papel o de varios— y se procesan de una
-        sola vez; cada línea nueva hereda el ticker y las acciones de la anterior.
+        Entra como resultado del día que se cobró y, si es en pesos, se convierte a dólares con
+        el MEP de esa fecha. Cargá todos los cobros juntos —de un papel o de varios— y se
+        procesan de una sola vez; cada línea nueva hereda el ticker, las acciones y la moneda
+        de la anterior. <b>Mirá la moneda</b>: se propone la del papel, pero un CEDEAR D cotiza
+        en dólares y su dividendo suele acreditarse en pesos. Si dice USD y cargaste pesos, el
+        importe queda multiplicado por el MEP.
       </div>
     </div>
   );

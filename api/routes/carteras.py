@@ -90,12 +90,24 @@ def _armar_dividendo(c: dict) -> dict:
     # `por_accion` distingue las dos formas de tenerlo anotado: el dividendo
     # unitario que publica la empresa, o el total que entró a la cuenta.
     unitario = importe if c.get("por_accion") else importe / qty
-    return {"ticker": ticker, "tipo": "dividendo",
-            "buy_date": fecha, "sell_date": fecha,
-            "buy_price": 0.0, "sell_price": round(unitario, 6), "qty": qty,
-            "buy_comm": 0.0, "sell_comm": comision,
-            "pnl": round(qty * unitario - comision, 4),
-            "notes": (c.get("notes") or "").strip()}
+
+    # La moneda del cobro NO se deduce del ticker. Un CEDEAR D cotiza en
+    # dólares, pero su dividendo suele acreditarse en pesos: dar por sentado que
+    # un dividendo de TSMD.BA viene en dólares multiplica el importe por el MEP.
+    # Se guarda dicha, y solo si no viene se usa la convención del ticker.
+    moneda = (c.get("moneda") or "").strip().upper()
+    if moneda not in ("ARS", "USD"):
+        moneda = None
+
+    trade = {"ticker": ticker, "tipo": "dividendo",
+             "buy_date": fecha, "sell_date": fecha,
+             "buy_price": 0.0, "sell_price": round(unitario, 6), "qty": qty,
+             "buy_comm": 0.0, "sell_comm": comision,
+             "pnl": round(qty * unitario - comision, 4),
+             "notes": (c.get("notes") or "").strip()}
+    if moneda:
+        trade["moneda"] = moneda
+    return trade
 
 
 @bp.post("/<nombre>/dividendo")

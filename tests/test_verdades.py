@@ -474,6 +474,26 @@ def test_ida_y_vuelta_del_csv_no_pierde_nada():
             assert casi(a[k], b[k], 1e-9), f"{k}: {a[k]} != {b[k]}"
 
 
+def test_la_moneda_del_dividendo_manda_sobre_la_del_ticker():
+    """Un CEDEAR D cotiza en dólares y su dividendo se acredita en pesos.
+
+    TSMD.BA vale dólares, así que la convención del ticker diría USD. Si el
+    cobro fue en pesos y el registro lo dice, se convierte con el MEP: dar por
+    sentada la moneda del papel multiplica el importe por mil quinientos.
+    """
+    pnl_realizado = require("core.models.portfolio", "pnl_realizado")
+    base = {"ticker": "TSMD.BA", "tipo": "dividendo",
+            "buy_date": "2025-06-20", "sell_date": "2025-06-20",
+            "buy_price": 0.0, "sell_price": 1000.0, "qty": 10.0,
+            "buy_comm": 0.0, "sell_comm": 0.0, "pnl": 10000.0}
+
+    sin_moneda = pnl_realizado([base])["total_usd"]
+    en_pesos = pnl_realizado([{**base, "moneda": "ARS"}])["total_usd"]
+    assert casi(sin_moneda, 10000.0), "sin dato explícito vale la convención del ticker (USD)"
+    assert en_pesos < sin_moneda / 100, \
+        f"declarado en pesos tiene que pasar por el MEP: {en_pesos} vs {sin_moneda}"
+
+
 def test_el_csv_propio_lleva_dividendos_y_cerradas():
     """Exportar es respaldar TODO: si no, cada reimportación pierde lo cargado a mano.
 

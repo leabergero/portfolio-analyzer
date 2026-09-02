@@ -149,7 +149,10 @@ def pnl_realizado(trades) -> dict:
     por_moneda = {}
     for t in trades:
         ticker = t["ticker"].upper()
-        moneda = sources.ticker_currency(ticker)
+        # Una moneda guardada en el registro manda sobre la convención del
+        # ticker: el dividendo de un CEDEAR D se cobra en pesos aunque el papel
+        # cotice en dólares, y quien lo cargó es el único que sabe cuál fue.
+        moneda = (t.get("moneda") or sources.ticker_currency(ticker)).upper()
         div = 100.0 if sources.is_bond(ticker) else 1.0
         compra, venta = t["buy_price"] / div, t["sell_price"] / div
         c_compra, c_venta = t.get("buy_comm", 0) / div, t.get("sell_comm", 0) / div
