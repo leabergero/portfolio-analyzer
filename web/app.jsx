@@ -420,6 +420,8 @@ function Posicion({ d, cartera, recargar, extras, bench }) {
           {d.sin_precio.join(", ")}. Los bonos y ONs necesitan Cocos conectado.
         </div>
       )}
+      {real?.n > 0 && <CalendarioRealizado real={real} />}
+
       <div className="panel">
         <h3>Tenencias
           <a className="btn" style={{ marginLeft: "auto", textDecoration: "none", fontSize: 12.5 }}
@@ -487,6 +489,72 @@ function Posicion({ d, cartera, recargar, extras, bench }) {
             : <Momentum d={extras.momentum} />)
         : <div className="cargando">Midiendo el momentum…</div>}
     </>
+  );
+}
+
+function CalendarioRealizado({ real }) {
+  const c = colores();
+  const trades = real.trades || [];
+  if (trades.length === 0) return null;
+
+  // Un punto por mes: lo que dejaron las ventas y, apilado encima, los
+  // dividendos. `barmode: "relative"` es lo que hace que en un mismo mes lo
+  // positivo crezca hacia arriba y lo negativo hacia abajo sin taparse.
+  const meses = {};
+  for (const t of trades) {
+    const m = (t.sell_date || "").slice(0, 7);
+    if (!m) continue;
+    const x = meses[m] || (meses[m] = { mes: m, ventas: 0, dividendos: 0 });
+    if (t.tipo === "dividendo") x.dividendos += t.pnl_usd;
+    else x.ventas += t.pnl_usd;
+  }
+  const filas = Object.values(meses).sort((a, b) => (a.mes < b.mes ? -1 : 1));
+  if (filas.length === 0) return null;
+
+  const x = filas.map((f) => f.mes + "-15");        // al medio del mes que representa
+  const conDividendos = filas.filter((f) => f.dividendos).length;
+  const total = filas.reduce((s, f) => s + f.ventas + f.dividendos, 0);
+  const mejor = filas.reduce((a, b) => (a.ventas + a.dividendos > b.ventas + b.dividendos ? a : b));
+  const peor = filas.reduce((a, b) => (a.ventas + a.dividendos < b.ventas + b.dividendos ? a : b));
+  const nombreMes = (m) => new Date(m + "-15T12:00:00")
+    .toLocaleDateString("es-AR", { month: "long", year: "numeric" });
+  const mesCorto = (fecha) => new Date(fecha + "T12:00:00")
+    .toLocaleDateString("es-AR", { month: "short", year: "2-digit" }).replace(".", "");
+
+  return (
+    <div className="panel">
+      <h3>Mes a mes</h3>
+      <Grafico alto={260}
+        datos={[
+          { type: "bar", name: "ventas", x, y: filas.map((f) => f.ventas),
+            marker: { color: filas.map((f) => (f.ventas >= 0 ? c.positivo : c.negativo)),
+                      line: { width: 0 } },
+            width: 18 * 86400000, text: filas.map((f) => nombreMes(f.mes)),
+            textposition: "none",
+            hovertemplate: "%{text}<br>ventas: %{y:$,.2f}<extra></extra>" },
+          { type: "bar", name: "dividendos", x, y: filas.map((f) => f.dividendos),
+            marker: { color: c.alerta, line: { width: 0 } },
+            width: 18 * 86400000, text: filas.map((f) => nombreMes(f.mes)),
+            textposition: "none",
+            hovertemplate: "%{text}<br>dividendos: %{y:$,.2f}<extra></extra>" },
+        ]}
+        layout={{ barmode: "relative", bargap: 0.35, margin: { t: 12, l: 62 },
+                  legend: { orientation: "h", y: -0.2, x: 0.5, xanchor: "center" },
+                  // Plotly rotula los meses en inglés y no trae el locale es en
+                  // el bundle: las etiquetas se arman acá, una cada tres meses
+                  // para que no se pisen por más años que acumule la cartera.
+                  xaxis: { type: "date", showgrid: false,
+                           tickvals: x.filter((_, i) => i % 3 === 0),
+                           ticktext: x.filter((_, i) => i % 3 === 0).map(mesCorto) },
+                  yaxis: { tickprefix: "$", zeroline: true, zerolinewidth: 1.4 } }} />
+      <div className="pie">
+        Cada barra es un mes: lo que dejaron las ventas y, apilado encima, los dividendos
+        cobrados{conDividendos ? ` (${conDividendos} de ${filas.length} meses tuvieron)` : ""}.
+        El mejor fue <b>{nombreMes(mejor.mes)}</b> con {usd(mejor.ventas + mejor.dividendos)} y
+        el peor <b>{nombreMes(peor.mes)}</b> con {usd(peor.ventas + peor.dividendos)}; los{" "}
+        {filas.length} meses suman {usd(total)}.
+      </div>
+    </div>
   );
 }
 
