@@ -80,7 +80,26 @@ _TRIMESTRALES = {3, 6, 9, 12}
 
 
 def _objetivo_yfinance(simbolo: str):
-    from core.data import sources
+    """Consenso de analistas de yfinance, cacheado 24 h.
+
+    Sin caché este era el modelo más lento de todos con diferencia: pide el
+    `.info` completo por cada ticker y por cada candidato, y con seis posiciones
+    tarda más que los otros diez modelos juntos. Un precio objetivo de analistas
+    se mueve de semana en semana, así que cachearlo un día no pierde nada.
+    """
+    from core.data import cache
+
+    clave = f"yf:target:{simbolo.upper()}"
+    guardado = cache.leer_respuesta(clave, 24, default="__falta__")
+    if guardado != "__falta__":
+        return guardado
+
+    r = _pedir_objetivo_yfinance(simbolo)
+    cache.guardar_respuesta(clave, r)
+    return r
+
+
+def _pedir_objetivo_yfinance(simbolo: str):
     try:
         import yfinance as yf
         info = yf.Ticker(simbolo).info or {}

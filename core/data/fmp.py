@@ -35,9 +35,26 @@ _TTL_HORAS = 24
 # segundo pide que el usuario haga algo.
 _ultimo_error = None
 
+# Cortacircuitos. Cuando la API contesta 429, dejar de preguntarle por un rato:
+# seguir insistiendo no devuelve la cuota y sí cuesta tiempo real. Con la cuota
+# agotada, un análisis de seis posiciones llegaba a hacer ~36 pedidos fallidos
+# en cadena — 16 s de espera para nada, y era el modelo más lento de todos.
+_CORTE_MINUTOS = 30
+_sin_cuota_desde = None
+
+
+def _en_corte() -> bool:
+    import time
+    if _sin_cuota_desde is None:
+        return False
+    if time.time() - _sin_cuota_desde > _CORTE_MINUTOS * 60:
+        return False
+    return True
+
 
 def habilitado() -> bool:
-    return bool(clave("fmp"))
+    """Hay key configurada y la cuota no está agotada."""
+    return bool(clave("fmp")) and not _en_corte()
 
 
 def _pedir(recurso: str, simbolo: str, key: str):
@@ -61,7 +78,10 @@ def _pedir(recurso: str, simbolo: str, key: str):
         return None
 
     if r.status_code == 429:
+        global _sin_cuota_desde
+        import time
         _ultimo_error = "cuota"
+        _sin_cuota_desde = time.time()    # corta el resto de los pedidos
         return None                       # NO se cachea: mañana vuelve a andar
     if r.status_code in (401, 403):
         _ultimo_error = "key"
@@ -90,9 +110,9 @@ def objetivo(simbolo: str):
     Devuelve la misma forma que el equivalente de yfinance, para que quien
     consume no tenga que saber de dónde vino más allá del campo `fuente`.
     """
-    key = clave("fmp")
-    if not key:
+    if not habilitado():
         return None
+    key = clave("fmp")
 
     cotizacion = _pedir("quote", simbolo, key)
     consenso = _pedir("price-target-consensus", simbolo, key)
@@ -138,6 +158,9 @@ def estado() -> dict:
     """
     if not clave("fmp"):
         return {"conectado": False, "detalle": "sin API key"}
+    if _en_corte():
+        return {"conectado": False, "motivo": "cuota",
+                "detalle": _DIAGNOSTICO["cuota"]}
     if objetivo("AAPL"):
         return {"conectado": True,
                 "detalle": "precios objetivo de EE.UU. disponibles "
