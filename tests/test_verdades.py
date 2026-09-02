@@ -158,6 +158,57 @@ def test_soberano_agrega_d_al_final():
     assert d_ticker("GD35") == "GD35D"
 
 
+def test_bono_a_la_par_rinde_su_cupon():
+    """Precio limpio 100 → TIR ≈ tasa de cupón. Cualquier día del período.
+
+    Es el invariante clásico de renta fija y el que detecta casi todos los
+    errores posibles: base equivocada, interés corrido mal, conteo de días roto.
+    Se prueba a mitad de período a propósito, porque el día del cupón se cumple
+    incluso con la base mal.
+    """
+    from datetime import date, timedelta
+    analizar_bono, especie = require("core.models.bonds", "analizar_bono", "especie")
+    for ticker, cupon_base in (("AL30", date(2027, 1, 1)), ("AN29", date(2026, 11, 30))):
+        cupon = especie(ticker)["coupon_rate"]
+        for dias in (0, 91, 166):
+            liq = cupon_base + timedelta(days=dias)
+            tir = analizar_bono(ticker, 100.0, liq)["tir_pct"]
+            assert abs(tir - cupon) < 0.15, (
+                f"{ticker} a la par el día +{dias}: TIR {tir:.3f} % vs cupón {cupon} %")
+
+
+def test_amortizante_usa_nominal_residual():
+    """Los flujos de un bono que ya amortizó van por 100 de nominal RESIDUAL.
+
+    Bug encontrado el 2026-09-02, presente también en Terminal Financiera: se
+    comparaban flujos por 100 nominales ORIGINALES contra un precio expresado
+    por 100 residuales. Para el AL30 a 68 daba 0,587 % de TIR en vez de un
+    rendimiento de dos dígitos.
+
+    Nunca se detectó porque las TIR se validaron con el AN29, que es bullet: su
+    residual es siempre 100 y ahí la distinción no existe.
+    """
+    nominal_residual, flujos, analizar_bono = require(
+        "core.models.bonds", "nominal_residual", "flujos", "analizar_bono")
+
+    residual = nominal_residual("AL30")
+    assert residual < 100, "el AL30 ya amortizó: su residual no puede ser 100"
+
+    # Por 100 residuales, el capital que queda por cobrar es 100.
+    total = sum(m for _, m in flujos("AL30"))
+    assert total > 100, f"los flujos suman {total:.2f}: menos de 100 significa base equivocada"
+
+    # Y el rendimiento tiene que ser el de un bono argentino, no ~0.
+    tir = analizar_bono("AL30", 68.0)["tir_pct"]
+    assert tir > 5.0, f"AL30 a 68 rinde {tir:.3f} %; con la base mal daba 0,587 %"
+
+
+def test_bullet_no_amortiza_antes_del_vencimiento():
+    """Contraparte: un bullet tiene residual 100 hasta el final."""
+    nominal_residual = require("core.models.bonds", "nominal_residual")
+    assert nominal_residual("AN29") == 100.0
+
+
 # ══════════════════════════════════════════════════════════════════════════
 #  SUBYACENTES — colisiones de tickers cortos
 # ══════════════════════════════════════════════════════════════════════════
