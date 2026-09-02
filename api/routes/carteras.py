@@ -74,10 +74,8 @@ def importar(nombre):
                     "dividendos": sum(1 for t in realizadas if t.get("tipo") == "dividendo")})
 
 
-@bp.post("/<nombre>/dividendo")
-def dividendo(nombre):
-    """Registra un dividendo cobrado. No toca la posición: es resultado, no compra."""
-    c = request.json or {}
+def _armar_dividendo(c: dict) -> dict:
+    """Una fila de dividendo, o un error explicando qué le falta."""
     ticker = (c.get("ticker") or "").strip().upper()
     fecha = csv_native.normalizar_fecha(c.get("fecha") or "")
     try:
@@ -85,23 +83,45 @@ def dividendo(nombre):
         qty = float(c.get("qty") or 0) or 1.0
         comision = float(c.get("comision") or 0)
     except (TypeError, ValueError):
-        return jsonify({"error": "El importe y la cantidad tienen que ser números."}), 400
+        return {"error": "El importe y la cantidad tienen que ser números."}
     if not ticker or not fecha or importe <= 0:
-        return jsonify({"error": "Hacen falta ticker, fecha e importe."}), 400
+        return {"error": "Hacen falta ticker, fecha e importe."}
 
     # `por_accion` distingue las dos formas de tenerlo anotado: el dividendo
     # unitario que publica la empresa, o el total que entró a la cuenta.
     unitario = importe if c.get("por_accion") else importe / qty
-    trade = {"ticker": ticker, "tipo": "dividendo",
-             "buy_date": fecha, "sell_date": fecha,
-             "buy_price": 0.0, "sell_price": round(unitario, 6), "qty": qty,
-             "buy_comm": 0.0, "sell_comm": comision,
-             "pnl": round(qty * unitario - comision, 4),
-             "notes": (c.get("notes") or "").strip()}
-    r = store.agregar_realizado(nombre, [trade])
+    return {"ticker": ticker, "tipo": "dividendo",
+            "buy_date": fecha, "sell_date": fecha,
+            "buy_price": 0.0, "sell_price": round(unitario, 6), "qty": qty,
+            "buy_comm": 0.0, "sell_comm": comision,
+            "pnl": round(qty * unitario - comision, 4),
+            "notes": (c.get("notes") or "").strip()}
+
+
+@bp.post("/<nombre>/dividendo")
+def dividendo(nombre):
+    """Registra dividendos cobrados. No tocan la posición: son resultado, no compra.
+
+    Acepta una fila suelta o una lista: quien tiene seis cobros de un papel los
+    carga de una vez en vez de repetir el formulario seis veces.
+    """
+    cuerpo = request.json or {}
+    filas = cuerpo if isinstance(cuerpo, list) else cuerpo.get("dividendos") or [cuerpo]
+
+    trades, errores = [], []
+    for i, c in enumerate(filas):
+        armado = _armar_dividendo(c)
+        (errores if "error" in armado else trades).append(
+            {"fila": i + 1, **armado} if "error" in armado else armado)
+    if not trades:
+        return jsonify({"error": errores[0]["error"] if errores
+                        else "No se envió ningún dividendo.", "errores": errores}), 400
+
+    r = store.agregar_realizado(nombre, trades)
     if not r["agregados"]:
-        return jsonify({"error": "Ese dividendo ya estaba registrado."}), 409
-    return jsonify({"ok": True, "trade": trade, **r})
+        return jsonify({"error": "Esos dividendos ya estaban registrados."}), 409
+    return jsonify({"ok": True, "trades": trades, "errores": errores,
+                    "importe_total": round(sum(t["pnl"] for t in trades), 2), **r})
 
 
 @bp.delete("/<nombre>/realizado")

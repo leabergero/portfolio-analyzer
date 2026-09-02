@@ -491,56 +491,95 @@ function Posicion({ d, cartera, recargar, extras, bench }) {
 }
 
 function AltaDividendo({ cartera, recargar }) {
-  const vacio = { ticker: "", fecha: new Date().toISOString().slice(0, 10),
-                  importe: "", qty: "", por_accion: true, notes: "" };
-  const [f, setF] = useState(vacio);
+  const linea = (base) => ({ ticker: base?.ticker || "", fecha: "", importe: "",
+                             qty: base?.qty || "", por_accion: base?.por_accion ?? true });
+  const [filas, setFilas] = useState([linea()]);
   const [msg, setMsg] = useState(null);
   const [abierto, setAbierto] = useState(false);
-  const set = (k, v) => setF((x) => ({ ...x, [k]: v }));
+  const set = (i, k, v) => setFilas((f) => f.map((x, j) => (j === i ? { ...x, [k]: v } : x)));
+  // La fila nueva hereda ticker, cantidad y modo de la anterior: seis cobros de
+  // un mismo papel se cargan cambiando nada más que la fecha y el importe.
+  const sumar = () => setFilas((f) => [...f, linea(f[f.length - 1])]);
+  const quitar = (i) => setFilas((f) => (f.length === 1 ? [linea()] : f.filter((_, j) => j !== i)));
+
+  const completas = filas.filter((f) => f.ticker && f.fecha && f.importe);
 
   const guardar = async () => {
     const r = await api(`/api/carteras/${encodeURIComponent(cartera)}/dividendo`, {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(f) });
+      body: JSON.stringify({ dividendos: completas }) });
     if (r.error) { setMsg({ mal: r.error }); return; }
-    setMsg({ ok: `Registrado: ${num(r.trade.pnl, 2)} de ${r.trade.ticker}.` });
-    setF({ ...vacio, ticker: f.ticker });
+    setMsg({ ok: `${r.agregados} ${r.agregados === 1 ? "dividendo registrado" : "dividendos registrados"}` +
+                 `, ${num(r.importe_total, 2)} en total.` +
+                 (r.agregados < completas.length
+                   ? ` ${completas.length - r.agregados} ya estaban cargados.` : "") });
+    setFilas([linea(filas[filas.length - 1])]);
     recargar && recargar();
   };
 
   if (!abierto) return (
     <button className="btn" style={{ marginTop: 10 }} onClick={() => setAbierto(true)}>
-      + Registrar un dividendo</button>);
+      + Registrar dividendos</button>);
 
   return (
     <div className="panel" style={{ background: "var(--panel-2)", marginTop: 10 }}>
-      <h3>Dividendo cobrado
+      <h3>Dividendos cobrados
         <button className="btn" style={{ marginLeft: "auto", padding: "3px 10px", fontSize: 12 }}
                 onClick={() => setAbierto(false)}>Cerrar</button>
       </h3>
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end",
-                    marginTop: 10 }}>
-        {[["ticker", "Ticker", 120], ["fecha", "Fecha de cobro", 140],
-          ["importe", "Importe", 120], ["qty", "Acciones", 110]].map(([k, et, w]) => (
-          <label key={k} style={{ fontSize: 11.5, color: "var(--texto-3)" }}>{et}<br />
-            <input type={k === "fecha" ? "date" : k === "ticker" ? "text" : "number"}
-                   value={f[k]} style={{ width: w, marginTop: 3 }}
-                   onChange={(e) => set(k, k === "ticker" ? e.target.value.toUpperCase()
-                                                          : e.target.value)} /></label>))}
-        <div className="modos" style={{ marginBottom: 1 }}>
-          {[[true, "por acción"], [false, "importe total"]].map(([k, txt]) => (
-            <button key={String(k)} className={"modo" + (f.por_accion === k ? " on" : "")}
-                    onClick={() => set("por_accion", k)}>{txt}</button>))}
-        </div>
-        <button className="btn primario" onClick={guardar}
-                disabled={!f.ticker || !f.importe}>Registrar</button>
+      <div className="tabla-wrap"><table>
+        <thead><tr><th>Ticker</th><th>Fecha de cobro</th><th className="n">Importe</th>
+          <th>El importe es</th><th className="n">Acciones</th>
+          <th className="n">Resultado</th><th></th></tr></thead>
+        <tbody>
+          {filas.map((f, i) => {
+            const qty = parseFloat(f.qty) || 1;
+            const imp = parseFloat(f.importe) || 0;
+            const total = f.por_accion ? qty * imp : imp;
+            return (
+              <tr key={i}>
+                <td><input type="text" value={f.ticker} style={{ width: 110 }}
+                           placeholder="METR.BA"
+                           onChange={(e) => set(i, "ticker", e.target.value.toUpperCase())} /></td>
+                <td><input type="date" value={f.fecha} style={{ width: 140 }}
+                           onChange={(e) => set(i, "fecha", e.target.value)} /></td>
+                <td><input type="number" step="0.0001" value={f.importe} style={{ width: 110 }}
+                           onChange={(e) => set(i, "importe", e.target.value)} /></td>
+                <td>
+                  <select value={f.por_accion ? "unit" : "total"} style={{ width: 130 }}
+                          onChange={(e) => set(i, "por_accion", e.target.value === "unit")}>
+                    <option value="unit">por acción</option>
+                    <option value="total">el total cobrado</option>
+                  </select>
+                </td>
+                <td><input type="number" value={f.qty} style={{ width: 100 }}
+                           disabled={!f.por_accion} placeholder={f.por_accion ? "" : "—"}
+                           onChange={(e) => set(i, "qty", e.target.value)} /></td>
+                <td className="n mono">{total ? num(total, 2) : "—"}</td>
+                <td><button className="btn" style={{ padding: "2px 9px", fontSize: 12 }}
+                            onClick={() => quitar(i)}>✕</button></td>
+              </tr>);
+          })}
+        </tbody>
+      </table></div>
+      <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 10 }}>
+        <button className="btn" onClick={sumar}>+ Otra línea</button>
+        <button className="btn primario" onClick={guardar} disabled={completas.length === 0}>
+          Registrar {completas.length || ""} {completas.length === 1 ? "dividendo" : "dividendos"}
+        </button>
+        {completas.length > 0 && (
+          <span className="mono" style={{ marginLeft: "auto", fontSize: 13.5 }}>
+            {num(completas.reduce((s, f) => s + (f.por_accion
+              ? (parseFloat(f.qty) || 1) * (parseFloat(f.importe) || 0)
+              : parseFloat(f.importe) || 0), 0), 2)} en total
+          </span>)}
       </div>
       {msg && <div className={"aviso " + (msg.mal ? "mal" : "ok")}>{msg.mal || msg.ok}</div>}
       <div className="pie">
         Un dividendo <b>no toca la posición</b>: no suma papeles ni cambia el costo de nada.
         Entra como resultado del día que se cobró y se convierte a dólares con el MEP de esa
-        fecha. Si tenés anotado el total que entró a la cuenta en vez del dividendo por acción,
-        cambiá a <b>importe total</b> y dejá las acciones en blanco.
+        fecha. Cargá todos los cobros juntos —de un papel o de varios— y se procesan de una
+        sola vez; cada línea nueva hereda el ticker y las acciones de la anterior.
       </div>
     </div>
   );
