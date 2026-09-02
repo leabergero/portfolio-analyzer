@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+.venv/
+.ruff_cache/
+
+# Datos regenerables — la caché de mercado se reconstruye sola
+data/*.db
+data/*.json
+!data/.gitkeep
+
+# Credenciales — NUNCA versionar
+connectors.json
+*.enc
+.env
+
+# Frontend compilado (se genera desde web/app.jsx)
+web/app.js

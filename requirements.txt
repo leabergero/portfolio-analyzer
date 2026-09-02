@@ -1,0 +1,21 @@
+# Núcleo — fases 1 a 4
+flask>=3.0.0
+flask-cors>=4.0.0
+pandas>=2.0.0
+numpy>=1.26.0
+scipy>=1.11.0
+requests>=2.31.0
+
+# Fuentes de mercado
+yfinance>=0.2.40
+pycocos                                              # bonos, ONs, letras
+pyobd @ git+https://github.com/franco-lamas/PyOBD.git  # BYMA histórico
+
+# Vault de credenciales (AES-256-GCM)
+cryptography>=41.0
+
+# Fase 5 — reporte PDF
+matplotlib>=3.8.0
+
+# Propuestas, ver docs/PENDIENTES.md — no instalar hasta que se usen de verdad:
+#   hmmlearn>=0.3.0    regímenes con HMM real (hoy es un umbral de volatilidad)
