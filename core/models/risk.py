@@ -211,6 +211,8 @@ def analizar(posiciones, benchmark: str = "SP500") -> dict:
     for i, t in enumerate(tickers):
         contribuciones[i]["ticker"] = t
 
+    distribucion = _ajustar_distribucion(cartera, var95, var99)
+
     return {
         "tickers": tickers,
         "pesos": [round(float(x) * 100, 2) for x in w],
@@ -236,12 +238,86 @@ def analizar(posiciones, benchmark: str = "SP500") -> dict:
 
         "asimetria": round(float(stats.skew(cartera)), 3),
         "curtosis_exceso": round(float(stats.kurtosis(cartera)), 3),
+        "distribucion": distribucion,
 
         "contribucion_riesgo": sorted(contribuciones,
                                       key=lambda x: -(x["riesgo_pct"] or 0)),
         "rf": round(rf, 4),
         "rf_label": rf_label,
         "moneda": "USD",
+    }
+
+
+def _ajustar_distribucion(retornos, var95: float, var99: float) -> dict:
+    """Histograma de los retornos diarios contra las dos curvas teóricas.
+
+    Se ajustan **normal y t de Student**, y se decide cuál describe mejor los
+    datos con un test de Kolmogórov-Smirnov. La comparación no es académica: si
+    gana la t —que es lo habitual con estos activos— significa que los días
+    extremos ocurren más seguido de lo que cualquier modelo normal supone, y
+    todo VaR calculado con la campana está subestimado.
+
+    Cada barra se etiqueta por zona para poder pintarla: la pérdida grave, la
+    cola de dos sigmas, y el centro de la distribución.
+    """
+    r = np.asarray(retornos, dtype=float)
+    if r.size < 60:
+        return {}
+
+    conteo, bordes = np.histogram(r, bins=60)
+    centros = (bordes[:-1] + bordes[1:]) / 2
+    ancho = float(centros[1] - centros[0]) if len(centros) > 1 else 1.0
+    escala = r.size * ancho
+    mu, sigma = float(r.mean()), float(r.std(ddof=1))
+
+    normal = stats.norm.pdf(centros, mu, sigma) * escala
+    try:
+        gl, loc, esc = stats.t.fit(r)
+        t_pdf = stats.t.pdf(centros, gl, loc, esc) * escala
+        # kstest con `args` sobre la t falla en esta versión de scipy
+        # (ndtr recibe tres posicionales). Pasarle la CDF ya evaluada evita
+        # depender de esa firma.
+        ks_n = stats.kstest(r, lambda x: stats.norm.cdf(x, mu, sigma)).statistic
+        ks_t = stats.kstest(r, lambda x: stats.t.cdf(x, gl, loc, esc)).statistic
+        mejor = "t-student" if ks_t <= ks_n else "normal"
+    except Exception as e:
+        print(f"  [riesgo] ajuste t falló: {type(e).__name__}: {e}")
+        t_pdf, gl, mejor = np.zeros_like(centros), None, "normal"
+
+    zonas = ["grave" if x <= var99 else "mala" if x <= var95
+             else "extrema" if abs(x - mu) > 2 * sigma else "normal"
+             for x in centros]
+
+    # Dónde se ven de verdad las colas gordas. Medirlo en el cuantil 5 % engaña:
+    # ahí la normal SOBRESTIMA la frecuencia de días malos, porque una
+    # distribución leptocúrtica es más angosta en los hombros aunque tenga más
+    # cola. El exceso aparece en los extremos, y ahí es donde hay que mirarlo.
+    extremos = []
+    for k in (2, 3, 4):
+        umbral = mu - k * sigma
+        observados_k = int((r <= umbral).sum())
+        esperados_k = float(stats.norm.cdf(-k) * r.size)
+        extremos.append({
+            "sigmas": k,
+            "umbral_pct": round(umbral * 100, 3),
+            "observados": observados_k,
+            "si_fuera_normal": round(esperados_k, 2),
+            "veces": round(observados_k / esperados_k, 1) if esperados_k > 0.01 else None,
+        })
+
+    return {
+        "x": [round(float(v) * 100, 3) for v in centros],
+        "y": [int(c) for c in conteo],
+        "zonas": zonas,
+        "normal": [round(float(v), 2) for v in normal],
+        "tstudent": [round(float(v), 2) for v in t_pdf],
+        "grados_libertad": round(float(gl), 2) if gl else None,
+        "mejor_ajuste": mejor,
+        "media_pct": round(mu * 100, 4),
+        "sigma_pct": round(sigma * 100, 3),
+        "dos_sigma_pct": [round((mu - 2 * sigma) * 100, 3), round((mu + 2 * sigma) * 100, 3)],
+        "extremos": extremos,
+        "n_dias": int(r.size),
     }
 
 

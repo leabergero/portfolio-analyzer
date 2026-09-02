@@ -188,8 +188,12 @@ function Barra({ modo, setModo, tema, setTema, carteras, cartera, setCartera }) 
 // Stress y Momentum viven DENTRO de Riesgo, y Black-Litterman debajo de
 // Objetivos: son lecturas de lo mismo y separarlas obligaba a saltar de pestaña
 // para responder una sola pregunta.
+// Posición es el resumen rápido de la cartera y absorbe todo lo que responde
+// "qué tengo y cómo se comporta": KPIs de riesgo, tenencias, composición,
+// correlaciones, distribución de retornos y momentum. Riesgo queda solo con lo
+// que profundiza. Menos pestañas, y cada una con una pregunta entera adentro.
 const PESTANAS = [
-  ["posicion", "Posición"], ["composicion", "Composición"], ["riesgo", "Riesgo"],
+  ["posicion", "Posición"], ["riesgo", "Riesgo"],
   ["markowitz", "Markowitz"], ["montecarlo", "Monte Carlo"], ["capm", "Benchmark"],
   ["objetivos", "Objetivos"], ["regimenes", "Regímenes"],
 ];
@@ -266,10 +270,10 @@ function Panel({ tab, R, M, cartera, bench, recargar }) {
   if (d.error) return <div className="aviso mal"><b>No se pudo calcular.</b> {d.error}</div>;
 
   const vistas = {
-    posicion: <Posicion d={{ ...d, cartera_nombre: cartera }} cartera={cartera} recargar={recargar} />,
-    composicion: <Composicion d={d} />,
-    riesgo: <Riesgo d={d} cartera={cartera}
-                    extras={{ stress: R.stress, momentum: R.momentum }} />,
+    posicion: <Posicion d={{ ...d, cartera_nombre: cartera }} cartera={cartera}
+                        recargar={recargar} extras={{ composicion: R.composicion,
+                        riesgo: R.riesgo, momentum: R.momentum }} />,
+    riesgo: <Riesgo d={d} cartera={cartera} extras={{ stress: R.stress }} />,
     markowitz: <Markowitz d={d} cartera={cartera} bench={bench} />,
     montecarlo: <MonteCarlo d={d} cartera={cartera} />,
     capm: <Capm d={d} cartera={cartera} bench={bench} />,
@@ -358,11 +362,19 @@ function AltaRapida({ cartera, recargar }) {
   );
 }
 
-function Posicion({ d, cartera, recargar }) {
+function Posicion({ d, cartera, recargar, extras }) {
   const filas = d.posiciones || [];
+  const [corr, setCorr] = useState(null);
+  const r = extras?.riesgo;
+  useEffect(() => { setCorr(null);
+    api(`/api/correlaciones/${encodeURIComponent(cartera)}`).then(setCorr); }, [cartera]);
+
   return (
     <>
-      <AltaRapida cartera={cartera} recargar={recargar} />
+      {/* 1 · Cómo se comporta la cartera, antes que el detalle de qué tiene */}
+      {r && !r.error && <KpisRiesgo d={r} />}
+
+      {/* 2 · Qué tengo */}
       <div className="kpis">
         <Kpi etiqueta="Valor total" valor={usd(d.valor_total)} ayuda={AYUDA.valor}
              sub={d.mep_hoy ? `MEP $${d.mep_hoy}` : null} />
@@ -371,6 +383,7 @@ function Posicion({ d, cartera, recargar }) {
              sub={pct(d.pnl_pct)} />
         <Kpi etiqueta="Posiciones" valor={filas.length} sub={`${new Set(filas.map(f=>f.ticker)).size} activos`} />
       </div>
+      <AltaRapida cartera={cartera} recargar={recargar} />
       {d.sin_precio?.length > 0 && (
         <div className="aviso ojo">
           <b>{d.sin_precio.length} posiciones sin precio</b> y quedaron fuera del total:{" "}
@@ -405,6 +418,163 @@ function Posicion({ d, cartera, recargar }) {
           Cada lote se valuó con el precio de hoy, y su costo con el dólar MEP del día
           en que lo compraste. Convertir una compra vieja al dólar de hoy mediría el tipo
           de cambio, no el rendimiento del activo.
+        </div>
+      </div>
+
+      {/* 3 · En qué está invertida */}
+      <Seccion titulo="En qué está invertida" />
+      {extras?.composicion
+        ? (extras.composicion.error
+            ? <div className="aviso mal">{extras.composicion.error}</div>
+            : <Composicion d={extras.composicion} />)
+        : <div className="cargando">Clasificando los activos…</div>}
+
+      {/* 4 · Se mueven juntos o no */}
+      <Seccion titulo="¿Se mueven juntos?" />
+      {corr ? (corr.error ? <div className="aviso mal">{corr.error}</div>
+                          : <MatrizCorrelaciones corr={corr} />)
+            : <div className="cargando">Calculando correlaciones…</div>}
+
+      {/* 5 · Cómo son los días */}
+      <Seccion titulo="Cómo son los días de esta cartera" />
+      {r && !r.error ? <Distribucion d={r} /> : <div className="cargando">Calculando…</div>}
+
+      {/* 6 · Es momento de entrar o esperar */}
+      <Seccion titulo="¿Viento a favor o en contra?" />
+      {extras?.momentum
+        ? (extras.momentum.error
+            ? <div className="aviso mal">{extras.momentum.error}</div>
+            : <Momentum d={extras.momentum} />)
+        : <div className="cargando">Midiendo el momentum…</div>}
+    </>
+  );
+}
+
+function Seccion({ titulo }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 12, margin: "26px 0 12px" }}>
+      <h3 style={{ margin: 0, fontSize: 16.5, whiteSpace: "nowrap" }}>{titulo}</h3>
+      <div style={{ flex: 1, height: 1, background: "var(--borde)" }} />
+    </div>
+  );
+}
+
+/* Distribución de retornos diarios, con las dos curvas teóricas y las barras
+   pintadas por zona. Reemplaza a la versión que se armaba en el cliente: los
+   ajustes salen del backend, que es donde está scipy. */
+function Distribucion({ d }) {
+  const c = colores();
+  const dist = d.distribucion;
+  if (!dist || !dist.x) return <div className="aviso ojo">Sin datos suficientes para la distribución.</div>;
+
+  const colorZona = { grave: c.negativo, mala: c.alerta,
+                      extrema: c.series[1], normal: c.series[2] };
+  const ganaT = dist.mejor_ajuste === "t-student";
+  const peor = dist.extremos?.find((e) => e.sigmas === 4) || dist.extremos?.[dist.extremos.length - 1];
+
+  const linea = (x, color, ancho = 1.6) => ({
+    type: "line", x0: x, x1: x, yref: "paper", y0: 0, y1: 0.93,
+    line: { color, width: ancho, dash: "dash" } });
+
+  return (
+    <>
+      <div className="panel">
+        <h3>Distribución de los retornos diarios
+          <span className={"chip " + (ganaT ? "ojo" : "ok")} style={{ marginLeft: 8 }}>
+            se ajusta mejor a {dist.mejor_ajuste}</span>
+        </h3>
+        <Grafico alto={400}
+          datos={[
+            { type: "bar", x: dist.x, y: dist.y, name: "días que pasaron",
+              marker: { color: dist.zonas.map((z) => colorZona[z]), opacity: 0.85 },
+              hovertemplate: "%{x:.2f} %: %{y} días<extra></extra>" },
+            { type: "scatter", mode: "lines", x: dist.x, y: dist.normal,
+              name: "si fuera una campana normal",
+              line: { color: c.texto3, width: 2, dash: "dot" } },
+            ...(dist.grados_libertad ? [{ type: "scatter", mode: "lines", x: dist.x,
+              y: dist.tstudent, name: `t de Student (ν = ${dist.grados_libertad})`,
+              line: { color: c.acento, width: 2.4 } }] : []),
+          ]}
+          layout={{
+            bargap: 0.02,
+            xaxis: { title: "Retorno de un día", ticksuffix: " %" },
+            yaxis: { title: "Cantidad de días" },
+            shapes: [linea(d.var95_pct, c.alerta), linea(d.var99_pct, c.negativo),
+                     linea(dist.media_pct, c.texto3, 1)],
+            annotations: [
+              { x: d.var95_pct, y: 1, yref: "paper", text: "día malo", showarrow: false,
+                font: { size: 10, color: c.alerta }, yanchor: "bottom" },
+              { x: d.var99_pct, y: 1, yref: "paper", text: "1 de cada 100", showarrow: false,
+                font: { size: 10, color: c.negativo }, yanchor: "bottom" },
+              { x: dist.media_pct, y: 1, yref: "paper", text: "día promedio", showarrow: false,
+                font: { size: 10, color: c.texto3 }, yanchor: "bottom" }] }} />
+        <div className="pie">
+          Cada barra es la cantidad de ruedas que terminaron con ese retorno, sobre{" "}
+          {dist.n_dias} días. En <span style={{ color: c.negativo }}>rojo</span> las pérdidas
+          graves, en <span style={{ color: c.alerta }}>ámbar</span> los días malos, en{" "}
+          <span style={{ color: c.series[1] }}>dorado</span> lo que se aparta más de dos
+          desvíos, y en <span style={{ color: c.series[2] }}>azul</span> el comportamiento
+          habitual. Día promedio {pct(dist.media_pct, 3)}, desvío {pct(dist.sigma_pct)}.
+        </div>
+      </div>
+
+      <div className="fila f2">
+        <div className="panel">
+          <h3>Los días extremos pasan más seguido de lo que un modelo normal supone</h3>
+          <div className="tabla-wrap"><table>
+            <thead><tr><th>Días peores que</th><th className="n">Umbral</th>
+              <th className="n">Pasaron</th><th className="n">Si fuera normal</th>
+              <th className="n">Exceso</th></tr></thead>
+            <tbody>{(dist.extremos || []).map((e) => (
+              <tr key={e.sigmas}>
+                <td>−{e.sigmas} desvíos</td>
+                <td className="n neg">{pct(e.umbral_pct)}</td>
+                <td className="n">{e.observados}</td>
+                <td className="n">{e.si_fuera_normal}</td>
+                <td className={"n " + (e.veces > 1.5 ? "neg" : "")}>
+                  {e.veces == null ? "—" : `${e.veces}×`}</td>
+              </tr>))}</tbody>
+          </table></div>
+          <div className="pie">
+            A dos desvíos la campana acierta. Es <b>más allá</b> donde se rompe:
+            {peor && peor.veces > 1 && <> los días peores que −{peor.sigmas} desvíos pasaron{" "}
+              <b>{peor.veces} veces más seguido</b> de lo que predice.</>}{" "}
+            Por eso el VaR calculado con la campana subestima el escenario grave, y por eso
+            se muestra también el de Cornish-Fisher.
+          </div>
+        </div>
+
+        <div className="panel">
+          <h3>La forma de la distribución</h3>
+          <div className="kpis" style={{ gridTemplateColumns: "1fr 1fr" }}>
+            <Kpi etiqueta="Asimetría" valor={num(d.asimetria, 3)}
+                 tono={d.asimetria < -0.3 ? "neg" : d.asimetria > 0.3 ? "pos" : ""}
+                 ayuda={{ que: "Asimetría",
+                          como: "Hacia qué lado se estira la distribución. Negativa: las caídas grandes son más frecuentes que las subas grandes.",
+                          umbral: "Cerca de 0 es simétrica. Por debajo de −0,5 hay sesgo claro a pérdidas." }} />
+            <Kpi etiqueta="Curtosis" valor={num(d.curtosis_exceso, 2)} sub="en exceso"
+                 tono={d.curtosis_exceso > 3 ? "neg" : ""} ayuda={AYUDA.curtosis} />
+          </div>
+          <div className={"aviso " + (d.asimetria < -0.3 ? "ojo" : "")}>
+            {d.asimetria < -0.3
+              ? "La cola izquierda es más larga: cuando esta cartera se mueve fuerte, tiende a ser para abajo."
+              : d.asimetria > 0.3
+              ? "La cola derecha es más larga: los movimientos fuertes tienden a ser al alza."
+              : "La distribución es bastante simétrica: subidas y bajadas grandes son igual de frecuentes."}
+          </div>
+          <div className={"aviso " + (d.curtosis_exceso > 3 ? "mal" : "ok")}>
+            {d.curtosis_exceso > 3
+              ? `Curtosis en exceso de ${num(d.curtosis_exceso, 1)}: hay colas gordas. Los días
+                 excepcionales —buenos y malos— pasan mucho más seguido de lo que supone
+                 cualquier modelo basado en la campana normal.`
+              : "Curtosis moderada: los movimientos extremos no son más frecuentes de lo esperable."}
+          </div>
+          {ganaT && (
+            <div className="pie">
+              El test de Kolmogórov-Smirnov elige la <b>t de Student con {dist.grados_libertad} grados
+              de libertad</b> por sobre la normal. Menos grados de libertad = colas más gordas;
+              por debajo de 5 la diferencia con la campana ya es grande.
+            </div>)}
         </div>
       </div>
     </>
@@ -459,10 +629,11 @@ function Composicion({ d }) {
 }
 
 /* ── Riesgo ── */
+// Correlaciones, distribución y momentum se mudaron a Posición: son parte del
+// retrato de la cartera, no de la profundización del riesgo.
 const SUB_RIESGO = [["resumen","Resumen"],["activos","Por activo"],
-                    ["evolucion","Evolución del riesgo"],["distribucion","Distribución"],
-                    ["cambiario","Tipo de cambio"],["stress","Stress"],
-                    ["limite","Poner un límite"],["momentum","Momentum"]];
+                    ["evolucion","Evolución del riesgo"],["cambiario","Tipo de cambio"],
+                    ["stress","Stress"],["limite","Poner un límite"]];
 
 function Riesgo({ d, cartera, extras }) {
   const [sub, setSub] = useState("resumen");
@@ -474,14 +645,12 @@ function Riesgo({ d, cartera, extras }) {
           <button key={k} className={"tab" + (sub === k ? " on" : "")}
                   onClick={() => setSub(k)}>{t}</button>))}
       </div>
-      {sub === "resumen" && <RiesgoResumen d={d} cartera={cartera} />}
+      {sub === "resumen" && <RiesgoResumen d={d} />}
       {sub === "activos" && <RiesgoActivos cartera={cartera} />}
       {sub === "evolucion" && <RiesgoEvolucion cartera={cartera} />}
-      {sub === "distribucion" && <RiesgoDistribucion cartera={cartera} />}
       {sub === "cambiario" && <RiesgoCambiario cartera={cartera} />}
       {sub === "stress" && (extras.stress ? <Stress d={extras.stress} /> : <div className="cargando">Calculando…</div>)}
       {sub === "limite" && <RiesgoLimite cartera={cartera} d={d} />}
-      {sub === "momentum" && (extras.momentum ? <Momentum d={extras.momentum} /> : <div className="cargando">Calculando…</div>)}
     </>
   );
 }
@@ -505,10 +674,8 @@ function KpisRiesgo({ d }) {
   );
 }
 
-function RiesgoResumen({ d, cartera }) {
+function RiesgoResumen({ d }) {
   const c = colores();
-  const [corr, setCorr] = useState(null);
-  useEffect(() => { api(`/api/correlaciones/${encodeURIComponent(cartera)}`).then(setCorr); }, [cartera]);
   const contrib = d.contribucion_riesgo || [];
   const desbalance = contrib.filter((x) => x.ratio && x.ratio > 1.5);
 
@@ -555,8 +722,6 @@ function RiesgoResumen({ d, cartera }) {
           {desbalance.map((x) => `${x.ticker} pesa ${x.peso_pct} % y aporta ${x.riesgo_pct} % del riesgo`).join(" · ")}.
         </div>
       )}
-
-      {corr && !corr.error && <MatrizCorrelaciones corr={corr} />}
     </>
   );
 }
@@ -712,58 +877,6 @@ function RiesgoEvolucion({ cartera }) {
         <div className="pie">{d.nota}</div>
       </div>
     </>
-  );
-}
-
-function RiesgoDistribucion({ cartera }) {
-  const c = colores();
-  const [d, setD] = useState(null);
-  useEffect(() => { setD(null); api(`/api/riesgo/${encodeURIComponent(cartera)}/por-activo`).then(setD); }, [cartera]);
-  if (!d) return <div className="cargando">Armando la distribución…</div>;
-  if (d.error) return <div className="aviso mal">{d.error}</div>;
-
-  const rs = d.serie_cartera.map((p) => p.ret);
-  const k = d.cartera;
-  const media = rs.reduce((a, b) => a + b, 0) / rs.length;
-  const sd = Math.sqrt(rs.reduce((a, b) => a + (b - media) ** 2, 0) / (rs.length - 1));
-  // Campana normal con la misma media y desvío: la referencia contra la que se
-  // compara la forma real.
-  const lo = Math.min(...rs), hi = Math.max(...rs);
-  const paso = (hi - lo) / 60;
-  const xs = Array.from({ length: 61 }, (_, i) => lo + i * paso);
-  const normal = xs.map((x) => rs.length * paso *
-    Math.exp(-((x - media) ** 2) / (2 * sd * sd)) / (sd * Math.sqrt(2 * Math.PI)));
-  const linea = (x, color, texto) => ({
-    type: "line", x0: x, x1: x, yref: "paper", y0: 0, y1: 0.92,
-    line: { color, width: 1.6, dash: "dash" },
-  });
-  return (
-    <div className="panel">
-      <h3>Distribución de los retornos diarios</h3>
-      <Grafico alto={380}
-        datos={[
-          { type: "histogram", x: rs, nbinsx: 60, name: "días reales",
-            marker: { color: c.series[2], opacity: 0.75 },
-            hovertemplate: "%{x:.2f} %: %{y} días<extra></extra>" },
-          { type: "scatter", mode: "lines", x: xs, y: normal, name: "si fuera una campana normal",
-            line: { color: c.alerta, width: 2 } }]}
-        layout={{
-          shapes: [linea(k.var95_pct, c.negativo), linea(k.var99_pct, c.negativo),
-                   linea(media, c.texto3)],
-          annotations: [
-            { x: k.var95_pct, y: 1, yref: "paper", text: "día malo", showarrow: false,
-              font: { size: 10, color: c.negativo }, yanchor: "bottom" },
-            { x: k.var99_pct, y: 1, yref: "paper", text: "1 de 100", showarrow: false,
-              font: { size: 10, color: c.negativo }, yanchor: "bottom" }],
-          xaxis: { title: "Retorno diario", ticksuffix: " %" },
-          yaxis: { title: "Cantidad de días" }, bargap: 0.02 }} />
-      <div className="pie">
-        Las barras son los días que realmente pasaron; la curva, cómo se verían si los
-        retornos siguieran una campana normal. <b>Donde las barras superan a la curva en los
-        extremos, esos son los días que un modelo normal no ve venir</b> — la curtosis en
-        exceso de esta cartera es {num(k.curtosis_exceso)}.
-      </div>
-    </div>
   );
 }
 
