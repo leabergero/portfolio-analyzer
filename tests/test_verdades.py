@@ -371,6 +371,61 @@ def test_tope_de_concentracion_se_respeta():
 
 
 # ══════════════════════════════════════════════════════════════════════════
+#  COMPARACIÓN — que el ganador sea un ganador
+# ══════════════════════════════════════════════════════════════════════════
+
+def test_dos_carteras_identicas_no_tienen_ganador():
+    """Comparada consigo misma, ninguna cartera gana: p debe dar 1.
+
+    Es el control de cordura de la prueba de Sharpe. Si una serie "le gana" a su
+    propia copia, el estadístico está mal y todo veredicto sale contaminado.
+    """
+    import numpy as np
+    test = require("core.models.comparacion", "test_diferencia_sharpe")
+    rng = np.random.default_rng(3)
+    r = rng.normal(0.0004, 0.012, 800)
+    t = test(r, r.copy())
+    assert abs(t["diferencia_anual"]) < 1e-9, "una serie no puede superarse a sí misma"
+    assert t["p_valor"] > 0.99, f"p = {t['p_valor']}, debería ser 1"
+    assert not t["concluyente"]
+
+
+def test_diferencia_grande_y_sostenida_si_se_detecta():
+    """Contraparte: una ventaja real y persistente tiene que dar p bajo.
+
+    Sin este caso, un test que devolviera "no concluyente" siempre pasaría el
+    control de arriba y parecería correcto.
+    """
+    import numpy as np
+    test = require("core.models.comparacion", "test_diferencia_sharpe")
+    rng = np.random.default_rng(4)
+    mala = rng.normal(0.0000, 0.012, 1500)
+    buena = rng.normal(0.0012, 0.012, 1500)     # mucho más retorno, misma volatilidad
+    t = test(buena, mala)
+    assert t["diferencia_anual"] > 0.5
+    assert t["p_valor"] < 0.05, f"p = {t['p_valor']}: no detectó una ventaja real"
+    assert t["concluyente"]
+
+
+def test_la_correlacion_entra_en_la_prueba():
+    """Dos carteras que comparten activos están correlacionadas, y eso cambia el p.
+
+    Ignorar la correlación sobrestima la significancia: es el motivo por el que
+    la prueba usa Jobson-Korkie-Memmel y no una comparación suelta de Sharpes.
+    """
+    import numpy as np
+    test = require("core.models.comparacion", "test_diferencia_sharpe")
+    rng = np.random.default_rng(5)
+    base = rng.normal(0.0005, 0.012, 1000)
+    parecida = base + rng.normal(0.0001, 0.002, 1000)      # muy correlacionada
+    distinta = rng.normal(0.0006, 0.012, 1000)             # independiente
+    t_par = test(parecida, base)
+    t_dis = test(distinta, base)
+    assert t_par["correlacion"] > 0.9
+    assert abs(t_dis["correlacion"]) < 0.3
+
+
+# ══════════════════════════════════════════════════════════════════════════
 #  CSV — el contrato de entrada y salida
 # ══════════════════════════════════════════════════════════════════════════
 
