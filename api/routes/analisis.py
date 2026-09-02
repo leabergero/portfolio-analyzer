@@ -144,6 +144,23 @@ def mc_motores(nombre):
                    request.args.get("horizonte", 252, type=int))
 
 
+@bp.get("/montecarlo/<nombre>/por-activo")
+def mc_activos(nombre):
+    """Simula cada activo por separado: qué papel puede hundir el resultado."""
+    return _simple(nombre, montecarlo.por_activo,
+                   request.args.get("horizonte", 252, type=int),
+                   request.args.get("simulaciones", 4000, type=int),
+                   request.args.get("motor", "t"))
+
+
+@bp.get("/montecarlo/<nombre>/correlaciones")
+def mc_correlaciones(nombre):
+    """Correlación móvil para animar: las correlaciones no son estables."""
+    return _simple(nombre, montecarlo.correlaciones_moviles,
+                   request.args.get("ventana", 63, type=int),
+                   request.args.get("pasos", 40, type=int))
+
+
 @bp.get("/capm/<nombre>")
 def capm_(nombre):
     return _simple(nombre, capm.analizar, request.args.get("benchmark", "SP500"))

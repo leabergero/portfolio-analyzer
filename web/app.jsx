@@ -1021,7 +1021,196 @@ function Markowitz({ d, cartera, bench }) {
 }
 
 /* ── Monte Carlo ── */
+const SUB_MC = [["abanico","Abanico"],["activos","Por activo"],
+                ["correlaciones","Correlaciones en el tiempo"],["motores","Motores"]];
+
 function MonteCarlo({ d, cartera }) {
+  const [sub, setSub] = useState("abanico");
+  const f = d.final || {};
+  return (
+    <>
+      <div className="kpis">
+        <Kpi etiqueta="Hoy" valor={usd(d.valor_inicial)} />
+        <Kpi etiqueta="Mediana a un año" valor={usd(f.mediana)}
+             tono={f.mediana > d.valor_inicial ? "pos" : "neg"} />
+        <Kpi etiqueta="Escenario malo (5 %)" valor={usd(f.var95)} tono="neg"
+             sub={`perdés ${pct(f.perdida_var95_pct, 1)}`} />
+        <Kpi etiqueta="Escenario muy malo (1 %)" valor={usd(f.var99)} tono="neg"
+             sub={`perdés ${pct(f.perdida_var99_pct, 1)}`} />
+        <Kpi etiqueta="Probabilidad de ganar" valor={pct(f.prob_ganancia, 1)}
+             tono={f.prob_ganancia > 50 ? "pos" : "neg"} />
+      </div>
+      <div className="tabs" style={{ marginTop: 4 }}>
+        {SUB_MC.map(([k, t]) => (
+          <button key={k} className={"tab" + (sub === k ? " on" : "")}
+                  onClick={() => setSub(k)}>{t}</button>))}
+      </div>
+      {sub === "abanico" && <DistribucionFinal d={d} />}
+      {sub === "activos" && <McPorActivo cartera={cartera} horizonte={d.horizonte_ruedas} />}
+      {sub === "correlaciones" && <CorrelacionesAnimadas cartera={cartera} />}
+      {sub === "motores" && <McMotores d={d} cartera={cartera} />}
+    </>
+  );
+}
+
+function McPorActivo({ cartera, horizonte }) {
+  const c = colores();
+  const [d, setD] = useState(null);
+  useEffect(() => { setD(null);
+    api(`/api/montecarlo/${encodeURIComponent(cartera)}/por-activo?horizonte=${horizonte}`).then(setD);
+  }, [cartera, horizonte]);
+  if (!d) return <div className="cargando">Simulando cada activo por separado…</div>;
+  if (d.error) return <div className="aviso mal">{d.error}</div>;
+
+  const todos = [...d.por_activo, d.cartera];
+  return (
+    <>
+      <div className="panel">
+        <h3>Rango de resultados de cada activo</h3>
+        <Grafico alto={Math.max(260, todos.length * 52)}
+          datos={[
+            { type: "bar", orientation: "h", name: "escenario malo → mediana",
+              y: todos.map((f) => f.ticker).reverse(),
+              x: todos.map((f) => f.mediana - f.p5).reverse(),
+              base: todos.map((f) => f.p5).reverse(),
+              marker: { color: c.negativo, opacity: 0.55 },
+              hovertemplate: "%{y}<extra></extra>" },
+            { type: "bar", orientation: "h", name: "mediana → escenario bueno",
+              y: todos.map((f) => f.ticker).reverse(),
+              x: todos.map((f) => f.p95 - f.mediana).reverse(),
+              base: todos.map((f) => f.mediana).reverse(),
+              marker: { color: c.positivo, opacity: 0.55 },
+              hovertemplate: "%{y}<extra></extra>" },
+            { type: "scatter", mode: "markers", name: "hoy",
+              y: todos.map((f) => f.ticker).reverse(),
+              x: todos.map((f) => f.valor_inicial).reverse(),
+              marker: { symbol: "line-ns-open", size: 16, color: c.texto,
+                        line: { width: 2.5, color: c.texto } },
+              hovertemplate: "%{y}: $%{x:,.0f} hoy<extra></extra>" }]}
+          layout={{ barmode: "overlay", margin: { l: 82 },
+                    xaxis: { title: "Valor a un año", tickprefix: "$" } }} />
+        <div className="pie">
+          Cada barra va del escenario malo (5 %) al bueno (95 %), con la marca vertical
+          en lo que vale hoy. Cuanto más larga, más incierto es ese activo.
+        </div>
+      </div>
+
+      <div className="panel">
+        <h3>Detalle</h3>
+        <div className="tabla-wrap"><table>
+          <thead><tr><th>Activo</th><th className="n">Peso</th><th className="n">Hoy</th>
+            <th className="n">Mediana</th><th className="n">Escenario malo</th>
+            <th className="n">Pérdida</th><th className="n">P(ganar)</th>
+            <th className="n">Incertidumbre</th></tr></thead>
+          <tbody>{todos.map((f) => (
+            <tr key={f.ticker} style={f.ticker === "CARTERA"
+                  ? { borderTop: "2px solid var(--acento)", fontWeight: 600 } : null}>
+              <td className="mono">{f.ticker}</td>
+              <td className="n">{pct(f.peso_pct, 1)}</td>
+              <td className="n">{usd(f.valor_inicial, 0)}</td>
+              <td className="n">{usd(f.mediana, 0)}</td>
+              <td className="n">{usd(f.p5, 0)}</td>
+              <td className="n neg">{pct(f.perdida_var95_pct, 1)}</td>
+              <td className="n">{pct(f.prob_ganancia, 1)}</td>
+              <td className="n">{num(f.amplitud, 2)}×</td>
+            </tr>))}</tbody>
+        </table></div>
+        <div className="aviso ok">
+          <b>Diversificar vale {usd(d.ahorro_diversificacion_usd)} en el escenario malo.</b>{" "}
+          {d.nota}
+        </div>
+        <div className="pie">
+          "Incertidumbre" es el ancho del abanico como múltiplo del valor de hoy: cuántas
+          veces su propio valor separa al buen escenario del malo.
+        </div>
+      </div>
+    </>
+  );
+}
+
+function CorrelacionesAnimadas({ cartera }) {
+  const c = colores();
+  const [d, setD] = useState(null);
+  const [i, setI] = useState(0);
+  const [corriendo, setCorriendo] = useState(false);
+
+  useEffect(() => { setD(null); setI(0);
+    api(`/api/montecarlo/${encodeURIComponent(cartera)}/correlaciones`).then(setD); }, [cartera]);
+
+  useEffect(() => {
+    if (!corriendo || !d?.cuadros) return;
+    const id = setTimeout(() => setI((x) => (x + 1) % d.cuadros.length), 260);
+    return () => clearTimeout(id);
+  }, [corriendo, i, d]);
+
+  if (!d) return <div className="cargando">Calculando cómo se movieron las correlaciones…</div>;
+  if (d.error) return <div className="aviso mal">{d.error}</div>;
+
+  const cuadro = d.cuadros[i];
+  const cerca = (d.eventos || []).filter((e) =>
+    Math.abs(new Date(e.fecha) - new Date(cuadro.fecha)) < 45 * 864e5);
+
+  return (
+    <>
+      <div className="panel">
+        <h3>Las correlaciones no son estables
+          <span style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
+            <button className="btn" style={{ padding: "3px 11px", fontSize: 12.5 }}
+                    onClick={() => setCorriendo(!corriendo)}>
+              {corriendo ? "⏸ Detener" : "▶ Reproducir"}</button>
+            <input type="range" min="0" max={d.cuadros.length - 1} value={i}
+                   onChange={(e) => { setCorriendo(false); setI(+e.target.value); }}
+                   style={{ width: 190 }} />
+            <span className="mono" style={{ fontSize: 12.5 }}>{cuadro.fecha}</span>
+          </span>
+        </h3>
+        <div className="fila f2" style={{ marginBottom: 0, marginTop: 8 }}>
+          <Grafico alto={Math.max(280, d.tickers.length * 46)}
+            datos={[{ type: "heatmap", z: cuadro.matriz, x: d.tickers, y: d.tickers,
+                      zmin: -1, zmax: 1,
+                      colorscale: [[0, c.negativo], [0.5, c.panel], [1, c.acento]],
+                      text: cuadro.matriz.map((f) => f.map((v) => v.toFixed(2))),
+                      texttemplate: "%{text}", textfont: { size: 10 },
+                      hovertemplate: "%{y} ↔ %{x}: %{z:.2f}<extra></extra>",
+                      colorbar: { thickness: 10, len: 0.8 } }]}
+            layout={{ margin: { l: 80, b: 70, t: 6, r: 10 } }} />
+          <div>
+            <Grafico alto={200}
+              datos={[{ type: "scatter", mode: "lines", name: "correlación media",
+                        x: d.cuadros.map((q) => q.fecha), y: d.cuadros.map((q) => q.media),
+                        line: { color: c.acento, width: 2 } }]}
+              layout={{ margin: { t: 6, l: 44, b: 40 },
+                        yaxis: { title: "Correlación media" },
+                        shapes: [{ type: "line", x0: cuadro.fecha, x1: cuadro.fecha,
+                                   yref: "paper", y0: 0, y1: 1,
+                                   line: { color: c.alerta, width: 2 } },
+                                 ...(d.eventos || []).map((e) => ({
+                                   type: "line", x0: e.fecha, x1: e.fecha, yref: "paper",
+                                   y0: 0, y1: 1, line: { color: c.texto3, width: 0.8, dash: "dot" } }))] }} />
+            <div className="kpis" style={{ gridTemplateColumns: "1fr 1fr", marginTop: 8 }}>
+              <Kpi etiqueta="Ahora" valor={num(cuadro.media, 3)}
+                   tono={cuadro.media > d.media_global + 0.15 ? "neg"
+                        : cuadro.media < d.media_global - 0.15 ? "pos" : ""} />
+              <Kpi etiqueta="Promedio del período" valor={num(d.media_global, 3)} />
+            </div>
+            {cerca.length > 0 && (
+              <div className="aviso ojo">
+                Por estas fechas: {cerca.map((e) => e.descripcion).join(" · ")}.
+              </div>)}
+          </div>
+        </div>
+        <div className="pie">
+          {d.nota} El máximo del período fue <b>{d.maximo.media}</b> el {d.maximo.fecha}; el
+          mínimo, <b>{d.minimo.media}</b> el {d.minimo.fecha}. Una matriz de correlaciones
+          promedio esconde este movimiento, y es el que decide si la diversificación va a
+          estar ahí cuando haga falta.
+        </div>
+      </div>
+    </>
+  );
+}
+
+function McMotores({ d, cartera }) {
   const c = colores();
   const [motores, setMotores] = useState(null);
   const a = d.abanico || {};
@@ -1065,7 +1254,6 @@ function MonteCarlo({ d, cartera }) {
           escenarios; la clara, nueve de cada diez. Motor: <b>{d.motor}</b>.
         </div>
       </div>
-      <DistribucionFinal d={d} />
       <div className="panel">
         <h3>¿Cambia según el supuesto de distribución?</h3>
         {!motores ? (

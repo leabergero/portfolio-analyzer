@@ -203,3 +203,153 @@ def comparar_motores(posiciones, horizonte: int = 252, n_sims: int = 10_000) -> 
                 "prob_ganancia": r["final"]["prob_ganancia"],
             }
     return salida
+
+
+def por_activo(posiciones, horizonte: int = 252, n_sims: int = 4000,
+               motor: str = "t") -> dict:
+    """Simula cada activo por separado, además de la cartera.
+
+    Responde qué activo puede hundir el resultado, que el agregado esconde: la
+    cartera promedia, y promediar es exactamente lo que oculta el caso
+    individual. Cada activo se simula con SU propio μ y σ, así que un papel
+    volátil muestra su abanico real y no el suavizado del conjunto.
+
+    Menos simulaciones que el agregado a propósito: son N activos y el objetivo
+    acá es comparar formas, no afinar el tercer decimal de un percentil.
+    """
+    from core.models.portfolio import matriz_retornos, value_weights
+
+    ret_df, precios = matriz_retornos(posiciones)
+    if ret_df.empty:
+        return {"error": "Sin datos para simular."}
+
+    tickers = list(ret_df.columns)
+    w = value_weights(posiciones, precios, tickers)
+    valor_total = sum(float(p.get("qty", 0)) * precios[t]
+                      for p in posiciones
+                      for t in [str(p["ticker"]).upper()] if t in precios)
+    rng = np.random.default_rng(_SEMILLA)
+
+    filas = []
+    for i, t in enumerate(tickers):
+        r = ret_df[t].to_numpy()
+        valor = float(w[i]) * valor_total
+        if valor <= 0:
+            continue
+        finales = valor * np.exp(
+            _sortear(motor, r, n_sims, horizonte, rng).sum(axis=1))
+        var95 = float(np.percentile(finales, 5))
+        filas.append({
+            "ticker": t,
+            "valor_inicial": round(valor, 2),
+            "peso_pct": round(float(w[i]) * 100, 2),
+            "mediana": round(float(np.median(finales)), 2),
+            "p5": round(var95, 2),
+            "p95": round(float(np.percentile(finales, 95)), 2),
+            "perdida_var95_pct": round((valor - var95) / valor * 100, 2),
+            "prob_ganancia": round(float((finales > valor).mean()) * 100, 1),
+            # Rango entre el buen y el mal escenario, como múltiplo del valor de
+            # hoy: cuánta incertidumbre trae este activo a la cartera.
+            "amplitud": round(float(np.percentile(finales, 95) - var95) / valor, 2),
+        })
+
+    cartera = ret_df[tickers].to_numpy() @ w
+    finales_c = valor_total * np.exp(
+        _sortear(motor, cartera, n_sims, horizonte, rng).sum(axis=1))
+    var95_c = float(np.percentile(finales_c, 5))
+
+    suma_individual = sum(f["valor_inicial"] - f["p5"] for f in filas)
+    perdida_cartera = valor_total - var95_c
+
+    return {
+        "motor": motor, "horizonte_ruedas": horizonte, "n_simulaciones": n_sims,
+        "por_activo": sorted(filas, key=lambda f: -f["perdida_var95_pct"]),
+        "cartera": {
+            "ticker": "CARTERA", "valor_inicial": round(valor_total, 2), "peso_pct": 100.0,
+            "mediana": round(float(np.median(finales_c)), 2),
+            "p5": round(var95_c, 2),
+            "p95": round(float(np.percentile(finales_c, 95)), 2),
+            "perdida_var95_pct": round(perdida_cartera / valor_total * 100, 2),
+            "prob_ganancia": round(float((finales_c > valor_total).mean()) * 100, 1),
+            "amplitud": round(float(np.percentile(finales_c, 95) - var95_c) / valor_total, 2),
+        },
+        "ahorro_diversificacion_usd": round(suma_individual - perdida_cartera, 2),
+        "nota": "Si los activos cayeran todos a la vez en su escenario malo, la pérdida "
+                f"sería ${suma_individual:,.0f}. La de la cartera es ${perdida_cartera:,.0f}: "
+                "la diferencia es lo que aporta que no caigan sincronizados.",
+    }
+
+
+def correlaciones_moviles(posiciones, ventana: int = 63, pasos: int = 40) -> dict:
+    """Cómo evolucionó la correlación entre los activos, para animar.
+
+    Una matriz de correlaciones es una foto de un promedio, y esconde el hecho
+    más importante del riesgo de cartera: **las correlaciones no son estables**.
+    Suben en las crisis, justo cuando la diversificación tendría que proteger.
+    Ver la matriz moverse muestra eso de una forma que un número promedio no
+    puede.
+    """
+    from core.models.portfolio import matriz_retornos
+    from core.models.regimenes import EVENTOS
+
+    ret_df, _ = matriz_retornos(posiciones)
+    if ret_df.shape[1] < 2 or len(ret_df) < ventana + 20:
+        return {"error": "Serie demasiado corta para una correlación móvil."}
+
+    tickers = list(ret_df.columns)
+
+    # Primera rueda a partir de la cual TODOS los activos tienen cotización real.
+    # `matriz_retornos` rellena con ceros lo que todavía no existía, así que sin
+    # esto los pasos se reparten sobre un rango donde la mayoría de las ventanas
+    # no son calculables y la animación queda con cuatro cuadros.
+    vivos = (ret_df.abs() > 1e-12).cumsum() > 0
+    primera = int(np.argmax(vivos.all(axis=1).to_numpy())) if vivos.all(axis=1).any() else 0
+    arranque = max(ventana, primera + ventana)
+    if arranque >= len(ret_df) - 1:
+        return {"error": "No hay historia en común suficiente entre todos los activos "
+                         "para una correlación móvil: probá una ventana más corta."}
+
+    indices = np.linspace(arranque, len(ret_df) - 1,
+                          min(pasos, len(ret_df) - arranque), dtype=int)
+
+    cuadros = []
+    for i in indices:
+        tramo = ret_df.iloc[i - ventana:i]
+        # Un activo que todavía no cotizaba llega como serie constante —
+        # `matriz_retornos` rellena con ceros— y su correlación es NaN, que
+        # después contamina la media y el gráfico entero. Esas ventanas se
+        # descartan en vez de dibujarlas vacías: no hay correlación que mostrar
+        # cuando el activo no existía.
+        if (tramo.std(ddof=1) < 1e-12).any():
+            continue
+        m = tramo.corr()
+        if m.isna().to_numpy().any():
+            continue
+        valores = [[round(float(m.loc[a, b]), 3) for b in tickers] for a in tickers]
+        pares = [float(m.loc[a, b]) for j, a in enumerate(tickers) for b in tickers[j + 1:]]
+        cuadros.append({
+            "fecha": str(ret_df.index[i].date()),
+            "matriz": valores,
+            "media": round(float(np.mean(pares)), 3) if pares else 0.0,
+        })
+
+    if not cuadros:
+        return {"error": "No hay ninguna ventana donde todos los activos tengan "
+                         "cotización: probá con una ventana más corta."}
+
+    medias = [c["media"] for c in cuadros]
+    pico = max(cuadros, key=lambda c: c["media"])
+    piso = min(cuadros, key=lambda c: c["media"])
+    desde, hasta = cuadros[0]["fecha"], cuadros[-1]["fecha"]
+
+    return {
+        "tickers": tickers, "cuadros": cuadros, "ventana_ruedas": ventana,
+        "media_global": round(float(np.mean(medias)), 3),
+        "maximo": {"fecha": pico["fecha"], "media": pico["media"]},
+        "minimo": {"fecha": piso["fecha"], "media": piso["media"]},
+        "eventos": [{"fecha": f, "alcance": a, "descripcion": d}
+                    for f, a, d in EVENTOS if desde <= f <= hasta],
+        "nota": f"Correlación sobre las últimas {ventana} ruedas en cada punto. "
+                "Que suba significa que los activos empiezan a moverse juntos y la "
+                "diversificación deja de proteger.",
+    }
