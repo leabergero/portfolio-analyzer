@@ -41,6 +41,7 @@ function colores() {
     texto: v("--texto"), texto2: v("--texto-2"), texto3: v("--texto-3"),
     borde: v("--borde"), panel: v("--panel"), acento: v("--acento"),
     positivo: v("--positivo"), negativo: v("--negativo"), alerta: v("--alerta"),
+    marcaActual: v("--marca-actual"), marcaOptima: v("--marca-optima"),
     series: [1,2,3,4,5,6,7,8].map((i) => v(`--serie-${i}`)),
   };
 }
@@ -1161,10 +1162,12 @@ function Markowitz({ d, cartera, bench, extras }) {
       line: { color: c.acento, width: 2.5 } },
     { type: "scatter", mode: "markers+text", name: "tu cartera",
       x: [d.actual.vol_pct], y: [d.actual.ret_pct], text: ["actual"], textposition: "top center",
-      marker: { size: 15, color: c.series[2], symbol: "star", line: { width: 1, color: c.panel } } },
+      marker: { size: 17, color: c.marcaActual, symbol: "star",
+                line: { width: 1, color: c.panel } } },
     { type: "scatter", mode: "markers+text", name: "máximo Sharpe",
       x: [d.max_sharpe.vol_pct], y: [d.max_sharpe.ret_pct], text: ["óptima"], textposition: "top center",
-      marker: { size: 13, color: c.positivo, symbol: "triangle-up" } },
+      marker: { size: 14, color: c.marcaOptima, symbol: "triangle-up",
+                line: { width: 1, color: c.panel } } },
     { type: "scatter", mode: "markers+text", name: "mínima varianza",
       x: [d.min_varianza.vol_pct], y: [d.min_varianza.ret_pct], text: ["mín. riesgo"],
       textposition: "bottom center", marker: { size: 12, color: c.series[1], symbol: "diamond" } },
