@@ -441,9 +441,12 @@ def test_plantilla_csv_tiene_las_columnas_del_contrato():
     assert ruta.exists(), f"falta {ruta}"
     with open(ruta, encoding="utf-8-sig") as f:
         cols = next(csv.reader(f))
-    esperadas = ["ticker", "buy_date", "buy_price", "qty",
-                 "commissions", "source", "currency", "asset_type", "notes"]
+    # Se compara contra el módulo, no contra una lista escrita a mano acá: así
+    # agregar una columna obliga a actualizar la plantilla y no al revés.
+    esperadas = require("core.io.csv_native", "COLUMNAS")
     assert cols == esperadas, f"columnas {cols}"
+    assert "source" in cols and "currency" in cols
+    assert "record" in cols, "sin `record` no se distingue un dividendo de una compra"
 
 
 def test_ida_y_vuelta_del_csv_no_pierde_nada():
@@ -469,6 +472,73 @@ def test_ida_y_vuelta_del_csv_no_pierde_nada():
             assert str(a[k]) == str(b[k]), f"{k}: {a[k]!r} != {b[k]!r}"
         for k in ("buy_price", "qty", "commissions"):
             assert casi(a[k], b[k], 1e-9), f"{k}: {a[k]} != {b[k]}"
+
+
+def test_el_csv_propio_lleva_dividendos_y_cerradas():
+    """Exportar es respaldar TODO: si no, cada reimportación pierde lo cargado a mano.
+
+    Un dividendo anotado a mano no está en ningún CSV de broker. Si la
+    exportación propia no lo incluye, el respaldo miente y hay que volver a
+    cargarlo después de cada importación.
+    """
+    import io
+    write_todo = require("core.io.csv_native", "write_todo")
+    read_positions = require("core.io.csv_native", "read_positions")
+    read_realizado = require("core.io.csv_native", "read_realizado")
+
+    pos = [{"ticker": "METR.BA", "buy_date": "2025-01-10", "buy_price": 2000.0,
+            "qty": 500.0, "commissions": 10.0}]
+    real = [{"ticker": "METR.BA", "tipo": "dividendo", "buy_date": "2025-06-20",
+             "sell_date": "2025-06-20", "buy_price": 0.0, "sell_price": 70.0,
+             "qty": 500.0, "buy_comm": 0.0, "sell_comm": 0.0, "pnl": 35000.0}]
+    buf = io.StringIO()
+    write_todo(buf, pos, real)
+    texto = buf.getvalue()
+
+    vuelta_pos = read_positions(io.StringIO(texto))
+    vuelta_real = read_realizado(io.StringIO(texto))
+    assert len(vuelta_pos) == 1, "el dividendo no puede colarse como posición abierta"
+    assert casi(vuelta_pos[0]["qty"], 500.0)
+    assert len(vuelta_real) == 1 and vuelta_real[0]["tipo"] == "dividendo"
+    assert casi(vuelta_real[0]["pnl"], 35000.0), "500 × 70"
+
+
+def test_reimportar_el_mismo_archivo_no_duplica_el_realizado():
+    """Volver a subir un CSV pisa lo que ese archivo dejó, no se suma a ello.
+
+    El deduplicado por clave no alcanza: al corregir el prorrateo de los splits,
+    los mismos trades salieron con otras cantidades y otros precios, ninguna
+    clave coincidió y el P&L de COME quedó contado dos veces.
+    """
+    import tempfile, os
+    from pathlib import Path
+    agregar = require("core.io.store", "agregar_realizado")
+    import core.io.store as store
+    original = store.REALIZADO
+    tmp = tempfile.NamedTemporaryFile(suffix=".json", delete=False)
+    tmp.write(b"{}"); tmp.close()
+    store.REALIZADO = Path(tmp.name)
+    try:
+        v1 = [{"ticker": "COME.BA", "buy_date": "2025-05-14", "buy_price": 175.5,
+               "sell_date": "2026-02-27", "sell_price": 48.79, "qty": 8000.0,
+               "buy_comm": 0.0, "sell_comm": 0.0, "pnl": -1013680.0}]
+        v2 = [{**v1[0], "buy_price": 78.2, "qty": 17940.5, "pnl": -1013680.0}]
+        agregar("X", v1, "yahoo:leandro1.csv")
+        agregar("X", v2, "yahoo:leandro1.csv")
+        quedan = store.cargar_realizado("X")
+        assert len(quedan) == 1, f"el mismo archivo dos veces dejó {len(quedan)} registros"
+        assert casi(quedan[0]["qty"], 17940.5), "queda la versión nueva, no la vieja"
+
+        # Un dividendo cargado a mano no lleva lote: ninguna reimportación lo toca.
+        agregar("X", [{"ticker": "METR.BA", "tipo": "dividendo",
+                       "buy_date": "2025-06-20", "sell_date": "2025-06-20",
+                       "buy_price": 0.0, "sell_price": 70.0, "qty": 500.0,
+                       "pnl": 35000.0}])
+        agregar("X", v2, "yahoo:leandro1.csv")
+        assert len(store.cargar_realizado("X")) == 2, "la reimportación borró el dividendo"
+    finally:
+        store.REALIZADO = original
+        os.unlink(tmp.name)
 
 
 def test_split_reparte_el_costo_en_vez_de_regalar_acciones():

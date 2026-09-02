@@ -129,10 +129,27 @@ def cargar_realizado(nombre: str) -> list:
     return _leer(REALIZADO).get(nombre, [])
 
 
-def agregar_realizado(nombre: str, trades: list) -> dict:
-    """Suma trades cerrados, sin duplicar los ya registrados."""
+def agregar_realizado(nombre: str, trades: list, lote: str = None) -> dict:
+    """Suma trades cerrados. Con `lote`, REEMPLAZA lo que ese lote había dejado.
+
+    El deduplicado por clave no alcanza cuando cambia la forma de calcular: al
+    corregir el tratamiento de los splits, reimportar el mismo CSV generó trades
+    con otras cantidades y otros precios —ninguna clave coincidía— y el P&L de
+    COME quedó contado dos veces, −2.079.644 en vez de −1.040.884.
+
+    Por eso cada importación se marca con su archivo de origen: volver a subir
+    el mismo archivo pisa lo suyo y solo lo suyo. Los dividendos cargados a mano
+    no llevan lote y no los borra ninguna reimportación.
+    """
     datos = _leer(REALIZADO)
     existentes = datos.get(nombre, [])
+    reemplazados = 0
+    if lote:
+        previos = len(existentes)
+        existentes = [t for t in existentes if t.get("lote") != lote]
+        reemplazados = previos - len(existentes)
+        trades = [dict(t, lote=lote) for t in trades]
+
     clave = lambda t: (t["ticker"], t["buy_date"], t["buy_price"],               # noqa: E731
                        t["sell_date"], t["sell_price"], t["qty"])
     vistas = {clave(t) for t in existentes}
@@ -147,4 +164,18 @@ def agregar_realizado(nombre: str, trades: list) -> dict:
 
     datos[nombre] = existentes
     _escribir(REALIZADO, datos)
-    return {"agregados": agregados, "total": len(existentes)}
+    return {"agregados": agregados, "reemplazados": reemplazados,
+            "total": len(existentes)}
+
+
+def quitar_realizado(nombre: str, filtro: dict) -> int:
+    """Saca los registros que coinciden con todos los campos de `filtro`."""
+    datos = _leer(REALIZADO)
+    existentes = datos.get(nombre, [])
+    if not filtro:
+        return 0
+    quedan = [t for t in existentes
+              if not all(str(t.get(k, "")) == str(v) for k, v in filtro.items())]
+    datos[nombre] = quedan
+    _escribir(REALIZADO, datos)
+    return len(existentes) - len(quedan)

@@ -23,11 +23,17 @@ import io
 import re
 from pathlib import Path
 
-COLUMNAS = ["ticker", "buy_date", "buy_price", "qty",
-            "commissions", "source", "currency", "asset_type", "notes"]
+COLUMNAS = ["record", "ticker", "buy_date", "buy_price", "qty",
+            "commissions", "sell_date", "sell_price", "sell_commissions",
+            "source", "currency", "asset_type", "notes"]
 
-_NUMERICAS = ("buy_price", "qty", "commissions")
-_TEXTO = ("ticker", "buy_date", "source", "currency", "asset_type", "notes")
+_NUMERICAS = ("buy_price", "qty", "commissions", "sell_price", "sell_commissions")
+_TEXTO = ("record", "ticker", "buy_date", "sell_date", "source", "currency",
+          "asset_type", "notes")
+
+# `record` dice qué es cada fila. Vacío = posición abierta, que es como venía el
+# formato antes de esto: un CSV viejo sigue entrando igual.
+POSICION, DIVIDENDO, CERRADA = "", "dividendo", "cerrada"
 
 
 def _abrir_lectura(origen):
@@ -99,6 +105,8 @@ def read_positions(origen) -> list:
         ticker = (d.get("ticker") or d.get("symbol") or "").strip().upper()
         if not ticker:
             continue
+        if (d.get("record") or "").strip().lower() in (DIVIDENDO, CERRADA):
+            continue                      # esas filas las lee read_realizado
         salida.append({
             "ticker": ticker,
             "buy_date": normalizar_fecha(d.get("buy_date") or d.get("trade date")
@@ -134,6 +142,102 @@ def write_positions(destino, posiciones) -> int:
             w.writerow({
                 **{c: str(p.get(c, "") or "") for c in _TEXTO},
                 **{c: _numero(p.get(c)) for c in _NUMERICAS},
+            })
+            n += 1
+        return n
+    finally:
+        if cerrar:
+            f.close()
+
+
+def read_realizado(origen) -> list:
+    """Lee las filas de dividendos y operaciones cerradas del formato propio.
+
+    Salen con la misma forma que las que arma el importador de Yahoo, así el
+    resto del sistema no distingue de dónde vinieron.
+    """
+    f, cerrar = _abrir_lectura(origen)
+    try:
+        filas = list(csv.DictReader(f))
+    finally:
+        if cerrar:
+            f.close()
+
+    salida = []
+    for fila in filas:
+        d = {(k or "").strip().lower(): (v if v is not None else "")
+             for k, v in fila.items()}
+        record = (d.get("record") or "").strip().lower()
+        ticker = (d.get("ticker") or d.get("symbol") or "").strip().upper()
+        if not ticker or record not in (DIVIDENDO, CERRADA):
+            continue
+
+        qty = _numero(d.get("qty"), 0.0)
+        if record == DIVIDENDO:
+            # Un dividendo no tiene compra: se registra con las dos fechas
+            # iguales y precio de compra cero, que es como lo guarda el
+            # importador de Yahoo. Así el neteo no lo aparea con nada.
+            fecha = normalizar_fecha(d.get("sell_date") or d.get("buy_date"))
+            unitario = _numero(d.get("sell_price") or d.get("buy_price"))
+            comision = _numero(d.get("sell_commissions") or d.get("commissions"))
+            salida.append({
+                "ticker": ticker, "tipo": DIVIDENDO,
+                "buy_date": fecha, "sell_date": fecha,
+                "buy_price": 0.0, "sell_price": unitario,
+                "qty": qty or 1.0, "buy_comm": 0.0, "sell_comm": comision,
+                "pnl": round((qty or 1.0) * unitario - comision, 4),
+                "notes": (d.get("notes") or "").strip(),
+            })
+        else:
+            compra = _numero(d.get("buy_price"))
+            venta = _numero(d.get("sell_price"))
+            c_compra = _numero(d.get("commissions"))
+            c_venta = _numero(d.get("sell_commissions"))
+            salida.append({
+                "ticker": ticker,
+                "buy_date": normalizar_fecha(d.get("buy_date")),
+                "sell_date": normalizar_fecha(d.get("sell_date")),
+                "buy_price": compra, "sell_price": venta, "qty": qty,
+                "buy_comm": c_compra, "sell_comm": c_venta,
+                "pnl": round(qty * (venta - compra) - c_compra - c_venta, 4),
+                "notes": (d.get("notes") or "").strip(),
+            })
+    return salida
+
+
+def write_todo(destino, posiciones, realizadas=None) -> int:
+    """Exporta la cartera completa: lo abierto, lo cerrado y los dividendos.
+
+    Un respaldo que no incluya los dividendos cargados a mano obliga a volver a
+    cargarlos después de cada reimportación. Todo entra en un solo archivo, con
+    `record` diciendo qué es cada fila.
+    """
+    if hasattr(destino, "write"):
+        f, cerrar = destino, False
+    else:
+        f, cerrar = open(destino, "w", newline="", encoding="utf-8"), True
+    try:
+        w = csv.DictWriter(f, fieldnames=COLUMNAS, extrasaction="ignore")
+        w.writeheader()
+        n = 0
+        for p in posiciones or []:
+            w.writerow({**{c: str(p.get(c, "") or "") for c in _TEXTO},
+                        **{c: _numero(p.get(c)) for c in _NUMERICAS}})
+            n += 1
+        for t in realizadas or []:
+            es_div = t.get("tipo") == DIVIDENDO
+            w.writerow({
+                "record": DIVIDENDO if es_div else CERRADA,
+                "ticker": t.get("ticker", ""),
+                "buy_date": "" if es_div else t.get("buy_date", ""),
+                "buy_price": "" if es_div else _numero(t.get("buy_price")),
+                "qty": _numero(t.get("qty")),
+                "commissions": "" if es_div else _numero(t.get("buy_comm")),
+                "sell_date": t.get("sell_date", ""),
+                "sell_price": _numero(t.get("sell_price")),
+                "sell_commissions": _numero(t.get("sell_comm")),
+                "source": "", "currency": "", "asset_type": "",
+                "notes": t.get("notes", ""),
             })
             n += 1
         return n

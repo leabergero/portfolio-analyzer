@@ -388,8 +388,9 @@ function Posicion({ d, cartera, recargar, extras, bench }) {
   useEffect(() => { setCorr(null);
     api(`/api/correlaciones/${encodeURIComponent(cartera)}`).then(setCorr); }, [cartera]);
   // Lo cerrado se venía guardando y neteando sin que se viera en ningún lado.
+  const [n, setN] = useState(0);
   useEffect(() => { setReal(null);
-    api(`/api/carteras/${encodeURIComponent(cartera)}/realizado`).then(setReal); }, [cartera]);
+    api(`/api/carteras/${encodeURIComponent(cartera)}/realizado`).then(setReal); }, [cartera, n]);
   const cerrado = real?.n ? real.total_usd : null;
 
   return (
@@ -450,7 +451,7 @@ function Posicion({ d, cartera, recargar, extras, bench }) {
         </div>
       </div>
 
-      {real?.n > 0 && <PnlRealizado real={real} />}
+      {real && <PnlRealizado real={real} cartera={cartera} recargar={() => setN((x) => x + 1)} />}
 
       {/* 3 · En qué está invertida */}
       <Seccion titulo="En qué está invertida" />
@@ -489,7 +490,63 @@ function Posicion({ d, cartera, recargar, extras, bench }) {
   );
 }
 
-function PnlRealizado({ real }) {
+function AltaDividendo({ cartera, recargar }) {
+  const vacio = { ticker: "", fecha: new Date().toISOString().slice(0, 10),
+                  importe: "", qty: "", por_accion: true, notes: "" };
+  const [f, setF] = useState(vacio);
+  const [msg, setMsg] = useState(null);
+  const [abierto, setAbierto] = useState(false);
+  const set = (k, v) => setF((x) => ({ ...x, [k]: v }));
+
+  const guardar = async () => {
+    const r = await api(`/api/carteras/${encodeURIComponent(cartera)}/dividendo`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(f) });
+    if (r.error) { setMsg({ mal: r.error }); return; }
+    setMsg({ ok: `Registrado: ${num(r.trade.pnl, 2)} de ${r.trade.ticker}.` });
+    setF({ ...vacio, ticker: f.ticker });
+    recargar && recargar();
+  };
+
+  if (!abierto) return (
+    <button className="btn" style={{ marginTop: 10 }} onClick={() => setAbierto(true)}>
+      + Registrar un dividendo</button>);
+
+  return (
+    <div className="panel" style={{ background: "var(--panel-2)", marginTop: 10 }}>
+      <h3>Dividendo cobrado
+        <button className="btn" style={{ marginLeft: "auto", padding: "3px 10px", fontSize: 12 }}
+                onClick={() => setAbierto(false)}>Cerrar</button>
+      </h3>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end",
+                    marginTop: 10 }}>
+        {[["ticker", "Ticker", 120], ["fecha", "Fecha de cobro", 140],
+          ["importe", "Importe", 120], ["qty", "Acciones", 110]].map(([k, et, w]) => (
+          <label key={k} style={{ fontSize: 11.5, color: "var(--texto-3)" }}>{et}<br />
+            <input type={k === "fecha" ? "date" : k === "ticker" ? "text" : "number"}
+                   value={f[k]} style={{ width: w, marginTop: 3 }}
+                   onChange={(e) => set(k, k === "ticker" ? e.target.value.toUpperCase()
+                                                          : e.target.value)} /></label>))}
+        <div className="modos" style={{ marginBottom: 1 }}>
+          {[[true, "por acción"], [false, "importe total"]].map(([k, txt]) => (
+            <button key={String(k)} className={"modo" + (f.por_accion === k ? " on" : "")}
+                    onClick={() => set("por_accion", k)}>{txt}</button>))}
+        </div>
+        <button className="btn primario" onClick={guardar}
+                disabled={!f.ticker || !f.importe}>Registrar</button>
+      </div>
+      {msg && <div className={"aviso " + (msg.mal ? "mal" : "ok")}>{msg.mal || msg.ok}</div>}
+      <div className="pie">
+        Un dividendo <b>no toca la posición</b>: no suma papeles ni cambia el costo de nada.
+        Entra como resultado del día que se cobró y se convierte a dólares con el MEP de esa
+        fecha. Si tenés anotado el total que entró a la cuenta en vez del dividendo por acción,
+        cambiá a <b>importe total</b> y dejá las acciones en blanco.
+      </div>
+    </div>
+  );
+}
+
+function PnlRealizado({ real, cartera, recargar }) {
   const [abierto, setAbierto] = useState(false);
   const [detalle, setDetalle] = useState(false);
   const trades = real.trades || [];
@@ -588,6 +645,7 @@ function PnlRealizado({ real }) {
             prorratean sobre lo que había abierto. {ganadores} de {porTicker.length} tickers
             cerraron en verde.
           </div>
+          <AltaDividendo cartera={cartera} recargar={recargar} />
         </>
       )}
     </div>
