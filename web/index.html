@@ -161,9 +161,17 @@ td.n,th.n{text-align:right;font-family:"IBM Plex Mono",monospace;font-variant-nu
 .vacio{padding:44px 20px;text-align:center;color:var(--texto-3);font-size:14px}
 .cargando{padding:26px;text-align:center;color:var(--texto-3);font-size:13px}
 
-.chip{display:inline-block;font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;
-      font-weight:600;padding:2px 8px;border-radius:100px;border:1px solid currentColor}
+/* Ancho fijo y texto centrado: los veredictos son una escala —COMPRAR/MANTENER/
+   VENDER, FAVORABLE/NEUTRAL/EVITAR— y con el ancho siguiendo al largo de la
+   palabra la columna se leía como un borde dentado en vez de como una escala. */
+.chip{display:inline-flex;align-items:center;justify-content:center;min-width:104px;
+      font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;text-align:center;
+      font-weight:600;padding:3px 10px;border-radius:100px;border:1px solid currentColor}
 .chip.ok{color:var(--positivo)} .chip.mal{color:var(--negativo)} .chip.ojo{color:var(--alerta)}
+/* Toda celda cuyo contenido es un chip se centra sola: son 14 tablas y no hay
+   motivo para recordar la clase en cada una. */
+td:has(> .chip){text-align:center}
+th.c{text-align:center}
 
 footer{max-width:1400px;margin:26px auto 0;padding:18px 20px 40px;border-top:1px solid var(--borde);
        color:var(--texto-3);font-size:12.5px;display:flex;justify-content:space-between;

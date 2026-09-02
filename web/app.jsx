@@ -921,7 +921,7 @@ function RiesgoEvolucion({ cartera }) {
       <div className="panel">
         <h3>Los {ev.length} eventos del período</h3>
         <div className="tabla-wrap"><table>
-          <thead><tr><th>Fecha</th><th>Alcance</th><th>Qué pasó</th>
+          <thead><tr><th>Fecha</th><th className="c">Alcance</th><th>Qué pasó</th>
             <th className="n">Día malo por entonces</th></tr></thead>
           <tbody>{ev.slice().reverse().map((e, i) => (
             <tr key={i}><td className="mono">{e.fecha}</td>
@@ -987,15 +987,25 @@ function RiesgoCambiario({ cartera }) {
 
 function RiesgoLimite({ cartera, d }) {
   const c = colores();
-  const [objetivo, setObjetivo] = useState(Math.abs(d.var95_pct * 0.8).toFixed(2));
+  const sugerido = Math.abs(d.var95_pct * 0.8).toFixed(2);
+  const [objetivo, setObjetivo] = useState(sugerido);
+  // `pedido` es el límite que ya se calculó; `objetivo`, el que el usuario está
+  // tipeando. Separarlos deja que el panel se arme solo al entrar —con un 20 %
+  // menos de riesgo que hoy, que es la pregunta que uno viene a hacerse— sin
+  // disparar una optimización por cada tecla.
+  const [pedido, setPedido] = useState(sugerido);
   const [r, setR] = useState(null);
   const [cargando, setCargando] = useState(false);
 
-  const calcular = async () => {
-    setCargando(true);
-    setR(await api(`/api/riesgo/${encodeURIComponent(cartera)}/ajustar?var=${objetivo}`));
-    setCargando(false);
-  };
+  useEffect(() => {
+    let vivo = true;
+    setCargando(true); setR(null);
+    api(`/api/riesgo/${encodeURIComponent(cartera)}/ajustar?var=${pedido}`)
+      .then((x) => { if (!vivo) return; setR(x); setCargando(false); });
+    return () => { vivo = false; };
+  }, [pedido, cartera]);
+
+  const calcular = () => setPedido(objetivo);
 
   const ordenes = (r?.ordenes || []).filter((o) => o.accion !== "MANTENER");
 
@@ -1006,12 +1016,15 @@ function RiesgoLimite({ cartera, d }) {
         <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginTop: 10 }}>
           <span>No quiero perder más de</span>
           <input type="number" step="0.05" min="0.05" value={objetivo}
-                 onChange={(e) => setObjetivo(e.target.value)} style={{ width: 90 }} />
+                 onChange={(e) => setObjetivo(e.target.value)} style={{ width: 90 }}
+                 onKeyDown={(e) => e.key === "Enter" && calcular()} />
           <span>% en un día malo.</span>
-          <button className="btn primario" onClick={calcular} disabled={cargando}>
-            {cargando ? "Optimizando…" : "Calcular rebalanceo"}</button>
+          <button className="btn primario" onClick={calcular}
+                  disabled={cargando || objetivo === pedido}>
+            {cargando ? "Optimizando…" : "Recalcular"}</button>
           <span className="pie" style={{ marginTop: 0 }}>
-            Hoy: {pct(d.var95_pct)} ({usd(d.var95_usd)})</span>
+            Hoy: {pct(d.var95_pct)} ({usd(d.var95_usd)}) · abajo está resuelto
+            para {pct(pedido)}, cambiá el número para probar otro techo.</span>
         </div>
         <div className="pie">
           La cartera queda <b>invertida al 100 %</b>: se cambia la mezcla, no el nivel de
@@ -1095,7 +1108,7 @@ function RiesgoLimite({ cartera, d }) {
           <div className="panel">
             <h3>Órdenes</h3>
             <div className="tabla-wrap"><table>
-              <thead><tr><th>Acción</th><th>Activo</th><th className="n">Peso hoy</th>
+              <thead><tr><th className="c">Acción</th><th>Activo</th><th className="n">Peso hoy</th>
                 <th className="n">Peso nuevo</th><th className="n">Monto</th>
                 <th className="n">Unidades</th></tr></thead>
               <tbody>{ordenes.map((o) => (
@@ -1220,7 +1233,7 @@ function Markowitz({ d, cartera, bench, extras }) {
           </div>
           <div className="tabla-wrap"><table>
             <thead><tr><th>Ticker</th><th className="n">Hoy</th><th className="n">Objetivo</th>
-                       <th className="n">Diferencia</th><th>Acción</th></tr></thead>
+                       <th className="n">Diferencia</th><th className="c">Acción</th></tr></thead>
             <tbody>{(acciones || []).map((a) => (
               <tr key={a.ticker}>
                 <td className="mono">{a.ticker}</td>
@@ -1781,8 +1794,8 @@ function Momentum({ d }) {
         <h3>Veredicto por activo</h3>
         <div className="tabla-wrap"><table>
           <thead><tr><th>Ticker</th><th className="n">12−1</th><th className="n">12 meses</th>
-                     <th className="n">3 meses</th><th>Señal</th>
-                     <th className="n">1 mes</th><th>Entrada</th>
+                     <th className="n">3 meses</th><th className="c">Señal</th>
+                     <th className="n">1 mes</th><th className="c">Entrada</th>
                      <th>Qué significa</th></tr></thead>
           <tbody>{a.map((x) => (
             <tr key={x.ticker}>
@@ -1854,8 +1867,8 @@ function ObjetivosYBL({ cartera, extras, d, bench }) {
         <h3>Precio objetivo y momento de entrada</h3>
         <div className="tabla-wrap"><table>
           <thead><tr><th>Ticker</th><th className="n">Hoy</th><th className="n">Objetivo</th>
-            <th className="n">Upside</th><th>Momentum</th><th>Combinada</th>
-            <th>Tu opinión</th></tr></thead>
+            <th className="n">Upside</th><th className="c">Momentum</th><th className="c">Combinada</th>
+            <th className="c">Tu opinión</th></tr></thead>
           <tbody>{(obj.por_activo || []).map((x) => {
             const mv = manuales[x.ticker];
             return (
@@ -1865,13 +1878,16 @@ function ObjetivosYBL({ cartera, extras, d, bench }) {
                 <td className="n">{x.objetivo_medio ? usd(x.objetivo_medio) : "—"}</td>
                 <td className={"n " + signo(x.upside_pct)}>
                   {x.upside_pct == null ? "—" : pct(x.upside_pct, 1)}</td>
-                <td style={{ fontSize: 12.5 }}>{x.momentum || "—"}</td>
+                <td><span className={"chip " + (x.momentum === "FAVORABLE" ? "ok"
+                      : x.momentum === "EVITAR" ? "mal"
+                      : x.momentum === "ESPERAR" ? "ojo" : "")}>{x.momentum || "—"}</span></td>
                 <td><span className={"chip " + (x.combinada === "COMPRAR" ? "ok"
                       : x.combinada === "CARO" || x.combinada === "REDUCIR" ? "mal"
                       : x.combinada === "ESPERAR GIRO" ? "ojo" : "")}>{x.combinada}</span></td>
-                <td>
+                <td style={{ textAlign: "center" }}>
                   {mv ? (
-                    <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                    <span style={{ display: "flex", gap: 6, alignItems: "center",
+                                   justifyContent: "center" }}>
                       <span className="chip ojo">{mv.modo === "B2" ? `evento ${mv.meses} m` : "propia"}</span>
                       <span className="mono" style={{ fontSize: 11.5 }}>{mv.bajo}–{mv.alto}</span>
                       <button className="btn" style={{ padding: "1px 7px", fontSize: 11 }}
@@ -2061,7 +2077,7 @@ function BlackLitterman({ bl, actual }) {
             <div className="tabla-wrap"><table>
               <thead><tr><th>Ticker</th><th className="n">Hoy</th><th className="n">Sugerido</th>
                 <th className="n">Monto</th><th className="n">Retorno esperado</th>
-                <th>Acción</th></tr></thead>
+                <th className="c">Acción</th></tr></thead>
               <tbody>{acc.map((a) => (
                 <tr key={a.ticker}>
                   <td className="mono">{a.ticker}</td>
@@ -2163,7 +2179,7 @@ function Regimenes({ d, cartera }) {
       <div className="panel">
         <h3>Qué pasaba alrededor</h3>
         <div className="tabla-wrap"><table>
-          <thead><tr><th>Fecha</th><th>Alcance</th><th>Evento</th></tr></thead>
+          <thead><tr><th>Fecha</th><th className="c">Alcance</th><th>Evento</th></tr></thead>
           <tbody>{(d.eventos || []).slice().reverse().map((e, i) => (
             <tr key={i}><td className="mono">{e.fecha}</td>
               <td><span className="chip">{e.alcance}</span></td><td>{e.descripcion}</td></tr>))}</tbody>
