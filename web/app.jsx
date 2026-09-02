@@ -118,6 +118,9 @@ const AYUDA = {
   pnl: { que: "Ganancia o pérdida no realizada",
     como: "La diferencia entre lo que valen hoy y lo que te costaron, comisiones incluidas. Cada compra se convirtió a dólares con el MEP del día en que la hiciste, no con el de hoy.",
     umbral: "Es lo que ganarías o perderías si vendieras todo ahora." },
+  realizado: { que: "Ganancia o pérdida ya cerrada",
+    como: "Lo que dejaron las posiciones que vendiste, netas de comisiones. Cada pata se convierte a dólares con el MEP de su propia fecha, así el resultado no mezcla el movimiento del tipo de cambio con el del activo.",
+    umbral: "Ya está cobrado: no cambia con el precio de mañana." },
   sharpe: { que: "Sharpe",
     como: "Cuánto retorno conseguís por cada unidad de riesgo que asumís. Compara tu ganancia contra la de una letra del Tesoro, que no tiene riesgo.",
     umbral: "Por debajo de 0,5 el riesgo no se está pagando. Arriba de 1 es bueno; arriba de 2, excelente y poco frecuente." },
@@ -380,9 +383,14 @@ function AltaRapida({ cartera, recargar }) {
 function Posicion({ d, cartera, recargar, extras, bench }) {
   const filas = d.posiciones || [];
   const [corr, setCorr] = useState(null);
+  const [real, setReal] = useState(null);
   const r = extras?.riesgo;
   useEffect(() => { setCorr(null);
     api(`/api/correlaciones/${encodeURIComponent(cartera)}`).then(setCorr); }, [cartera]);
+  // Lo cerrado se venía guardando y neteando sin que se viera en ningún lado.
+  useEffect(() => { setReal(null);
+    api(`/api/carteras/${encodeURIComponent(cartera)}/realizado`).then(setReal); }, [cartera]);
+  const cerrado = real?.n ? real.total_usd : null;
 
   return (
     <>
@@ -394,8 +402,14 @@ function Posicion({ d, cartera, recargar, extras, bench }) {
         <Kpi etiqueta="Valor total" valor={usd(d.valor_total)} ayuda={AYUDA.valor}
              sub={d.mep_hoy ? `MEP $${d.mep_hoy}` : null} />
         <Kpi etiqueta="Costo" valor={usd(d.costo_total)} sub="comisiones incluidas" />
-        <Kpi etiqueta="Resultado" valor={usd(d.pnl)} tono={signo(d.pnl)} ayuda={AYUDA.pnl}
+        <Kpi etiqueta="Resultado abierto" valor={usd(d.pnl)} tono={signo(d.pnl)} ayuda={AYUDA.pnl}
              sub={pct(d.pnl_pct)} />
+        {cerrado != null && (
+          <Kpi etiqueta="Resultado realizado" valor={usd(cerrado)} tono={signo(cerrado)}
+               sub={`${real.n} operaciones cerradas`} ayuda={AYUDA.realizado} />)}
+        {cerrado != null && (
+          <Kpi etiqueta="Resultado total" valor={usd(d.pnl + cerrado)}
+               tono={signo(d.pnl + cerrado)} sub="abierto + cerrado" />)}
         <Kpi etiqueta="Posiciones" valor={filas.length} sub={`${new Set(filas.map(f=>f.ticker)).size} activos`} />
       </div>
       <AltaRapida cartera={cartera} recargar={recargar} />
@@ -436,6 +450,8 @@ function Posicion({ d, cartera, recargar, extras, bench }) {
         </div>
       </div>
 
+      {real?.n > 0 && <PnlRealizado real={real} />}
+
       {/* 3 · En qué está invertida */}
       <Seccion titulo="En qué está invertida" />
       {extras?.composicion
@@ -470,6 +486,72 @@ function Posicion({ d, cartera, recargar, extras, bench }) {
             : <Momentum d={extras.momentum} />)
         : <div className="cargando">Midiendo el momentum…</div>}
     </>
+  );
+}
+
+function PnlRealizado({ real }) {
+  const [detalle, setDetalle] = useState(false);
+  // Setenta y tres operaciones sueltas no dicen nada; agrupadas por ticker sí:
+  // qué papel dejó plata y cuál se la llevó.
+  const porTicker = Object.values((real.trades || []).reduce((acc, t) => {
+    const x = acc[t.ticker] || (acc[t.ticker] = { ticker: t.ticker, n: 0, pnl: 0, moneda: t.moneda });
+    x.n += 1; x.pnl += t.pnl_usd;
+    return acc;
+  }, {})).sort((a, b) => b.pnl - a.pnl);
+  const ganadores = porTicker.filter((x) => x.pnl > 0);
+  const acierto = porTicker.length ? ganadores.length / porTicker.length * 100 : 0;
+
+  return (
+    <div className="panel">
+      <h3>Posiciones cerradas
+        <button className="btn" style={{ marginLeft: "auto", padding: "3px 11px", fontSize: 12.5 }}
+                onClick={() => setDetalle(!detalle)}>
+          {detalle ? "Ver resumen" : `Ver las ${real.n} operaciones`}</button>
+      </h3>
+      <div className="tabla-wrap"><table>
+        {detalle ? (
+          <>
+            <thead><tr><th>Ticker</th><th>Compra</th><th>Venta</th><th className="n">Cantidad</th>
+              <th className="n">Precio compra</th><th className="n">Precio venta</th>
+              <th>Moneda</th><th className="n">Resultado</th></tr></thead>
+            <tbody>{[...real.trades].sort((a, b) => (a.sell_date < b.sell_date ? 1 : -1)).map((t, i) => (
+              <tr key={i}>
+                <td className="mono">{t.ticker}</td>
+                <td className="mono">{t.buy_date}</td>
+                <td className="mono">{t.sell_date}</td>
+                <td className="n">{num(t.qty, 2)}</td>
+                <td className="n">{num(t.buy_price, 2)}</td>
+                <td className="n">{num(t.sell_price, 2)}</td>
+                <td>{t.moneda}</td>
+                <td className={"n " + signo(t.pnl_usd)}>{usd(t.pnl_usd)}</td>
+              </tr>))}</tbody>
+          </>
+        ) : (
+          <>
+            <thead><tr><th>Ticker</th><th className="n">Operaciones</th>
+              <th className="n">Resultado neto</th></tr></thead>
+            <tbody>{porTicker.map((x) => (
+              <tr key={x.ticker}>
+                <td className="mono">{x.ticker}</td>
+                <td className="n">{x.n}</td>
+                <td className={"n " + signo(x.pnl)}>{usd(x.pnl)}</td>
+              </tr>))}
+              <tr style={{ fontWeight: 700 }}>
+                <td>NETO</td><td className="n">{real.n}</td>
+                <td className={"n " + signo(real.total_usd)}>{usd(real.total_usd)}</td>
+              </tr>
+            </tbody>
+          </>
+        )}
+      </table></div>
+      <div className="pie">
+        Cada operación se convierte a dólares con el MEP de <b>su propia fecha</b>: el de la
+        compra para la compra y el de la venta para la venta, así el resultado no mezcla el
+        movimiento del tipo de cambio con el del activo. Neteo FIFO contra las compras más
+        viejas. {num(ganadores.length, 0)} de {porTicker.length} tickers cerraron en verde
+        ({num(acierto, 0)} %).
+      </div>
+    </div>
   );
 }
 
@@ -2497,7 +2579,7 @@ function Carteras({ carteras, recargar }) {
             <input type="file" accept=".csv" hidden
                    onChange={(e) => e.target.files[0] && subir(e.target.files[0], "importar")} />
           </label>
-          <label className="btn">CSV de Yahoo Finance
+          <label className="btn yahoo">Importar de <b>yahoo!</b> finance
             <input type="file" accept=".csv" hidden
                    onChange={(e) => e.target.files[0] && subir(e.target.files[0], "importar-yahoo")} />
           </label>
