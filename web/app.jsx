@@ -504,9 +504,13 @@ function AltaDividendo({ cartera, recargar }) {
   // dividendo suele acreditarse en pesos. Darlo por sentado multiplica el
   // importe por el MEP y nadie se entera.
   const sugerirMoneda = async (i, ticker) => {
-    if (!ticker || filas[i]?.moneda) return;
+    if (!ticker) return;
     const r = await api(`/api/validar/${encodeURIComponent(ticker)}`);
-    if (r?.moneda) set(i, "moneda", r.moneda);
+    // De paso avisa si el ticker no existe: siete dividendos de Apple quedaron
+    // cargados en APPLD.BA —el papel es AAPLD.BA— y el error solo se ve como
+    // una fila de más en la tabla, meses después.
+    setFilas((f) => f.map((x, j) => (j !== i ? x : {
+      ...x, existe: !!r?.valido, moneda: x.moneda || r?.moneda || "" })));
   };
   // La fila nueva hereda ticker, cantidad y modo de la anterior: seis cobros de
   // un mismo papel se cargan cambiando nada más que la fecha y el importe.
@@ -549,7 +553,10 @@ function AltaDividendo({ cartera, recargar }) {
             const total = f.por_accion ? qty * imp : imp;
             return (
               <tr key={i}>
-                <td><input type="text" value={f.ticker} style={{ width: 110 }}
+                <td><input type="text" value={f.ticker}
+                           style={{ width: 110,
+                                    borderColor: f.existe === false ? "var(--negativo)" : "" }}
+                           title={f.existe === false ? "No se encontraron precios para ese ticker" : ""}
                            placeholder="METR.BA"
                            onBlur={(e) => sugerirMoneda(i, e.target.value.trim().toUpperCase())}
                            onChange={(e) => set(i, "ticker", e.target.value.toUpperCase())} /></td>
@@ -595,6 +602,12 @@ function AltaDividendo({ cartera, recargar }) {
           </span>)}
       </div>
       {msg && <div className={"aviso " + (msg.mal ? "mal" : "ok")}>{msg.mal || msg.ok}</div>}
+      {filas.some((f) => f.existe === false) && (
+        <div className="aviso ojo">
+          <b>{filas.filter((f) => f.existe === false).map((f) => f.ticker).join(", ")}</b>: no se
+          encontraron precios para ese ticker. Se puede cargar igual, pero revisá que esté bien
+          escrito — un dividendo bajo un ticker que no existe queda suelto, sin sumarse al papel.
+        </div>)}
       <div className="pie">
         Un dividendo <b>no toca la posición</b>: no suma papeles ni cambia el costo de nada.
         Entra como resultado del día que se cobró y, si es en pesos, se convierte a dólares con
