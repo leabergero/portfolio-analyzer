@@ -586,62 +586,144 @@ def riesgo_cambiario(posiciones) -> dict:
     }
 
 
-# ── Ajuste a un VaR objetivo ──────────────────────────────────────────────────
+# ── Rebalanceo a un VaR objetivo ──────────────────────────────────────────────
 
-def ajustar_a_var(posiciones, var_objetivo_pct: float, benchmark: str = "SP500") -> dict:
-    """Cuánto habría que desarmar para que la pérdida de un día malo no supere X.
+def rebalancear_a_var(posiciones, var_objetivo_pct: float,
+                      benchmark: str = "SP500") -> dict:
+    """Qué comprar y qué vender para que la cartera no pase de cierto riesgo.
 
-    No reoptimiza la cartera: calcula la fracción a mantener invertida —el resto
-    queda en dólares— y qué se vende de cada posición. Es la respuesta directa a
-    "no quiero perder más de tanto en un día".
+    **Rebalancea, no liquida.** La cartera sigue invertida al 100 %: se cambia
+    la MEZCLA para que la pérdida de un día malo caiga al límite pedido. Reducir
+    todo proporcionalmente y pasar el resto a dólares también baja el VaR, pero
+    no es lo que quiere alguien que pregunta esto — quiere seguir invertido con
+    menos riesgo, no estar menos invertido.
 
-    Escalar funciona porque el VaR es homogéneo de grado 1 en el capital
-    invertido: la mitad de la cartera tiene la mitad del VaR en dólares.
+    Se busca el cambio MÁS CHICO que cumple la restricción:
+
+        min  Σ (wᵢ − wᵢ⁰)²        el menor movimiento respecto de hoy
+        s.a. μₚ + z₅ · σₚ ≥ objetivo
+             Σwᵢ = 1,  wᵢ ≥ 0
+
+    Minimizar la distancia a la cartera actual —y no maximizar el retorno—
+    respeta las decisiones ya tomadas: la pregunta es "cómo bajo el riesgo",
+    no "cuál es la mejor cartera", que para eso está Markowitz.
+
+    La optimización usa el VaR paramétrico porque es diferenciable; el histórico
+    del resultado se calcula después y se informa, para que la diferencia entre
+    ambos quede a la vista en vez de escondida.
     """
+    from scipy.optimize import minimize
+
     from core.models.portfolio import matriz_retornos, value_weights
 
     objetivo = -abs(float(var_objetivo_pct)) / 100.0
     ret_df, precios = matriz_retornos(posiciones)
-    if ret_df.empty:
-        return {"error": "Sin datos suficientes."}
+    if ret_df.shape[1] < 2:
+        return {"error": "Hacen falta al menos dos activos para rebalancear."}
 
     tickers = list(ret_df.columns)
-    w = value_weights(posiciones, precios, tickers)
-    cartera = ret_df[tickers].to_numpy() @ w
-    var_actual = var_historico(cartera, 0.05)
+    n = len(tickers)
+    w0 = value_weights(posiciones, precios, tickers)
+    mu = ret_df.mean().to_numpy()
+    cov = ret_df.cov().to_numpy()
+    z = float(stats.norm.ppf(0.05))
+
     valor_total = sum(float(p.get("qty", 0)) * precios[t]
                       for p in posiciones
                       for t in [str(p["ticker"]).upper()] if t in precios)
 
-    if var_actual >= objetivo:
-        return {"ya_cumple": True, "var_actual_pct": round(var_actual * 100, 3),
+    def var_parametrico(w):
+        return float(w @ mu + z * np.sqrt(w @ cov @ w))
+
+    var_actual_hist = var_historico(ret_df[tickers].to_numpy() @ w0, 0.05)
+    var_actual_param = var_parametrico(w0)
+    if var_actual_hist >= objetivo and var_actual_param >= objetivo:
+        return {"ya_cumple": True,
+                "var_actual_pct": round(var_actual_hist * 100, 3),
                 "var_objetivo_pct": round(objetivo * 100, 3),
                 "valor_total": round(valor_total, 2),
                 "mensaje": "La cartera ya está por debajo de ese límite: no hace falta "
-                           "vender nada."}
+                           "mover nada."}
 
-    fraccion = objetivo / var_actual        # < 1
-    liquidez = 1 - fraccion
-    ajustes = [{
-        "ticker": t,
-        "peso_actual_pct": round(float(w[i]) * 100, 2),
-        "peso_nuevo_pct": round(float(w[i]) * fraccion * 100, 2),
-        "vender_usd": round(float(w[i]) * valor_total * liquidez, 2),
-        "vender_unidades": round(float(w[i]) * valor_total * liquidez / precios[t], 3)
-                           if precios.get(t) else None,
-    } for i, t in enumerate(tickers)]
+    # ¿Hasta dónde se puede bajar el riesgo sin vender? El piso NO es la cartera
+    # de mínima varianza: minimizar σ no minimiza el VaR, porque VaR = μ + z·σ y
+    # una cartera muy tranquila con retorno esperado bajo puede tener PEOR VaR
+    # que otra más volátil pero con más retorno. Hay que optimizar el VaR mismo.
+    limites = tuple((0.0, 1.0) for _ in range(n))
+    suma_uno = ({"type": "eq", "fun": lambda w: w.sum() - 1.0},)
+    mejor = minimize(lambda w: -var_parametrico(w), w0, method="SLSQP",
+                     bounds=limites, constraints=suma_uno,
+                     options={"maxiter": 300, "ftol": 1e-12})
+    w_piso = mejor.x if mejor.success else w0
+    var_piso = var_parametrico(w_piso)
+
+    # El VaR es NEGATIVO: "no alcanzable" es que el mejor posible siga siendo
+    # más negativo que el objetivo.
+    if var_piso < objetivo:
+        return {"alcanzable": False,
+                "var_actual_pct": round(var_actual_hist * 100, 3),
+                "var_objetivo_pct": round(objetivo * 100, 3),
+                "var_minimo_posible_pct": round(var_piso * 100, 3),
+                "pesos_minimo_riesgo": {t: round(float(w_piso[i]) * 100, 2)
+                                        for i, t in enumerate(tickers)},
+                "mensaje": f"Con estos activos no se puede bajar de "
+                           f"{abs(var_piso) * 100:.2f} % sin vender. Esa es la mejor mezcla "
+                           f"posible de lo que ya tenés; para ir más abajo hay que incorporar "
+                           f"algo menos volátil o dejar una parte en dólares."}
+
+    resultado = minimize(
+        lambda w: float(((w - w0) ** 2).sum()), w0, method="SLSQP",
+        bounds=tuple((0.0, 1.0) for _ in range(n)),
+        constraints=(
+            {"type": "eq", "fun": lambda w: w.sum() - 1.0},
+            {"type": "ineq", "fun": lambda w: var_parametrico(w) - objetivo},
+        ),
+        options={"maxiter": 300, "ftol": 1e-10})
+
+    w1 = resultado.x if resultado.success else w_min
+    r1 = ret_df[tickers].to_numpy() @ w1
+    r0 = ret_df[tickers].to_numpy() @ w0
+
+    ordenes = []
+    for i, t in enumerate(tickers):
+        delta = float(w1[i] - w0[i])
+        usd = delta * valor_total
+        ordenes.append({
+            "ticker": t,
+            "peso_actual_pct": round(float(w0[i]) * 100, 2),
+            "peso_nuevo_pct": round(float(w1[i]) * 100, 2),
+            "delta_pct": round(delta * 100, 2),
+            "monto_usd": round(usd, 2),
+            "unidades": round(usd / precios[t], 3) if precios.get(t) else None,
+            "accion": "COMPRAR" if delta > 0.002 else ("VENDER" if delta < -0.002 else "MANTENER"),
+        })
+
+    rotacion = float(np.abs(w1 - w0).sum() / 2)
 
     return {
-        "ya_cumple": False,
-        "var_actual_pct": round(var_actual * 100, 3),
+        "ya_cumple": False, "alcanzable": True, "convergio": bool(resultado.success),
         "var_objetivo_pct": round(objetivo * 100, 3),
-        "var_actual_usd": round(var_actual * valor_total, 2),
-        "var_objetivo_usd": round(objetivo * valor_total, 2),
-        "invertido_pct": round(fraccion * 100, 1),
-        "liquidez_pct": round(liquidez * 100, 1),
-        "a_liquidar_usd": round(liquidez * valor_total, 2),
         "valor_total": round(valor_total, 2),
-        "ajustes": sorted(ajustes, key=lambda a: -a["vender_usd"]),
-        "nota": "Se reduce la exposición de forma proporcional y el resto queda en "
-                "dólares. No cambia la composición relativa: para eso está Markowitz.",
+        "antes": {
+            "var95_pct": round(var_actual_hist * 100, 3),
+            "var95_usd": round(var_actual_hist * valor_total, 2),
+            "volatilidad_pct": round(float(r0.std(ddof=1)) * np.sqrt(RUEDAS) * 100, 2),
+            "retorno_anual_pct": round(float((1 + r0.mean()) ** RUEDAS - 1) * 100, 2),
+        },
+        "despues": {
+            "var95_pct": round(var_historico(r1, 0.05) * 100, 3),
+            "var95_usd": round(var_historico(r1, 0.05) * valor_total, 2),
+            "var95_parametrico_pct": round(var_parametrico(w1) * 100, 3),
+            "volatilidad_pct": round(float(r1.std(ddof=1)) * np.sqrt(RUEDAS) * 100, 2),
+            "retorno_anual_pct": round(float((1 + r1.mean()) ** RUEDAS - 1) * 100, 2),
+        },
+        "ordenes": sorted(ordenes, key=lambda o: o["monto_usd"]),
+        "rotacion_pct": round(rotacion * 100, 2),
+        "a_operar_usd": round(rotacion * valor_total * 2, 2),
+        "nota": "La cartera queda invertida al 100 %: se cambia la mezcla, no el nivel de "
+                "exposición. Se busca el movimiento más chico que cumple el límite, para "
+                "no deshacer decisiones que ya tomaste.",
+        "nota_metodo": "La optimización usa el VaR paramétrico porque es derivable; el "
+                       "histórico del resultado se calcula aparte y se muestra al lado, "
+                       "así la diferencia entre ambos queda a la vista.",
     }

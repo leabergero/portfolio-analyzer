@@ -450,6 +450,54 @@ function Posicion({ d, cartera, recargar, extras }) {
   );
 }
 
+/* Vive acá, junto a Posición, que es donde se muestra. Se perdió una vez al
+   reescribir Riesgo y la app quedó rota sin que Babel lo notara: una referencia
+   a un componente inexistente es un error de EJECUCIÓN, no de sintaxis. */
+function MatrizCorrelaciones({ corr }) {
+  const c = colores();
+  const [enCaidas, setEnCaidas] = useState(false);
+  const m = enCaidas && corr.matriz_caidas ? corr.matriz_caidas : corr.matriz;
+  const tono = { defensiva: "ok", mixta: "ojo", agresiva: "mal" }[corr.caracter];
+  return (
+    <div className="panel">
+      <h3>¿Defensiva o agresiva?
+        <span className={"chip " + tono} style={{ marginLeft: 8 }}>{corr.caracter}</span>
+        {corr.matriz_caidas && (
+          <button className="btn" style={{ marginLeft: "auto", padding: "3px 10px", fontSize: 12 }}
+                  onClick={() => setEnCaidas(!enCaidas)}>
+            {enCaidas ? "Ver días normales" : "Ver solo días de caída"}</button>)}
+      </h3>
+      <div className="fila f2" style={{ marginTop: 10, marginBottom: 0 }}>
+        <Grafico alto={Math.max(260, corr.tickers.length * 44)}
+          datos={[{ type: "heatmap", z: m, x: corr.tickers, y: corr.tickers,
+                    zmin: -1, zmax: 1, colorscale: [[0, c.negativo], [0.5, c.panel], [1, c.acento]],
+                    text: m.map((f) => f.map((v) => v.toFixed(2))),
+                    texttemplate: "%{text}", textfont: { size: 10 },
+                    hovertemplate: "%{y} ↔ %{x}: %{z:.2f}<extra></extra>",
+                    colorbar: { thickness: 10, len: 0.8 } }]}
+          layout={{ margin: { l: 80, b: 70, t: 10, r: 10 } }} />
+        <div>
+          <div className="kpis" style={{ gridTemplateColumns: "1fr 1fr" }}>
+            <Kpi etiqueta="Correlación media" valor={num(corr.correlacion_media, 3)}
+                 ayuda={{ que: "Correlación media entre pares",
+                          como: "Cuánto se mueven juntos tus activos, en promedio. Va de −1 a 1.",
+                          umbral: "Debajo de 0,3 la cartera es defensiva; arriba de 0,6, agresiva: casi todo se mueve junto." }} />
+            <Kpi etiqueta="En días de caída" valor={num(corr.correlacion_media_en_caidas, 3)}
+                 tono={corr.aviso_caidas ? "neg" : ""} sub="el 10 % de días peores" />
+          </div>
+          <div className={"aviso " + tono}>{corr.lectura}</div>
+          {corr.aviso_caidas && <div className="aviso mal">{corr.aviso_caidas}</div>}
+          {corr.par_mas_correlacionado && (
+            <div className="pie">
+              El par que más se mueve junto: <b>{corr.par_mas_correlacionado.a} ↔ {corr.par_mas_correlacionado.b}</b> ({corr.par_mas_correlacionado.corr}).
+              El que menos: <b>{corr.par_menos_correlacionado.a} ↔ {corr.par_menos_correlacionado.b}</b> ({corr.par_menos_correlacionado.corr}).
+            </div>)}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Seccion({ titulo }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 12, margin: "26px 0 12px" }}>
@@ -628,29 +676,27 @@ function Composicion({ d }) {
   );
 }
 
-/* ── Riesgo ── */
-// Correlaciones, distribución y momentum se mudaron a Posición: son parte del
-// retrato de la cartera, no de la profundización del riesgo.
-const SUB_RIESGO = [["resumen","Resumen"],["activos","Por activo"],
-                    ["evolucion","Evolución del riesgo"],["cambiario","Tipo de cambio"],
-                    ["stress","Stress"],["limite","Poner un límite"]];
-
+/* ── Riesgo ──
+   Una sola página que se lee de arriba abajo, no sub-pestañas: el riesgo se
+   entiende encadenando —cuánto puedo perder, cuándo se disparó, qué activo lo
+   trae, cuánto es del dólar, qué pasó en crisis reales, y qué haría para
+   bajarlo—. Saltar de pestaña rompía esa lectura. */
 function Riesgo({ d, cartera, extras }) {
-  const [sub, setSub] = useState("resumen");
   return (
     <>
       <KpisRiesgo d={d} />
-      <div className="tabs" style={{ marginTop: 4 }}>
-        {SUB_RIESGO.map(([k, t]) => (
-          <button key={k} className={"tab" + (sub === k ? " on" : "")}
-                  onClick={() => setSub(k)}>{t}</button>))}
-      </div>
-      {sub === "resumen" && <RiesgoResumen d={d} />}
-      {sub === "activos" && <RiesgoActivos cartera={cartera} />}
-      {sub === "evolucion" && <RiesgoEvolucion cartera={cartera} />}
-      {sub === "cambiario" && <RiesgoCambiario cartera={cartera} />}
-      {sub === "stress" && (extras.stress ? <Stress d={extras.stress} /> : <div className="cargando">Calculando…</div>)}
-      {sub === "limite" && <RiesgoLimite cartera={cartera} d={d} />}
+      <Seccion titulo="¿Cuándo se disparó el riesgo?" />
+      <RiesgoEvolucion cartera={cartera} />
+      <Seccion titulo="El riesgo de cada activo por separado" />
+      <RiesgoActivos cartera={cartera} />
+      <Seccion titulo="Quién trae el riesgo de la cartera" />
+      <RiesgoResumen d={d} />
+      <Seccion titulo="¿Cuánto del riesgo es el dólar?" />
+      <RiesgoCambiario cartera={cartera} />
+      <Seccion titulo="Qué habría pasado en crisis reales" />
+      {extras.stress ? <Stress d={extras.stress} /> : <div className="cargando">Calculando…</div>}
+      <Seccion titulo="Ponerle un techo al riesgo" />
+      <RiesgoLimite cartera={cartera} d={d} />
     </>
   );
 }
@@ -678,12 +724,11 @@ function RiesgoResumen({ d }) {
   const c = colores();
   const contrib = d.contribucion_riesgo || [];
   const desbalance = contrib.filter((x) => x.ratio && x.ratio > 1.5);
-
   return (
     <>
       <div className="fila f2">
         <div className="panel">
-          <h3>Quién trae el riesgo</h3>
+          <h3>Peso contra aporte al riesgo</h3>
           <Grafico alto={Math.max(220, contrib.length * 46)}
             datos={[
               { type: "bar", orientation: "h", name: "aporte al riesgo",
@@ -716,58 +761,11 @@ function RiesgoResumen({ d }) {
           </div>
         </div>
       </div>
-
       {desbalance.length > 0 && (
         <div className="aviso ojo"><b>Riesgo concentrado.</b>{" "}
           {desbalance.map((x) => `${x.ticker} pesa ${x.peso_pct} % y aporta ${x.riesgo_pct} % del riesgo`).join(" · ")}.
-        </div>
-      )}
+        </div>)}
     </>
-  );
-}
-
-function MatrizCorrelaciones({ corr }) {
-  const c = colores();
-  const [enCaidas, setEnCaidas] = useState(false);
-  const m = enCaidas && corr.matriz_caidas ? corr.matriz_caidas : corr.matriz;
-  const tono = { defensiva: "ok", mixta: "ojo", agresiva: "mal" }[corr.caracter];
-  return (
-    <div className="panel" style={{ marginTop: 14 }}>
-      <h3>¿Defensiva o agresiva?
-        <span className={"chip " + tono} style={{ marginLeft: 8 }}>{corr.caracter}</span>
-        {corr.matriz_caidas && (
-          <button className="btn" style={{ marginLeft: "auto", padding: "3px 10px", fontSize: 12 }}
-                  onClick={() => setEnCaidas(!enCaidas)}>
-            {enCaidas ? "Ver días normales" : "Ver solo días de caída"}</button>)}
-      </h3>
-      <div className="fila f2" style={{ marginTop: 10, marginBottom: 0 }}>
-        <Grafico alto={Math.max(260, corr.tickers.length * 44)}
-          datos={[{ type: "heatmap", z: m, x: corr.tickers, y: corr.tickers,
-                    zmin: -1, zmax: 1, colorscale: [[0, c.negativo], [0.5, c.panel], [1, c.acento]],
-                    text: m.map((f) => f.map((v) => v.toFixed(2))),
-                    texttemplate: "%{text}", textfont: { size: 10 },
-                    hovertemplate: "%{y} ↔ %{x}: %{z:.2f}<extra></extra>",
-                    colorbar: { thickness: 10, len: 0.8 } }]}
-          layout={{ margin: { l: 80, b: 70, t: 10, r: 10 } }} />
-        <div>
-          <div className="kpis" style={{ gridTemplateColumns: "1fr 1fr" }}>
-            <Kpi etiqueta="Correlación media" valor={num(corr.correlacion_media, 3)}
-                 ayuda={{ que: "Correlación media entre pares",
-                          como: "Cuánto se mueven juntos tus activos, en promedio. Va de −1 a 1.",
-                          umbral: "Debajo de 0,3 la cartera es defensiva; arriba de 0,6, agresiva: casi todo se mueve junto." }} />
-            <Kpi etiqueta="En días de caída" valor={num(corr.correlacion_media_en_caidas, 3)}
-                 tono={corr.aviso_caidas ? "neg" : ""} sub="el 10 % de días peores" />
-          </div>
-          <div className={"aviso " + tono}>{corr.lectura}</div>
-          {corr.aviso_caidas && <div className="aviso mal">{corr.aviso_caidas}</div>}
-          {corr.par_mas_correlacionado && (
-            <div className="pie">
-              El par que más se mueve junto: <b>{corr.par_mas_correlacionado.a} ↔ {corr.par_mas_correlacionado.b}</b> ({corr.par_mas_correlacionado.corr}).
-              El que menos: <b>{corr.par_menos_correlacionado.a} ↔ {corr.par_menos_correlacionado.b}</b> ({corr.par_menos_correlacionado.corr}).
-            </div>)}
-        </div>
-      </div>
-    </div>
   );
 }
 
@@ -844,37 +842,67 @@ function RiesgoEvolucion({ cartera }) {
   if (!d) return <div className="cargando">Calculando la ventana móvil…</div>;
   if (d.error) return <div className="aviso mal">{d.error}</div>;
 
-  const marcas = (d.eventos || []).map((e) => ({
-    type: "line", x0: e.fecha, x1: e.fecha, yref: "paper", y0: 0, y1: 1,
-    line: { color: e.alcance === "AR" ? c.series[3] : c.series[4], width: 1, dash: "dot" },
-  }));
+  const ev = d.eventos || [];
+  // Los eventos se dibujan como marcadores sobre la propia serie del VaR, no
+  // como líneas punteadas de un píxel: así se ven, se pueden apuntar con el
+  // mouse y se lee qué pasó ese día. Antes estaban pero eran invisibles y mudos.
+  const porFecha = Object.fromEntries(d.serie.map((p) => [p.fecha, p.var95_pct]));
+  const cercano = (f) => porFecha[f] ??
+    (d.serie.reduce((mejor, p) =>
+      Math.abs(new Date(p.fecha) - new Date(f)) < Math.abs(new Date(mejor.fecha) - new Date(f))
+        ? p : mejor, d.serie[0]).var95_pct);
+
   return (
     <>
       <div className="panel">
-        <h3>Cuándo se disparó el riesgo</h3>
-        <Grafico alto={360}
+        <h3>Pérdida en un día malo, a lo largo del tiempo</h3>
+        <Grafico alto={400}
           datos={[
-            { type: "scatter", mode: "lines", name: "pérdida en un día malo",
+            { type: "scatter", mode: "lines", name: "día malo (VaR 95 %)",
               x: d.serie.map((p) => p.fecha), y: d.serie.map((p) => p.var95_pct),
-              line: { color: c.negativo, width: 1.8 } },
-            { type: "scatter", mode: "lines", name: "pérdida en un día muy malo",
+              line: { color: c.negativo, width: 1.9 },
+              hovertemplate: "%{x}<br>%{y:.2f} %<extra></extra>" },
+            { type: "scatter", mode: "lines", name: "día muy malo (CVaR 95 %)",
               x: d.serie.map((p) => p.fecha), y: d.serie.map((p) => p.cvar95_pct),
-              line: { color: c.alerta, width: 1.2, dash: "dot" } }]}
-          layout={{ shapes: marcas, yaxis: { title: "Pérdida diaria", ticksuffix: " %" } }} />
+              line: { color: c.alerta, width: 1.2, dash: "dot" },
+              hovertemplate: "%{x}<br>%{y:.2f} %<extra></extra>" },
+            { type: "scatter", mode: "markers", name: "eventos argentinos",
+              x: ev.filter((e) => e.alcance === "AR").map((e) => e.fecha),
+              y: ev.filter((e) => e.alcance === "AR").map((e) => cercano(e.fecha)),
+              marker: { symbol: "diamond", size: 11, color: c.series[3],
+                        line: { width: 1.2, color: c.panel } },
+              text: ev.filter((e) => e.alcance === "AR").map((e) => e.descripcion),
+              hovertemplate: "<b>%{x}</b><br>%{text}<extra></extra>" },
+            { type: "scatter", mode: "markers", name: "eventos mundiales",
+              x: ev.filter((e) => e.alcance !== "AR").map((e) => e.fecha),
+              y: ev.filter((e) => e.alcance !== "AR").map((e) => cercano(e.fecha)),
+              marker: { symbol: "circle", size: 10, color: c.series[4],
+                        line: { width: 1.2, color: c.panel } },
+              text: ev.filter((e) => e.alcance !== "AR").map((e) => e.descripcion),
+              hovertemplate: "<b>%{x}</b><br>%{text}<extra></extra>" },
+          ]}
+          layout={{
+            shapes: ev.map((e) => ({ type: "line", x0: e.fecha, x1: e.fecha, yref: "paper",
+              y0: 0, y1: 1, line: { color: e.alcance === "AR" ? c.series[3] : c.series[4],
+                                    width: 1, dash: "dot" }, opacity: 0.5 })),
+            yaxis: { title: "Pérdida diaria", ticksuffix: " %" } }} />
         <div className="pie">
-          VaR 95 % sobre las últimas {d.ventana_ruedas} ruedas en cada punto. Las líneas
-          verticales son eventos macro: violeta los argentinos, lila los mundiales.
+          VaR 95 % sobre las últimas {d.ventana_ruedas} ruedas en cada punto: cuando la línea
+          baja, la cartera se volvió más riesgosa. Los <b>rombos</b> son eventos argentinos y
+          los <b>círculos</b>, mundiales — apuntalos con el mouse para leer qué pasó.
+          Son contexto, no causa.
         </div>
       </div>
       <div className="panel">
-        <h3>Eventos del período</h3>
+        <h3>Los {ev.length} eventos del período</h3>
         <div className="tabla-wrap"><table>
-          <thead><tr><th>Fecha</th><th>Alcance</th><th>Qué pasó</th></tr></thead>
-          <tbody>{(d.eventos || []).slice().reverse().map((e, i) => (
+          <thead><tr><th>Fecha</th><th>Alcance</th><th>Qué pasó</th>
+            <th className="n">Día malo por entonces</th></tr></thead>
+          <tbody>{ev.slice().reverse().map((e, i) => (
             <tr key={i}><td className="mono">{e.fecha}</td>
-              <td><span className="chip">{e.alcance}</span></td><td>{e.descripcion}</td></tr>))}</tbody>
+              <td><span className="chip">{e.alcance}</span></td><td>{e.descripcion}</td>
+              <td className="n neg">{pct(cercano(e.fecha))}</td></tr>))}</tbody>
         </table></div>
-        <div className="pie">{d.nota}</div>
       </div>
     </>
   );
@@ -933,51 +961,126 @@ function RiesgoCambiario({ cartera }) {
 }
 
 function RiesgoLimite({ cartera, d }) {
-  const [objetivo, setObjetivo] = useState(Math.abs(d.var95_pct * 0.7).toFixed(2));
+  const c = colores();
+  const [objetivo, setObjetivo] = useState(Math.abs(d.var95_pct * 0.8).toFixed(2));
   const [r, setR] = useState(null);
   const [cargando, setCargando] = useState(false);
+
   const calcular = async () => {
     setCargando(true);
     setR(await api(`/api/riesgo/${encodeURIComponent(cartera)}/ajustar?var=${objetivo}`));
     setCargando(false);
   };
+
+  const ordenes = (r?.ordenes || []).filter((o) => o.accion !== "MANTENER");
+
   return (
     <>
       <div className="panel">
-        <h3>¿Cuánto tendría que desarmar para no perder más de…?</h3>
+        <h3>¿Qué tendría que comprar y vender para no pasar de cierto riesgo?</h3>
         <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginTop: 10 }}>
           <span>No quiero perder más de</span>
           <input type="number" step="0.05" min="0.05" value={objetivo}
                  onChange={(e) => setObjetivo(e.target.value)} style={{ width: 90 }} />
           <span>% en un día malo.</span>
           <button className="btn primario" onClick={calcular} disabled={cargando}>
-            {cargando ? "Calculando…" : "Calcular"}</button>
+            {cargando ? "Optimizando…" : "Calcular rebalanceo"}</button>
           <span className="pie" style={{ marginTop: 0 }}>
             Hoy: {pct(d.var95_pct)} ({usd(d.var95_usd)})</span>
         </div>
+        <div className="pie">
+          La cartera queda <b>invertida al 100 %</b>: se cambia la mezcla, no el nivel de
+          exposición. Se busca el movimiento más chico que cumple el límite, para no deshacer
+          decisiones que ya tomaste.
+        </div>
       </div>
+
       {r?.error && <div className="aviso mal">{r.error}</div>}
-      {r && !r.error && r.ya_cumple && <div className="aviso ok">{r.mensaje}</div>}
-      {r && !r.error && !r.ya_cumple && (
+      {r?.ya_cumple && <div className="aviso ok">{r.mensaje}</div>}
+      {r && r.alcanzable === false && (
         <>
-          <div className="kpis">
-            <Kpi etiqueta="Mantener invertido" valor={pct(r.invertido_pct, 1)} />
-            <Kpi etiqueta="Pasar a dólares" valor={pct(r.liquidez_pct, 1)} tono="neg"
-                 sub={usd(r.a_liquidar_usd)} />
-            <Kpi etiqueta="Día malo pasaría a ser" valor={usd(r.var_objetivo_usd)}
-                 sub={`desde ${usd(r.var_actual_usd)}`} />
-          </div>
+          <div className="aviso ojo"><b>Ese límite no se alcanza solo rebalanceando.</b> {r.mensaje}</div>
           <div className="panel">
-            <h3>Qué vender de cada posición</h3>
+            <h3>La mezcla de menor riesgo posible con estos activos</h3>
             <div className="tabla-wrap"><table>
-              <thead><tr><th>Activo</th><th className="n">Peso hoy</th><th className="n">Peso nuevo</th>
-                <th className="n">Vender</th><th className="n">Unidades</th></tr></thead>
-              <tbody>{r.ajustes.map((a) => (
-                <tr key={a.ticker}><td className="mono">{a.ticker}</td>
-                  <td className="n">{pct(a.peso_actual_pct, 1)}</td>
-                  <td className="n">{pct(a.peso_nuevo_pct, 1)}</td>
-                  <td className="n neg">{usd(a.vender_usd)}</td>
-                  <td className="n">{a.vender_unidades == null ? "—" : num(a.vender_unidades, 2)}</td>
+              <thead><tr><th>Activo</th><th className="n">Peso</th></tr></thead>
+              <tbody>{Object.entries(r.pesos_minimo_riesgo).sort((a, b) => b[1] - a[1]).map(([t, w]) => (
+                <tr key={t}><td className="mono">{t}</td><td className="n">{pct(w, 1)}</td></tr>))}</tbody>
+            </table></div>
+            <div className="pie">
+              Llega a {pct(r.var_minimo_posible_pct)} de pérdida en un día malo, contra
+              {" "}{pct(r.var_actual_pct)} de tu cartera actual.
+            </div>
+          </div>
+        </>
+      )}
+
+      {r && r.alcanzable && !r.ya_cumple && (
+        <>
+          <div className="fila f2">
+            <div className="panel">
+              <h3>Antes y después</h3>
+              <div className="tabla-wrap"><table>
+                <thead><tr><th></th><th className="n">Hoy</th><th className="n">Rebalanceada</th>
+                  <th className="n">Cambio</th></tr></thead>
+                <tbody>
+                  {[["Pérdida en un día malo", "var95_pct", true],
+                    ["Volatilidad anual", "volatilidad_pct", true],
+                    ["Retorno anual esperado", "retorno_anual_pct", false]].map(([et, k, menosEsMejor]) => {
+                    const a = r.antes[k], b = r.despues[k];
+                    const mejora = menosEsMejor ? Math.abs(b) < Math.abs(a) : b > a;
+                    return (
+                      <tr key={k}><td>{et}</td>
+                        <td className="n">{pct(a)}</td>
+                        <td className="n">{pct(b)}</td>
+                        <td className={"n " + (mejora ? "pos" : "neg")}>
+                          {(b - a >= 0 ? "+" : "") + num(b - a, 2)} pp</td>
+                      </tr>);
+                  })}
+                </tbody>
+              </table></div>
+              <div className={"aviso " + (r.despues.retorno_anual_pct < r.antes.retorno_anual_pct ? "ojo" : "ok")}>
+                Bajar el riesgo cuesta retorno: pasás de {pct(r.antes.retorno_anual_pct)} a{" "}
+                {pct(r.despues.retorno_anual_pct)} anual esperado. Ese es el precio del límite
+                que pediste, y conviene verlo antes de operar.
+              </div>
+              <div className="pie">{r.nota_metodo}</div>
+            </div>
+
+            <div className="panel">
+              <h3>Cómo se mueven los pesos</h3>
+              <Grafico alto={Math.max(230, r.ordenes.length * 46)}
+                datos={[
+                  { type: "bar", orientation: "h", name: "hoy",
+                    y: r.ordenes.map((o) => o.ticker).reverse(),
+                    x: r.ordenes.map((o) => o.peso_actual_pct).reverse(),
+                    marker: { color: c.texto3 } },
+                  { type: "bar", orientation: "h", name: "rebalanceada",
+                    y: r.ordenes.map((o) => o.ticker).reverse(),
+                    x: r.ordenes.map((o) => o.peso_nuevo_pct).reverse(),
+                    marker: { color: c.acento } }]}
+                layout={{ barmode: "group", margin: { l: 82 }, xaxis: { ticksuffix: " %" } }} />
+              <div className="pie">
+                Rotación {pct(r.rotacion_pct)}: hay que operar {usd(r.a_operar_usd)} entre
+                compras y ventas sobre una cartera de {usd(r.valor_total)}.
+              </div>
+            </div>
+          </div>
+
+          <div className="panel">
+            <h3>Órdenes</h3>
+            <div className="tabla-wrap"><table>
+              <thead><tr><th>Acción</th><th>Activo</th><th className="n">Peso hoy</th>
+                <th className="n">Peso nuevo</th><th className="n">Monto</th>
+                <th className="n">Unidades</th></tr></thead>
+              <tbody>{ordenes.map((o) => (
+                <tr key={o.ticker}>
+                  <td><span className={"chip " + (o.accion === "COMPRAR" ? "ok" : "mal")}>{o.accion}</span></td>
+                  <td className="mono">{o.ticker}</td>
+                  <td className="n">{pct(o.peso_actual_pct, 1)}</td>
+                  <td className="n">{pct(o.peso_nuevo_pct, 1)}</td>
+                  <td className={"n " + signo(o.monto_usd)}>{usd(Math.abs(o.monto_usd))}</td>
+                  <td className="n">{o.unidades == null ? "—" : num(Math.abs(o.unidades), 2)}</td>
                 </tr>))}</tbody>
             </table></div>
             <div className="pie">{r.nota}</div>

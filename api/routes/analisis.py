@@ -94,11 +94,11 @@ def riesgo_fx(nombre):
 
 @bp.get("/riesgo/<nombre>/ajustar")
 def riesgo_ajustar(nombre):
-    """Qué desarmar para que la pérdida de un día malo no supere un límite."""
+    """Qué comprar y vender para que la pérdida de un día malo no supere un límite."""
     objetivo = request.args.get("var", type=float)
     if objetivo is None:
         return jsonify({"error": "Falta el VaR objetivo (parámetro `var`, en %)."}), 400
-    return _simple(nombre, risk.ajustar_a_var, objetivo,
+    return _simple(nombre, risk.rebalancear_a_var, objetivo,
                    request.args.get("benchmark", "SP500"))
 
 
