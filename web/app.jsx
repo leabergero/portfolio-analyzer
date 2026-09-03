@@ -172,8 +172,8 @@ function Barra({ modo, setModo, tema, setTema, carteras, cartera, setCartera }) 
       <div className="marca">Portfolio <span>Analyzer</span></div>
       <div className="modos">
         {[["analisis", "Análisis"], ["comparacion", "Comparación"],
-          ["carteras", "Carteras"], ["mercado", "Mercado"],
-          ["conectores", "Conectores"]].map(([k, t]) => (
+          ["carteras", "Carteras"], ["mercado", "Dólar MEP"],
+          ["conectores", "Conectores"], ["cocos", "Cocos"]].map(([k, t]) => (
           <button key={k} className={"modo" + (modo === k ? " on" : "")}
                   onClick={() => setModo(k)}>{t}</button>
         ))}
@@ -746,7 +746,7 @@ function PnlRealizado({ real, cartera, recargar }) {
               <>
                 <thead><tr><th>Ticker</th><th>Compra</th><th>Venta</th><th className="n">Cantidad</th>
                   <th className="n">Precio compra</th><th className="n">Precio venta</th>
-                  <th className="n">MEP compra</th><th className="n">MEP venta</th>
+                  <th className="n">Dólar compra → venta</th>
                   <th className="n">Resultado origen</th>
                   <th className="n">Resultado inversión</th>
                   <th className="n">Resultado tipo de cambio</th>
@@ -760,12 +760,16 @@ function PnlRealizado({ real, cartera, recargar }) {
                     <td className="n">{num(t.qty, 2)}</td>
                     <td className="n">{num(t.buy_price, 2)}</td>
                     <td className="n">{num(t.sell_price, 2)}</td>
-                    <td className="n">{t.mep_compra ? num(t.mep_compra, 2) : "—"}</td>
-                    <td className="n">{t.mep_venta ? num(t.mep_venta, 2) : "—"}</td>
+                    <td className={"n " + signo(t.pnl_fx_usd)}>
+                      {t.mep_compra && t.mep_venta
+                        ? `${num(t.mep_compra, 2)} → ${num(t.mep_venta, 2)}  ` +
+                          `(${t.mep_venta >= t.mep_compra ? "+" : ""}` +
+                          `${num((t.mep_venta / t.mep_compra - 1) * 100, 1)}%)`
+                        : "—"}</td>
                     <td className={"n " + signo(t.pnl_origen)}>
                       {num(t.pnl_origen, 2)} {t.moneda}</td>
                     <td className={"n " + signo(t.pnl_activo_usd)}>{usd(t.pnl_activo_usd)}</td>
-                    <td className={"n " + (t.pnl_fx_usd ? signo(t.pnl_fx_usd) : "")}>
+                    <td className={"n " + (t.pnl_fx_usd ? "fx " + signo(t.pnl_fx_usd) : "")}>
                       {t.pnl_fx_usd ? usd(t.pnl_fx_usd) : "—"}</td>
                     <td className={"n " + signo(t.pnl_usd)}>{usd(t.pnl_usd)}</td>
                   </tr>))}</tbody>
@@ -783,7 +787,7 @@ function PnlRealizado({ real, cartera, recargar }) {
                     <td className="n">{x.n}</td>
                     <td className={"n " + signo(x.origen)}>{num(x.origen, 2)} {x.moneda}</td>
                     <td className={"n " + signo(x.activo)}>{usd(x.activo)}</td>
-                    <td className={"n " + (x.fx ? signo(x.fx) : "")}>
+                    <td className={"n " + (x.fx ? "fx " + signo(x.fx) : "")}>
                       {x.fx ? usd(x.fx) : "—"}</td>
                     <td className={"n " + signo(x.usd)}>{usd(x.usd)}</td>
                   </tr>))}
@@ -792,7 +796,7 @@ function PnlRealizado({ real, cartera, recargar }) {
                     <td className="n">{enPesos != null ? `${num(enPesos, 2)} ARS` : ""}
                       {enDolar != null ? ` · ${num(enDolar, 2)} USD` : ""}</td>
                     <td className={"n " + signo(real.total_activo_usd)}>{usd(real.total_activo_usd)}</td>
-                    <td className={"n " + signo(real.total_fx_usd)}>{usd(real.total_fx_usd)}</td>
+                    <td className={"n fx " + signo(real.total_fx_usd)}>{usd(real.total_fx_usd)}</td>
                     <td className={"n " + signo(real.total_usd)}>{usd(real.total_usd)}</td>
                   </tr>
                 </tbody>
@@ -1635,11 +1639,12 @@ function Markowitz({ d, cartera, bench, extras }) {
 }
 
 /* ── Monte Carlo ── */
-const SUB_MC = [["abanico","Abanico"],["activos","Por activo"],
-                ["correlaciones","Correlaciones en el tiempo"],["motores","Motores"]];
 
 function MonteCarlo({ d, cartera }) {
-  const [sub, setSub] = useState("abanico");
+  // Un solo botón para todo: el abanico abriéndose rueda a rueda y las
+  // correlaciones moviéndose en el tiempo son la misma película contada dos
+  // veces, y tenerlas en pestañas separadas obligaba a arrancar cada una a mano.
+  const [corriendo, setCorriendo] = useState(false);
   const f = d.final || {};
   return (
     <>
@@ -1654,15 +1659,21 @@ function MonteCarlo({ d, cartera }) {
         <Kpi etiqueta="Probabilidad de ganar" valor={pct(f.prob_ganancia, 1)}
              tono={f.prob_ganancia > 50 ? "pos" : "neg"} />
       </div>
-      <div className="tabs" style={{ marginTop: 4 }}>
-        {SUB_MC.map(([k, t]) => (
-          <button key={k} className={"tab" + (sub === k ? " on" : "")}
-                  onClick={() => setSub(k)}>{t}</button>))}
+
+      <div className="panel" style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <button className="btn primario" onClick={() => setCorriendo(!corriendo)}>
+          {corriendo ? "⏸ Detener la simulación" : "▶ Reproducir la simulación"}
+        </button>
+        <span style={{ fontSize: 12.5, color: "var(--texto-3)" }}>
+          Mueve a la vez el abanico y las correlaciones: cómo se abre el rango de
+          resultados rueda a rueda, y cómo se movió lo que los activos tienen en común.
+        </span>
       </div>
-      {sub === "abanico" && <DistribucionFinal d={d} />}
-      {sub === "activos" && <McPorActivo cartera={cartera} horizonte={d.horizonte_ruedas} />}
-      {sub === "correlaciones" && <CorrelacionesAnimadas cartera={cartera} />}
-      {sub === "motores" && <McMotores d={d} cartera={cartera} />}
+
+      <DistribucionFinal d={d} corriendo={corriendo} />
+      <McPorActivo cartera={cartera} horizonte={d.horizonte_ruedas} />
+      <CorrelacionesAnimadas cartera={cartera} corriendo={corriendo} />
+      <McMotores cartera={cartera} horizonte={d.horizonte_ruedas} />
     </>
   );
 }
@@ -1683,29 +1694,36 @@ function McPorActivo({ cartera, horizonte }) {
         <h3>Rango de resultados de cada activo</h3>
         <Grafico alto={Math.max(280, todos.length * 44 + 110)}
           datos={[
-            { type: "bar", orientation: "h", name: "escenario malo → mediana",
+            // El corte de color es el valor de HOY, no la mediana: rojo quiere decir
+            // literalmente "termino con menos de lo que tengo". Cada mitad se recorta
+            // contra el valor inicial, así que un activo cuyo abanico entero quedó de un
+            // solo lado no dibuja la mitad que no existe.
+            { type: "bar", orientation: "h", name: "termina con menos que hoy",
               y: todos.map((f) => f.ticker).reverse(),
-              x: todos.map((f) => f.mediana - f.p5).reverse(),
               base: todos.map((f) => f.p5).reverse(),
+              x: todos.map((f) => Math.max(0, Math.min(f.p95, f.valor_inicial) - f.p5)).reverse(),
               marker: { color: c.negativo, opacity: 0.55 },
               hovertemplate: "%{y}<extra></extra>" },
-            { type: "bar", orientation: "h", name: "mediana → escenario bueno",
+            { type: "bar", orientation: "h", name: "termina con más que hoy",
               y: todos.map((f) => f.ticker).reverse(),
-              x: todos.map((f) => f.p95 - f.mediana).reverse(),
-              base: todos.map((f) => f.mediana).reverse(),
+              base: todos.map((f) => Math.max(f.p5, f.valor_inicial)).reverse(),
+              x: todos.map((f) => Math.max(0, f.p95 - Math.max(f.p5, f.valor_inicial))).reverse(),
               marker: { color: c.positivo, opacity: 0.55 },
               hovertemplate: "%{y}<extra></extra>" },
-            { type: "scatter", mode: "markers", name: "hoy",
+            { type: "scatter", mode: "markers", name: "mediana",
               y: todos.map((f) => f.ticker).reverse(),
-              x: todos.map((f) => f.valor_inicial).reverse(),
+              x: todos.map((f) => f.mediana).reverse(),
               marker: { symbol: "line-ns-open", size: 16, color: c.texto,
                         line: { width: 2.5, color: c.texto } },
-              hovertemplate: "%{y}: $%{x:,.0f} hoy<extra></extra>" }]}
+              hovertemplate: "%{y}: mediana $%{x:,.0f}<extra></extra>" }]}
           layout={{ barmode: "overlay", margin: { l: 82 },
                     xaxis: { title: "Valor a un año", tickprefix: "$" } }} />
         <div className="pie">
-          Cada barra va del escenario malo (5 %) al bueno (95 %), con la marca vertical
-          en lo que vale hoy. Cuanto más larga, más incierto es ese activo.
+          El color se parte en lo que vale hoy: <b className="neg">rojo</b> es terminar con
+          menos de lo que tenés, <b className="pos">verde</b> con más. La marca vertical es
+          la mediana. La barra entera va del escenario malo (5 %) al bueno (95 %), o sea que
+          cubre <b>el 90 % de los escenarios y no todos</b>: queda un 5 % peor que el extremo
+          izquierdo, y de ese lado no hay piso dibujado.
         </div>
       </div>
 
@@ -1714,6 +1732,7 @@ function McPorActivo({ cartera, horizonte }) {
         <div className="tabla-wrap"><table>
           <thead><tr><th>Activo</th><th className="n">Peso</th><th className="n">Hoy</th>
             <th className="n">Mediana</th><th className="n">Escenario malo</th>
+            <th className="n">Escenario bueno</th>
             <th className="n">Pérdida</th><th className="n">P(ganar)</th>
             <th className="n">Incertidumbre</th></tr></thead>
           <tbody>{todos.map((f) => (
@@ -1724,6 +1743,7 @@ function McPorActivo({ cartera, horizonte }) {
               <td className="n">{usd(f.valor_inicial, 0)}</td>
               <td className="n">{usd(f.mediana, 0)}</td>
               <td className="n">{usd(f.p5, 0)}</td>
+              <td className="n">{usd(f.p95, 0)}</td>
               <td className="n neg">{pct(f.perdida_var95_pct, 1)}</td>
               <td className="n">{pct(f.prob_ganancia, 1)}</td>
               <td className="n">{num(f.amplitud, 2)}×</td>
@@ -1733,23 +1753,48 @@ function McPorActivo({ cartera, horizonte }) {
           <b>Diversificar vale {usd(d.ahorro_diversificacion_usd)} en el escenario malo.</b>{" "}
           {d.nota}
         </div>
-        <div className="pie">
-          "Incertidumbre" es el ancho del abanico como múltiplo del valor de hoy: cuántas
-          veces su propio valor separa al buen escenario del malo.
+        <div className="pie" style={{ lineHeight: 1.65 }}>
+          <b>Cómo se lee cada fila.</b> Los cinco números de la simulación parten los
+          escenarios en tramos de probabilidad conocida: <b>5 %</b> termina peor que el
+          escenario malo, <b>45 %</b> entre el escenario malo y la mediana, <b>45 %</b>
+          entre la mediana y el bueno, y <b>5 %</b> mejor que el bueno. Ojo con confundir
+          ese corte con el de perder: el borde entre perder y ganar es la columna
+          <i> hoy</i>, y <i>P(ganar)</i> es exactamente la probabilidad de terminar a su
+          derecha — nominal en dólares, sin descontar inflación ni compararla contra una
+          tasa sin riesgo.
+          <br /><br />
+          <b>Para comparar activos entre sí no sirve el largo de la barra</b>, que está en
+          dólares y por lo tanto mezcla riesgo con tamaño de la posición: el que más pesa
+          siempre parece el más incierto. Eso se mira en <i>Incertidumbre</i>, que es el
+          ancho del abanico como múltiplo del valor de hoy — cuántas veces su propio valor
+          separa al buen escenario del malo — y en <i>Pérdida</i>, que es cuánto cae desde
+          hoy hasta el escenario malo. Un activo con incertidumbre alta <b>y</b> peso alto
+          es el que decide el resultado de la cartera; el resto es ruido alrededor.
+          <br /><br />
+          <b>La fila CARTERA no es la suma de las de arriba.</b> Se simula la serie de la
+          cartera ya ponderada, que arrastra las correlaciones reales entre los papeles, y
+          por eso su incertidumbre es menor que la del activo que la domina. Los escenarios
+          malos de cada activo tampoco ocurren juntos: cada p5 es el suyo, aislado.
+          <br /><br />
+          <b>Lo que hay que tomar con pinzas es el centro, no el ancho.</b> Cada activo se
+          simula con su propio μ y σ históricos, así que un papel que viene subiendo
+          proyecta mediana al alza sólo porque así se movió antes. La forma del abanico es
+          mucho más confiable que dónde está parado.
         </div>
       </div>
     </>
   );
 }
 
-function CorrelacionesAnimadas({ cartera }) {
+function CorrelacionesAnimadas({ cartera, corriendo }) {
   const c = colores();
   const [d, setD] = useState(null);
   const [i, setI] = useState(0);
-  const [corriendo, setCorriendo] = useState(false);
 
   useEffect(() => { setD(null); setI(0);
     api(`/api/montecarlo/${encodeURIComponent(cartera)}/correlaciones`).then(setD); }, [cartera]);
+
+  useEffect(() => { if (corriendo) setI(0); }, [corriendo]);
 
   useEffect(() => {
     if (!corriendo || !d?.cuadros) return;
@@ -1769,11 +1814,8 @@ function CorrelacionesAnimadas({ cartera }) {
       <div className="panel">
         <h3>Las correlaciones no son estables
           <span style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
-            <button className="btn" style={{ padding: "3px 11px", fontSize: 12.5 }}
-                    onClick={() => setCorriendo(!corriendo)}>
-              {corriendo ? "⏸ Detener" : "▶ Reproducir"}</button>
             <input type="range" min="0" max={d.cuadros.length - 1} value={i}
-                   onChange={(e) => { setCorriendo(false); setI(+e.target.value); }}
+                   onChange={(e) => setI(+e.target.value)}
                    style={{ width: 190 }} />
             <span className="mono" style={{ fontSize: 12.5 }}>{cuadro.fecha}</span>
           </span>
@@ -1824,119 +1866,92 @@ function CorrelacionesAnimadas({ cartera }) {
   );
 }
 
-function McMotores({ d, cartera }) {
-  const c = colores();
+function McMotores({ cartera, horizonte }) {
   const [motores, setMotores] = useState(null);
-  const a = d.abanico || {};
-  const banda = (lo, hi, color, nombre) => ([
-    { type: "scatter", x: a.dias, y: hi, mode: "lines", line: { width: 0 },
-      showlegend: false, hoverinfo: "skip" },
-    { type: "scatter", x: a.dias, y: lo, mode: "lines", line: { width: 0 },
-      fill: "tonexty", fillcolor: color, name: nombre, hoverinfo: "skip" },
-  ]);
-  const datos = [
-    ...banda(a.p5, a.p95, c.acento + "22", "casi seguro · 9 de cada 10 casos"),
-    ...banda(a.p25, a.p75, c.acento + "44", "lo más típico · la mitad de los casos"),
-    { type: "scatter", x: a.dias, y: a.p50, mode: "lines", name: "mediana",
-      line: { color: c.acento, width: 2.5 } },
-  ];
-  const layout = {
-    xaxis: { title: "Ruedas hacia adelante" }, yaxis: { title: "Valor en dólares" },
-    shapes: [{ type: "line", x0: a.dias?.[0], x1: a.dias?.[a.dias.length - 1],
-               y0: d.valor_inicial, y1: d.valor_inicial,
-               line: { color: c.texto3, width: 2, dash: "dot" } }],
-  };
-  const f = d.final || {};
+
+  // Antes había que apretar un botón para pedirlos. Ya no: es una tabla de cuatro
+  // filas y la pregunta que contesta —¿el resultado depende del supuesto de
+  // distribución?— hay que hacérsela siempre, no solo cuando uno se acuerda.
+  useEffect(() => { setMotores(null);
+    api(`/api/montecarlo/${encodeURIComponent(cartera)}/motores?horizonte=${horizonte}`)
+      .then(setMotores);
+  }, [cartera, horizonte]);
+
   return (
-    <>
-      <div className="kpis">
-        <Kpi etiqueta="Hoy" valor={usd(d.valor_inicial)} />
-        <Kpi etiqueta="Mediana a un año" valor={usd(f.mediana)}
-             tono={f.mediana > d.valor_inicial ? "pos" : "neg"} />
-        <Kpi etiqueta="Escenario malo (5 %)" valor={usd(f.var95)} tono="neg"
-             sub={`perdés ${pct(f.perdida_var95_pct, 1)}`} />
-        <Kpi etiqueta="Escenario muy malo (1 %)" valor={usd(f.var99)} tono="neg"
-             sub={`perdés ${pct(f.perdida_var99_pct, 1)}`} />
-        <Kpi etiqueta="Probabilidad de ganar" valor={pct(f.prob_ganancia, 1)}
-             tono={f.prob_ganancia > 50 ? "pos" : "neg"} />
-      </div>
-      <div className="panel">
-        <h3>Futuros posibles · {d.n_simulaciones.toLocaleString("es-AR")} simulaciones</h3>
-        <Grafico datos={datos} layout={layout} alto={380} />
-        <div className="pie">
-          La línea punteada es lo que vale hoy. La banda oscura contiene la mitad de los
-          escenarios; la clara, nueve de cada diez. Motor: <b>{d.motor}</b>.
-        </div>
-      </div>
-      <div className="panel">
-        <h3>¿Cambia según el supuesto de distribución?</h3>
-        {!motores ? (
-          <button className="btn" onClick={async () =>
-            setMotores(await api(`/api/montecarlo/${encodeURIComponent(cartera)}/motores?horizonte=${d.horizonte_ruedas}`))}>
-            Comparar los tres motores
-          </button>
-        ) : (
-          <>
-            <div className="tabla-wrap"><table>
-              <thead><tr><th>Motor</th><th className="n">Escenario malo</th>
-                         <th className="n">Pérdida</th><th className="n">Muy malo</th>
-                         <th className="n">Pérdida</th></tr></thead>
-              <tbody>{Object.entries(motores).map(([k, v]) => (
-                <tr key={k}><td>{k}</td>
-                  <td className="n">{usd(v.var95)}</td><td className="n neg">{pct(v.perdida_var95_pct, 1)}</td>
-                  <td className="n">{usd(v.var99)}</td><td className="n neg">{pct(v.perdida_var99_pct, 1)}</td>
-                </tr>))}</tbody>
-            </table></div>
-            <div className="pie">
-              Las colas gordas pesan en el riesgo de un día —ahí está el VaR de
-              Cornish-Fisher, en la pestaña de Riesgo— pero se diluyen al componer
-              muchos días: por eso los tres motores dan parecido a este horizonte.
-            </div>
-          </>
-        )}
-      </div>
-    </>
+    <div className="panel">
+      <h3>¿Cambia según el supuesto de distribución?</h3>
+      {!motores ? <div className="cargando">Comparando los tres motores…</div>
+       : motores.error ? <div className="aviso mal">{motores.error}</div> : (
+        <>
+          <div className="tabla-wrap"><table>
+            <thead><tr><th>Motor</th><th className="n">Escenario malo</th>
+                       <th className="n">Pérdida</th><th className="n">Muy malo</th>
+                       <th className="n">Pérdida</th></tr></thead>
+            <tbody>{Object.entries(motores).map(([k, v]) => (
+              <tr key={k}><td>{k}</td>
+                <td className="n">{usd(v.var95)}</td><td className="n neg">{pct(v.perdida_var95_pct, 1)}</td>
+                <td className="n">{usd(v.var99)}</td><td className="n neg">{pct(v.perdida_var99_pct, 1)}</td>
+              </tr>))}</tbody>
+          </table></div>
+          <div className="pie">
+            Las colas gordas pesan en el riesgo de un día —ahí está el VaR de
+            Cornish-Fisher, en la pestaña de Riesgo— pero se diluyen al componer
+            muchos días: por eso los tres motores dan parecido a este horizonte.
+          </div>
+        </>
+      )}
+    </div>
   );
 }
 
-function DistribucionFinal({ d }) {
+function DistribucionFinal({ d, corriendo }) {
   const c = colores();
-  const [paso, setPaso] = useState(null);          // null = animación apagada
+  const [paso, setPaso] = useState(0);
   const dist = d.distribucion || {};
   const a = d.abanico || {};
 
-  // Animación en bucle sobre el abanico: muestra cómo se va abriendo el rango de
-  // resultados rueda a rueda. Se puede parar — una animación que no se detiene
-  // molesta más de lo que explica.
-  useEffect(() => {
-    if (paso === null) return;
-    const id = setTimeout(() => setPaso((p) => (p + 1) % (a.dias?.length || 1)), 90);
-    return () => clearTimeout(id);
-  }, [paso, a.dias]);
+  useEffect(() => { if (corriendo) setPaso(0); }, [corriendo]);
 
-  const hasta = paso === null ? (a.dias?.length || 0) : paso + 1;
+  useEffect(() => {
+    if (!corriendo) return;
+    const id = setTimeout(() => setPaso((x) => (x + 1) % (a.dias?.length || 1)), 90);
+    return () => clearTimeout(id);
+  }, [corriendo, paso, a.dias]);
+
+  const hasta = corriendo ? paso + 1 : (a.dias?.length || 0);
   const corte = (arr) => (arr || []).slice(0, hasta);
+
+  // El abanico se parte en la línea de hoy: abajo es plata perdida, arriba es
+  // plata ganada, y son dos cosas distintas aunque el gráfico las dibuje juntas.
+  // Cada mitad se recorta contra el valor inicial —min para la de abajo, max
+  // para la de arriba— así que si el abanico entero quedó de un solo lado, la
+  // otra mitad se aplana en cero en vez de pintar una franja que no existe.
+  const V = d.valor_inicial;
+  const bajo = (arr) => corte(arr).map((v) => Math.min(v, V));
+  const alto = (arr) => corte(arr).map((v) => Math.max(v, V));
+  const banda = (lo, hi, alfa, nombre) => [
+    { type: "scatter", x: corte(a.dias), y: bajo(hi), mode: "lines", line: { width: 0 },
+      showlegend: false, hoverinfo: "skip" },
+    { type: "scatter", x: corte(a.dias), y: bajo(lo), mode: "lines", line: { width: 0 },
+      fill: "tonexty", fillcolor: c.negativo + alfa, name: nombre + " · pierde",
+      hoverinfo: "skip" },
+    { type: "scatter", x: corte(a.dias), y: alto(hi), mode: "lines", line: { width: 0 },
+      showlegend: false, hoverinfo: "skip" },
+    { type: "scatter", x: corte(a.dias), y: alto(lo), mode: "lines", line: { width: 0 },
+      fill: "tonexty", fillcolor: c.acento + alfa, name: nombre + " · gana",
+      hoverinfo: "skip" },
+  ];
 
   return (
     <>
       <div className="panel">
-        <h3>Cómo se abre el abanico
-          <button className="btn" style={{ marginLeft: "auto", padding: "3px 11px", fontSize: 12.5 }}
-                  onClick={() => setPaso(paso === null ? 0 : null)}>
-            {paso === null ? "▶ Reproducir" : "⏸ Detener"}</button>
-        </h3>
+        <h3>Cómo se abre el abanico</h3>
         <Grafico alto={320}
           datos={[
-            { type: "scatter", x: corte(a.dias), y: corte(a.p95), mode: "lines",
-              line: { width: 0 }, showlegend: false, hoverinfo: "skip" },
-            { type: "scatter", x: corte(a.dias), y: corte(a.p5), mode: "lines", line: { width: 0 },
-              fill: "tonexty", fillcolor: c.acento + "22", name: "9 de cada 10 casos" },
-            { type: "scatter", x: corte(a.dias), y: corte(a.p75), mode: "lines",
-              line: { width: 0 }, showlegend: false, hoverinfo: "skip" },
-            { type: "scatter", x: corte(a.dias), y: corte(a.p25), mode: "lines", line: { width: 0 },
-              fill: "tonexty", fillcolor: c.acento + "44", name: "la mitad de los casos" },
+            ...banda(a.p5, a.p95, "22", "9 de cada 10 casos"),
+            ...banda(a.p25, a.p75, "44", "la mitad de los casos"),
             { type: "scatter", x: corte(a.dias), y: corte(a.p50), mode: "lines",
-              name: "mediana", line: { color: c.acento, width: 2.5 } },
+              name: "mediana", line: { color: c.texto, width: 2.5 } },
           ]}
           layout={{ xaxis: { title: "Ruedas hacia adelante",
                              range: [0, a.dias?.[a.dias.length - 1] || 1] },
@@ -1944,12 +1959,13 @@ function DistribucionFinal({ d }) {
                              range: [Math.min(...(a.p5 || [0])) * 0.95,
                                      Math.max(...(a.p95 || [1])) * 1.05] },
                     shapes: [{ type: "line", xref: "paper", x0: 0, x1: 1,
-                               y0: d.valor_inicial, y1: d.valor_inicial,
+                               y0: V, y1: V,
                                line: { color: c.texto3, width: 2, dash: "dot" } }] }} />
         <div className="pie">
           La incertidumbre no crece de golpe: se abre con la raíz del tiempo. La línea
-          punteada es lo que vale hoy.{" "}
-          {paso !== null && <b>Rueda {a.dias?.[paso]} de {a.dias?.[a.dias.length - 1]}.</b>}
+          punteada es lo que vale hoy, y todo lo pintado en rojo abajo es la parte de los
+          escenarios en la que terminás con menos de lo que tenés.{" "}
+          {corriendo && <b>Rueda {a.dias?.[paso]} de {a.dias?.[a.dias.length - 1]}.</b>}
         </div>
       </div>
 
@@ -2902,10 +2918,172 @@ function Carteras({ carteras, recargar }) {
   );
 }
 
+const post = (ruta, cuerpo) => api(ruta, {
+  method: "POST", headers: { "Content-Type": "application/json" },
+  body: JSON.stringify(cuerpo || {}) });
+
+/* Las dos credenciales se cargan desde acá y no desde un archivo a mano: son la
+   única configuración que la aplicación pide, y esconderla en el disco obliga a
+   documentar un formato que después nadie recuerda. La de Cocos va al vault
+   cifrado del proyecto (`data/vault/`), la de FMP a `data/connectors.json`.
+   Ninguna de las dos se versiona ni vuelve al navegador una vez guardada. */
+
+function Ficha({ f }) {
+  return (
+    <>
+      <h3 style={{ justifyContent: "space-between" }}>
+        <span>{f.nombre}</span>
+        <span className={"chip " + (f.conectado ? "ok" : "ojo")}>
+          {f.conectado ? "conectado" : "no conectado"}</span>
+      </h3>
+      <div className="pie" style={{ marginTop: 2, marginBottom: 13 }}>
+        Aporta {f.aporta}. <i>{f.sin_ella}</i>
+        {f.detalle && <div style={{ marginTop: 2 }}>Estado: {f.detalle}.</div>}
+      </div>
+    </>
+  );
+}
+
+function Fmp({ f, recargar }) {
+  const [key, setKey] = useState("");
+  const [msg, setMsg] = useState(null);
+  const [yendo, setYendo] = useState(false);
+
+  const guardar = async () => {
+    setYendo(true); setMsg(null);
+    const r = await post("/api/conectores/fmp", { api_key: key.trim() });
+    setYendo(false);
+    if (r.error) { setMsg(["mal", r.error]); return; }
+    setKey(""); setMsg(["ok", "Clave guardada."]); recargar();
+  };
+
+  return (
+    <div className="panel">
+      <Ficha f={f} />
+      <div style={{ display: "flex", gap: 8 }}>
+        <input type="password" value={key} placeholder="API key" style={{ flex: 1 }}
+               autoComplete="off" onChange={(e) => setKey(e.target.value)}
+               onKeyDown={(e) => { if (e.key === "Enter" && key.trim()) guardar(); }} />
+        <button className="btn primario" disabled={!key.trim() || yendo} onClick={guardar}>
+          {yendo ? "Guardando…" : f.conectado ? "Reemplazar" : "Guardar"}</button>
+      </div>
+      <div className="pie">
+        Se saca gratis en <a href="https://site.financialmodelingprep.com/developer/docs"
+        target="_blank" rel="noreferrer">financialmodelingprep.com</a>. Queda en{" "}
+        <span className="mono">data/connectors.json</span> con permisos 600, fuera de git.
+      </div>
+      {msg && <div className={"aviso " + msg[0]}>{msg[1]}</div>}
+    </div>
+  );
+}
+
+function Cocos({ f, brk, recargar }) {
+  const vacias = { email: "", password: "", totp_secret_key: "" };
+  const [c, setC] = useState(vacias);
+  const [codigo, setCodigo] = useState("");
+  const [msg, setMsg] = useState(null);
+  const [yendo, setYendo] = useState(false);
+  const campo = (k, v) => setC((x) => ({ ...x, [k]: v }));
+
+  const resultado = (r) => setMsg(
+    r.conectado ? ["ok", `Conectado — ${r.detalle}.`]
+                : ["mal", r.error || r.detalle || "No se pudo conectar."]);
+
+  // Un solo paso: cifra las credenciales, guarda la clave sola y hace el login.
+  const ingresar = async () => {
+    setYendo(true); setMsg(null);
+    const r = await post("/api/broker/vault", c);
+    setYendo(false);
+    if (r.error) { setMsg(["mal", r.error]); recargar(); return; }
+    setC(vacias); resultado(r); recargar();
+  };
+
+  // Reconecta con las credenciales ya guardadas, sin volver a tipearlas.
+  const reconectar = async (forzar) => {
+    setYendo(true); setMsg(null);
+    resultado(await post("/api/broker/conectar",
+                         { forzar_login: !!forzar, codigo_2fa: codigo.trim() }));
+    setYendo(false); setCodigo(""); recargar();
+  };
+
+  const salir = async () => { await post("/api/broker/desconectar"); setMsg(null); recargar(); };
+  const borrar = async () => {
+    if (!confirm("¿Borrar las credenciales de Cocos guardadas?")) return;
+    await post("/api/broker/borrar"); setMsg(null); recargar();
+  };
+
+  return (
+    <div className="panel">
+      <Ficha f={f} />
+
+      {!brk?.vault_cargado && (
+        <>
+          <div style={{ display: "grid", gap: 7 }}>
+            <input type="email" placeholder="Email de Cocos" value={c.email}
+                   autoComplete="off" onChange={(e) => campo("email", e.target.value)} />
+            <input type="password" placeholder="Contraseña" value={c.password}
+                   autoComplete="new-password" onChange={(e) => campo("password", e.target.value)} />
+            <input type="text" inputMode="numeric" placeholder="Código 2FA de la app (6 dígitos)"
+                   value={c.totp_secret_key} autoComplete="off"
+                   onChange={(e) => campo("totp_secret_key", e.target.value)} />
+            <button className="btn primario" disabled={yendo || !c.email || !c.password}
+                    onClick={ingresar}>{yendo ? "Conectando…" : "Ingresar y conectar"}</button>
+          </div>
+          <div className="pie">
+            Abrí tu app de autenticación y poné el <b>código de 6 dígitos</b> del momento: la app
+            entra con eso y guarda la sesión, así los próximos arranques no piden nada. Las
+            credenciales se cifran con AES-256-GCM en <span className="mono">data/vault/</span>.
+            Si en cambio tenés la <b>semilla</b> (el texto largo que se escanea una vez),
+            pegala ahí y no vuelve a pedir código nunca.
+          </div>
+        </>
+      )}
+
+      {brk?.vault_cargado && !f.conectado && (
+        <>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+            <input type="text" inputMode="numeric" placeholder="Código 2FA (si lo pide)"
+                   value={codigo} style={{ width: 170 }} autoComplete="off"
+                   onChange={(e) => setCodigo(e.target.value)}
+                   onKeyDown={(e) => { if (e.key === "Enter") reconectar(true); }} />
+            <button className="btn primario" disabled={yendo}
+                    onClick={() => reconectar(false)}>{yendo ? "Conectando…" : "Conectar"}</button>
+            <button className="btn peligro" disabled={yendo} onClick={borrar}>Borrar credenciales</button>
+          </div>
+          <div className="pie">
+            Primero intenta con la sesión guardada. Si caducó, poné el código de 6 dígitos de la
+            app y tocá Conectar.
+          </div>
+        </>
+      )}
+
+      {f.conectado && (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <button className="btn peligro" onClick={salir}>Desconectar</button>
+          <button className="btn peligro" onClick={borrar}>Borrar credenciales</button>
+          <span className="pie" style={{ margin: 0 }}>
+            {f.cuenta ? `Cuenta ${f.cuenta}` : "Sesión activa"}. Desconectar deja las
+            credenciales; borrarlas las elimina del disco.
+          </span>
+        </div>
+      )}
+
+      {msg && <div className={"aviso " + msg[0]}>{msg[1]}</div>}
+    </div>
+  );
+}
+
 function Conectores() {
   const [d, setD] = useState(null);
-  useEffect(() => { api("/api/conectores").then(setD); }, []);
+  const [brk, setBrk] = useState(null);
+  const cargar = () => {
+    api("/api/conectores").then(setD);
+    api("/api/broker/estado").then(setBrk);
+  };
+  useEffect(() => { cargar(); }, []);
   if (!d) return <div className="cargando">Consultando fuentes…</div>;
+  const fuente = (t) => d.con_credencial.find((f) => f.nombre.includes(t)) || {};
+
   return (
     <>
       <div className="aviso">
@@ -2913,33 +3091,17 @@ function Conectores() {
         aplicación funciona igual, con menos cobertura.
       </div>
       <div className="fila f2">
-        <div className="panel">
-          <h3>Públicas · sin credencial</h3>
-          <div className="tabla-wrap"><table>
-            <thead><tr><th>Fuente</th><th>Aporta</th><th>Estado</th></tr></thead>
-            <tbody>{d.publicas.map((f, i) => (
-              <tr key={i}><td><b>{f.nombre}</b></td><td>{f.aporta}</td>
-                <td><span className="chip ok">{f.estado}</span></td></tr>))}</tbody>
-          </table></div>
-        </div>
-        <div className="panel">
-          <h3>Con credencial · opcionales</h3>
-          {d.con_credencial.map((f, i) => (
-            <div key={i} style={{ marginBottom: 14 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <b>{f.nombre}</b>
-                <span className={"chip " + (f.conectado ? "ok" : "ojo")}>
-                  {f.conectado ? "conectado" : "no conectado"}</span>
-              </div>
-              <div style={{ fontSize: 12.5, color: "var(--texto-2)", marginTop: 3 }}>
-                Aporta: {f.aporta}. Requiere {f.requiere}.
-              </div>
-              <div style={{ fontSize: 12.5, color: "var(--texto-3)", marginTop: 2 }}>
-                {f.detalle} — <i>{f.sin_ella}</i>
-              </div>
-            </div>
-          ))}
-        </div>
+        <Cocos f={fuente("Cocos")} brk={brk} recargar={cargar} />
+        <Fmp f={fuente("Financial Modeling")} recargar={cargar} />
+      </div>
+      <div className="panel" style={{ marginBottom: 14 }}>
+        <h3>Públicas · sin credencial</h3>
+        <div className="tabla-wrap"><table>
+          <thead><tr><th>Fuente</th><th>Aporta</th><th>Estado</th></tr></thead>
+          <tbody>{d.publicas.map((f, i) => (
+            <tr key={i}><td><b>{f.nombre}</b></td><td>{f.aporta}</td>
+              <td><span className="chip ok">{f.estado}</span></td></tr>))}</tbody>
+        </table></div>
       </div>
       <div className="panel">
         <h3>Descartadas</h3>
@@ -2953,19 +3115,332 @@ function Conectores() {
   );
 }
 
-/* ═══════════════ Mercado · MEP y noticias ═══════════════ */
+/* ═══════════════ Mi Cocos · la cuenta real del broker ═══════════════ */
+// Espejo de lo que Cocos expone hoy por API, todo en pesos y crudo del broker.
+// Es el punto de partida para lo que viene: cruzar estas tenencias reales contra
+// la cartera cargada a mano y valuar todo en dólares por MEP.
 
-function Mercado() {
+const ars = (n, dec = 2) =>
+  n == null ? "—" : "$" + Number(n).toLocaleString("es-AR",
+    { minimumFractionDigits: dec, maximumFractionDigits: dec });
+
+function MiCocos() {
+  const [d, setD] = useState(null);
+  const [err, setErr] = useState(null);
+  const [movs, setMovs] = useState([]);
+  const [masMovs, setMasMovs] = useState(false);
+  const [cargandoMovs, setCargandoMovs] = useState(false);
+  const [cat, setCat] = useState(null);           // filtro de categoría
+  const [fci, setFci] = useState(null);           // tracking de FCI
+
+  const traerMovs = (offset = 0) => {
+    setCargandoMovs(true);
+    api(`/api/cocos/movimientos?limite=40&offset=${offset}`).then((r) => {
+      setCargandoMovs(false);
+      if (r.error) return;
+      setMovs((prev) => offset ? [...prev, ...r.movimientos] : r.movimientos);
+      setMasMovs(r.hay_mas);
+    });
+  };
+
+  const cargar = () => {
+    setErr(null); setD(null); setMovs([]); setCat(null); setFci(null);
+    api("/api/cocos/resumen").then((r) => {
+      if (r.error) { setErr(r.error); return; }
+      setD(r);
+      if (r.conectado) { traerMovs(0); api("/api/cocos/fci").then(setFci); }
+    });
+  };
+  useEffect(() => { cargar(); }, []);
+
+  if (err) return <div className="aviso mal"><b>No se pudo leer Cocos.</b> {err}</div>;
+  if (!d) return <div className="cargando">Consultando tu cuenta de Cocos…</div>;
+  if (!d.conectado) return (
+    <div className="vacio">
+      No estás conectado a Cocos. Andá a <b>Conectores</b> y conectá tu cuenta para
+      ver acá tus posiciones, saldos y datos.
+    </div>
+  );
+
+  const errBloque = (x) => x && typeof x === "object" && x.error;
+  const pos = Array.isArray(d.posiciones) ? d.posiciones : [];
+  const dia = Array.isArray(d.dia) ? d.dia : [];
+  const porDia = Object.fromEntries(dia.map((t) => [t.instrument_code, t]));
+  const perfil = d.perfil || {};
+  const cuenta = perfil.account || {};
+  const fondos = d.fondos || {};
+  const bancos = Array.isArray(d.bancos) ? d.bancos : [];
+
+  // Totales de las tenencias, en pesos, tal como los da Cocos.
+  const valor = pos.reduce((s, p) => s + (p.quantity || 0) * (p.last || 0), 0);
+  const resultado = pos.reduce((s, p) => s + (p.result || 0), 0);
+  const costo = valor - resultado;
+  const efectivo = fondos.CI || {};
+
+  return (
+    <>
+      <div className="aviso ojo">
+        Todo lo de esta pantalla sale <b>en vivo de Cocos</b> y está <b>en pesos</b>, tal como
+        lo informa el broker. Es de solo lectura. <button className="btn"
+        style={{ padding: "1px 9px", fontSize: 12, marginLeft: 4 }}
+        onClick={cargar}>Actualizar</button>
+      </div>
+
+      {/* ── Cabecera de cuenta ── */}
+      <div className="kpis">
+        <Kpi etiqueta="Titular" valor={`${perfil.first_name || ""} ${perfil.last_name || ""}`.trim() || "—"}
+             sub={perfil.email} />
+        <Kpi etiqueta="Cuenta" valor={cuenta.id ? `#${cuenta.id}` : "—"}
+             sub={cuenta.tier ? `Tier ${cuenta.tier} · ${cuenta.entityType || ""}` : null} />
+        <Kpi etiqueta="Valor tenencias" valor={ars(valor, 0)} sub="cantidad × último" />
+        <Kpi etiqueta="Resultado" valor={ars(resultado, 0)} tono={resultado >= 0 ? "pos" : "neg"}
+             sub={costo ? pct(resultado / costo * 100) + " sobre el costo" : null} />
+        <Kpi etiqueta="Efectivo disponible" valor={ars(efectivo.ars, 0)}
+             sub={`US$ ${num(efectivo.usd)} · cable ${num(efectivo.ext)}`} />
+      </div>
+
+      {/* ── Posiciones ── */}
+      <div className="panel" style={{ marginBottom: 14 }}>
+        <h3>Posiciones ({pos.length})</h3>
+        {errBloque(d.posiciones)
+          ? <div className="aviso mal">{d.posiciones.error}</div>
+          : pos.length === 0
+          ? <div className="vacio">Sin tenencias en la cuenta.</div>
+          : <div className="tabla-wrap"><table>
+              <thead><tr>
+                <th>Ticker</th><th>Instrumento</th><th>Tipo</th>
+                <th className="n">Cantidad</th><th className="n">PPC</th><th className="n">Último</th>
+                <th className="n">Día</th><th className="n">Valor</th>
+                <th className="n">Resultado</th><th className="n">Rend.</th>
+              </tr></thead>
+              <tbody>{pos.map((p) => {
+                const v = (p.quantity || 0) * (p.last || 0);
+                const dd = porDia[p.instrument_code];
+                const varDia = dd && dd.previous_price && dd.last_price
+                  ? (dd.last_price / dd.previous_price - 1) * 100 : null;
+                const rp = p.result_percentage != null ? p.result_percentage * 100 : null;
+                return (
+                  <tr key={p.instrument_code + p.id_security}>
+                    <td className="mono"><b>{p.short_ticker || p.instrument_code}</b></td>
+                    <td>{p.instrument_short_name}</td>
+                    <td style={{ fontSize: 12, color: "var(--texto-3)" }}>{p.instrument_type}</td>
+                    <td className="n">{num(p.quantity, p.quantity % 1 ? 2 : 0)}</td>
+                    <td className="n">{ars(p.average_price)}</td>
+                    <td className="n">{ars(p.last)}</td>
+                    <td className={"n " + signo(varDia)}>{varDia == null ? "—" : pct(varDia)}</td>
+                    <td className="n">{ars(v, 0)}</td>
+                    <td className={"n " + signo(p.result)}>{ars(p.result, 0)}</td>
+                    <td className={"n " + signo(rp)}>{rp == null ? "—" : pct(rp)}</td>
+                  </tr>);
+              })}</tbody>
+            </table></div>}
+        <div className="pie">
+          PPC = precio promedio de compra. «Día» es la variación de hoy (precio previo vs.
+          último). Los bonos y ONs vienen cada 100 nominales; hoy no tenés en cartera.
+        </div>
+      </div>
+
+      <div className="fila f2">
+        {/* ── Saldos por plazo ── */}
+        <div className="panel">
+          <h3>Saldos disponibles por liquidación</h3>
+          {errBloque(fondos)
+            ? <div className="aviso mal">{fondos.error}</div>
+            : <div className="tabla-wrap"><table>
+                <thead><tr><th>Plazo</th><th className="n">Pesos</th>
+                  <th className="n">Dólar MEP</th><th className="n">Cable</th></tr></thead>
+                <tbody>{[["CI", "Inmediato"], ["24hs", "24 hs"], ["48hs", "48 hs"]].map(([k, t]) => (
+                  <tr key={k}><td>{t}</td>
+                    <td className="n">{ars((fondos[k] || {}).ars)}</td>
+                    <td className="n">{num((fondos[k] || {}).usd)}</td>
+                    <td className="n">{num((fondos[k] || {}).ext)}</td></tr>))}</tbody>
+              </table></div>}
+          <div className="pie">Lo que podés operar hoy (CI), mañana (24 hs) o pasado (48 hs).</div>
+        </div>
+
+        {/* ── Cuentas bancarias ── */}
+        <div className="panel">
+          <h3>Cuentas bancarias ({bancos.length})</h3>
+          {errBloque(d.bancos)
+            ? <div className="aviso mal">{d.bancos.error}</div>
+            : bancos.length === 0
+            ? <div className="vacio">Sin cuentas registradas.</div>
+            : <div className="tabla-wrap"><table>
+                <thead><tr><th>Entidad</th><th>Moneda</th><th>CBU/CVU</th></tr></thead>
+                <tbody>{bancos.map((b) => (
+                  <tr key={b.id_bank_account}>
+                    <td>{b.entity}</td><td>{b.currency}</td>
+                    <td className="mono" style={{ fontSize: 12 }}>{b.cbu_cvu}</td></tr>))}</tbody>
+              </table></div>}
+          <div className="pie">Las cuentas a las que Cocos puede transferir tus retiros.</div>
+        </div>
+      </div>
+
+      {/* ── Tracking de FCI ── */}
+      <div className="panel" style={{ marginBottom: 14 }}>
+        <h3>Fondos comunes (FCI) · suscripciones, rescates y resultado</h3>
+        {!fci
+          ? <div className="cargando">Reconstruyendo el historial de los fondos…</div>
+          : fci.error
+          ? <div className="aviso mal">{fci.error}</div>
+          : (fci.fci || []).length === 0
+          ? <div className="vacio">No hay movimientos de FCI en el historial.</div>
+          : <>
+              <div className="tabla-wrap"><table>
+                <thead><tr>
+                  <th>FCI</th><th>Moneda</th>
+                  <th className="n">Suscripto</th><th className="n">Rescatado</th>
+                  <th className="n">Tenencia hoy</th><th className="n">Resultado</th><th className="n">Rend.</th>
+                  <th className="n">Período</th>
+                </tr></thead>
+                <tbody>{fci.fci.map((f) => {
+                  const mon = (n) => f.moneda === "ARS" ? ars(n, 0) : num(n) + " " + (f.moneda || "");
+                  return (
+                    <tr key={f.ticker}>
+                      <td className="mono"><b>{f.ticker}</b></td>
+                      <td style={{ fontSize: 12, color: "var(--texto-3)" }}>{f.moneda}</td>
+                      <td className="n">{mon(f.suscrito)}<div style={{ fontSize: 10.5, color: "var(--texto-3)" }}>{f.n_susc} aportes</div></td>
+                      <td className="n">{mon(f.rescatado)}<div style={{ fontSize: 10.5, color: "var(--texto-3)" }}>{f.n_resc} rescates</div></td>
+                      <td className="n">{f.valor_actual ? mon(f.valor_actual) : "—"}</td>
+                      <td className={"n " + signo(f.resultado)}>{mon(f.resultado)}</td>
+                      <td className={"n " + signo(f.resultado_pct)}>{f.resultado_pct == null ? "—" : pct(f.resultado_pct)}</td>
+                      <td className="mono" style={{ fontSize: 11 }}>{f.desde}<br />{f.hasta}</td>
+                    </tr>);
+                })}</tbody>
+              </table></div>
+              <div className="pie">
+                Resultado = tenencia de hoy + lo rescatado − lo suscripto (lo que sacaste más lo
+                que aún tenés, contra lo que pusiste). En los de barrido diario (COCORMA) el capital
+                rota muchas veces, así que mirá el <b>resultado en $</b> más que el %.
+                {fci.cortado && <> · Historial recortado a los {fci.total_movs} movimientos más recientes.</>}
+              </div>
+            </>}
+      </div>
+
+      {/* ── Movimientos ── */}
+      <div className="panel" style={{ marginBottom: 14 }}>
+        <h3>Movimientos {movs.length ? `(${cat ? movs.filter((m) => m.categoria === cat).length + " de " : ""}${movs.length}${masMovs ? "+" : ""})` : ""}</h3>
+        {movs.length > 0 && (
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", margin: "2px 0 12px" }}>
+            {[null, ...Array.from(new Set(movs.map((m) => m.categoria)))].map((c) => (
+              <button key={c || "todas"} onClick={() => setCat(c)}
+                      className={"btn" + (cat === c ? " primario" : "")}
+                      style={{ padding: "3px 11px", fontSize: 12.5 }}>
+                {c || "Todas"}</button>))}
+          </div>
+        )}
+        {movs.length === 0 && cargandoMovs
+          ? <div className="cargando">Trayendo movimientos…</div>
+          : movs.length === 0
+          ? <div className="vacio">Sin movimientos.</div>
+          : <>
+              <div className="tabla-wrap"><table>
+                <thead><tr>
+                  <th>Fecha</th><th>Concepto</th><th>Ticker</th>
+                  <th className="n">Cantidad</th><th className="n">Precio</th><th className="n">Importe</th>
+                </tr></thead>
+                <tbody>{(cat ? movs.filter((m) => m.categoria === cat) : movs).map((m, i) => {
+                  const q = m.quantity && typeof m.quantity === "object" ? null : m.quantity;
+                  return (
+                    <tr key={(m.idTicket || m.identifierId || i) + "-" + i}>
+                      <td className="mono" style={{ fontSize: 12 }}>{m.fecha}</td>
+                      <td>{m.labelConcept || m.identifier}</td>
+                      <td className="mono">{m.ticker || ""}</td>
+                      <td className="n">{q ? num(q, q % 1 ? 2 : 0) : ""}</td>
+                      <td className="n">{m.price ? ars(m.price) : ""}</td>
+                      <td className={"n " + signo(m.amount)}>
+                        {m.amount == null ? "—"
+                          : (m.currency === "ARS" ? ars(m.amount) : num(m.amount) + " " + (m.currency || ""))}</td>
+                    </tr>);
+                })}</tbody>
+              </table></div>
+              {masMovs && (
+                <button className="btn" style={{ marginTop: 10 }} disabled={cargandoMovs}
+                        onClick={() => traerMovs(movs.length)}>
+                  {cargandoMovs ? "Cargando…" : "Cargar más"}</button>)}
+            </>}
+        <div className="pie">
+          Pagos con tarjeta, compras y ventas de instrumentos, rescates de FCI, acreditaciones.
+          Importe en la moneda de cada movimiento (ARS o USD).
+        </div>
+      </div>
+
+      {/* ── Qué se puede desarrollar ── */}
+      <div className="panel">
+        <h3>Qué se puede construir con esto</h3>
+        <div className="pie" style={{ fontSize: 13, lineHeight: 1.6 }}>
+          <b style={{ color: "var(--texto)" }}>Ya disponible por API:</b> posiciones con precio
+          promedio y resultado, variación del día, saldos por plazo, movimientos completos,
+          cuentas bancarias, perfil de la cuenta, y —lo que ya usa la app— precios de bonos, ONs
+          y letras.<br />
+          <b style={{ color: "var(--texto)" }}>Próximo paso natural:</b> cruzar estas tenencias
+          reales contra la cartera que cargás a mano (detectar diferencias), y reconstruir el
+          costo real desde los movimientos para valuar todo en dólares por el MEP de cada fecha.
+        </div>
+      </div>
+    </>
+  );
+}
+
+/* ═══════════════ Dólar MEP · serie, hitos y noticias ═══════════════ */
+
+function Mercado({ cartera }) {
   const [mep, setMep] = useState(null);
   const [news, setNews] = useState(null);
+  const [real, setReal] = useState(null);
   const [rango, setRango] = useState("2024-01-01");
   const c = colores();
 
   useEffect(() => { api(`/api/mep?desde=${rango}`).then(setMep); }, [rango]);
   useEffect(() => { api("/api/noticias?limite=30").then(setNews); }, []);
+  useEffect(() => {
+    if (!cartera) { setReal(null); return; }
+    api(`/api/carteras/${encodeURIComponent(cartera)}/realizado`).then(setReal);
+  }, [cartera]);
 
   const RANGOS = [["2026-01-01", "este año"], ["2024-01-01", "2 años"],
                   ["2020-01-01", "todo"]];
+
+  // Los hitos se pintan sobre la curva, en el MEP de esa rueda: una traza por
+  // tipo, así la leyenda de Plotly ya sirve de filtro sin escribir un toggle.
+  const TIPOS = { crisis: ["Crisis", c.negativo], politica: ["Política", c.series[4]],
+                  macro: ["Macro", c.alerta], positivo: ["Positivo", c.positivo],
+                  global: ["Global", c.series[2]] };
+  // Cada operación cerrada en pesos recorrió un tramo del dólar: de la cotización
+  // con la que se compró a la del día que se cobró. Se dibuja sobre la curva y se
+  // pinta por el resultado de tipo de cambio, que ya viene calculado con el mismo
+  // MEP que valúa la cartera (`pnl_realizado`). Las que ya eran en dólares no
+  // tienen tramo: no hubo exposición.
+  const tramos = Object.values((real?.trades || [])
+    .filter((t) => t.pnl_fx_usd && t.mep_compra && t.mep_venta)
+    .reduce((acc, t) => {
+      const k = t.buy_date + "·" + t.sell_date;
+      const x = acc[k] || (acc[k] = { ...t, tickers: [], fx: 0 });
+      if (!x.tickers.includes(t.ticker)) x.tickers.push(t.ticker);
+      x.fx += t.pnl_fx_usd;
+      return acc;
+    }, {}));
+
+  // Una banda por operación, de la compra a la venta, y translúcidas: donde varias
+  // se pisan el color se acumula, así que la intensidad muestra cuánto capital
+  // estuvo expuesto a la vez. Las verdes se dibujan últimas — o sea, encima de las
+  // rojas — porque son las pocas y quedarían tapadas abajo del montón.
+  const bandas = [...tramos].sort((a, b) => (a.fx > 0) - (b.fx > 0));
+
+  const hitos = mep?.eventos || [];
+  const marcas = Object.entries(TIPOS).map(([tipo, [nombre, color]]) => {
+    const del = hitos.filter((h) => h.tipo === tipo);
+    return del.length === 0 ? null : {
+      type: "scatter", mode: "markers", name: nombre,
+      x: del.map((h) => h.fecha),
+      // La noticia puede caer en feriado: se ancla en la primera rueda posterior.
+      y: del.map((h) => (mep.serie.find((p) => p.fecha >= h.fecha) || {}).valor),
+      text: del.map((h) => h.titulo),
+      marker: { color, size: del.map((h) => (h.impacto === "alto" ? 11 : 8)),
+                symbol: "triangle-down", line: { color: c.panel, width: 1 } },
+      hovertemplate: "<b>%{text}</b><br>%{x} · $%{y:,.2f}<extra></extra>",
+    };
+  }).filter(Boolean);
 
   return (
     <>
@@ -2985,15 +3460,42 @@ function Mercado() {
                           onClick={() => setRango(v)}>{t}</button>))}
               </span>
             </h3>
-            <Grafico alto={340}
+            <Grafico alto={360}
               datos={[{ type: "scatter", mode: "lines", name: "MEP",
                         x: mep.serie.map((p) => p.fecha), y: mep.serie.map((p) => p.valor),
                         line: { color: c.acento, width: 1.8 },
-                        hovertemplate: "%{x}<br>$%{y:,.2f}<extra></extra>" }]}
-              layout={{ yaxis: { title: "Pesos por dólar", tickprefix: "$" } }} />
+                        hovertemplate: "%{x}<br>$%{y:,.2f}<extra></extra>" },
+                      ...marcas]}
+              layout={{ yaxis: { title: "Pesos por dólar", tickprefix: "$" },
+                        shapes: [
+                          ...bandas.map((b) => ({
+                            type: "rect", yref: "paper", y0: 0, y1: 1,
+                            x0: b.buy_date, x1: b.sell_date, layer: "below",
+                            fillcolor: b.fx > 0 ? c.positivo : c.negativo,
+                            opacity: 0.07, line: { width: 0 } })),
+                          ...hitos.filter((h) => h.impacto === "alto").map((h) => ({
+                            type: "line", x0: h.fecha, x1: h.fecha, y0: 0, y1: 1,
+                            yref: "paper", layer: "below",
+                            line: { color: c.borde, width: 1, dash: "dot" } }))],
+                        legend: { orientation: "h", y: -0.18, font: { size: 10 } },
+                        margin: { b: 46 } }} />
             <div className="pie">
-              Esta es la serie con la que se convierte toda la cartera a dólares, usando
-              el valor de la fecha de cada operación. Fuentes públicas, sin credencial.
+              Los triángulos son las noticias que movieron al MEP; se apagan tocando su
+              color en la leyenda. La lista se edita a mano en <code>data/eventos_mep.json</code>:
+              nadie publica "qué noticia movió al dólar", así que marcar saltos automáticamente
+              solo pondría una etiqueta genérica sobre cada rueda volátil.{" "}
+              {cartera
+                ? bandas.length > 0
+                  ? <>El fondo pinta una banda por cada una de las {tramos.length} posiciones
+                      en pesos que <b>{cartera}</b> abrió y cerró, de la compra a la venta:{" "}
+                      <b className="pos">verde</b> si el MEP le sumó dólares,{" "}
+                      <b className="neg">rojo</b> si se los llevó. Se superponen, así que cuanto
+                      más intenso el color, más operaciones expuestas al mismo tiempo.</>
+                  : <><b>{cartera}</b> no tiene operaciones cerradas en pesos, así que no hay
+                      tramos que marcar: lo que se compró y se vendió en dólares no tuvo
+                      exposición al MEP.</>
+                : <>Elegí una cartera arriba y el fondo se pinta con los períodos en que
+                     tuviste posiciones en pesos, verde o rojo según lo que te hizo el dólar.</>}
             </div>
           </div>
         </>
@@ -3061,8 +3563,9 @@ function App() {
         {modo === "analisis" && <Analisis cartera={cartera} />}
         {modo === "comparacion" && <Comparacion carteras={carteras} />}
         {modo === "carteras" && <Carteras carteras={carteras} recargar={recargar} />}
-        {modo === "mercado" && <Mercado />}
+        {modo === "mercado" && <Mercado cartera={cartera} />}
         {modo === "conectores" && <Conectores />}
+        {modo === "cocos" && <MiCocos />}
       </div>
       <footer>
         <span>© Leandro R. Bergero · Msc Finance and Banking BSM-UPF ·{" "}

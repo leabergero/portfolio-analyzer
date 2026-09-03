@@ -91,10 +91,12 @@ def valuar(posiciones, precios=None) -> dict:
         es_bono = sources.is_bond(t, origen)
         moneda = (p.get("currency") or sources.ticker_currency(t)).upper()
 
-        # El precio de compra sigue la misma convención que el de mercado:
-        # los bonos cotizan cada 100 nominales, en su moneda de origen.
-        compra = float(p.get("buy_price", 0)) / (100.0 if es_bono else 1.0)
-        comision = float(p.get("commissions", 0)) / (100.0 if es_bono else 1.0)
+        # El precio de compra sigue la misma convención que el de mercado: los
+        # bonos cotizan cada 100 nominales. Salvo que el usuario lo haya cargado
+        # ya por nominal, que es lo que decide `divisor_nominal`.
+        div = sources.divisor_nominal(t, p.get("buy_price"), origen)
+        compra = float(p.get("buy_price", 0)) / div
+        comision = float(p.get("commissions", 0)) / div
 
         if moneda == "ARS":
             compra_usd = mep_mod.a_usd(compra, p.get("buy_date"), serie_mep)
@@ -154,7 +156,10 @@ def pnl_realizado(trades) -> dict:
         # ticker: el dividendo de un CEDEAR D se cobra en pesos aunque el papel
         # cotice en dólares, y quien lo cargó es el único que sabe cuál fue.
         moneda = (t.get("moneda") or sources.ticker_currency(ticker)).upper()
-        div = 100.0 if sources.is_bond(ticker) else 1.0
+        # La escala la fija el precio más grande de la operación: si uno de los
+        # dos vino en cero (un dividendo) no puede decidir por los dos.
+        div = sources.divisor_nominal(
+            ticker, max(abs(t["buy_price"] or 0), abs(t["sell_price"] or 0)))
         compra, venta = t["buy_price"] / div, t["sell_price"] / div
         c_compra, c_venta = t.get("buy_comm", 0) / div, t.get("sell_comm", 0) / div
         mep_c = mep_v = None

@@ -39,6 +39,7 @@ def mep_serie():
         "hoy": round(float(s.iloc[-1]), 2),
         "serie": [{"fecha": str(f.date()), "valor": round(float(v), 2)}
                   for f, v in s.items()],
+        "eventos": mep.eventos(str(s.index[0].date()), str(s.index[-1].date())),
     })
 
 
@@ -177,33 +178,116 @@ def broker_estado():
     return jsonify({**cocos.estado(), "vault_cargado": vault.existe()})
 
 
+def _parte_2fa(valor: str):
+    """Separa lo que el usuario puso en el campo 2FA en (semilla, código puntual).
+
+    Un código de la app son 6 dígitos y vale medio minuto: no se guarda, se usa
+    sólo en esta conexión. Cualquier otra cosa se toma como semilla base32 y sí
+    se guarda, porque genera los códigos sola de ahí en más.
+    """
+    v = (valor or "").strip()
+    if v.replace(" ", "").isdigit() and len(v.replace(" ", "")) == 6:
+        return "", v.replace(" ", "")
+    return v, ""
+
+
 @bp.post("/broker/vault")
 def broker_vault():
-    """Cifra las credenciales y devuelve la API key. Se muestra UNA sola vez."""
+    """Cifra email/contraseña, guarda la clave sola y conecta en un paso.
+
+    El usuario nunca ve ni maneja la clave del vault. El 2FA puede ser la semilla
+    (se guarda) o el código de 6 dígitos del momento (no se guarda: sirve sólo
+    para este login, y después manda la sesión guardada).
+    """
     c = request.json or {}
+    semilla, codigo = _parte_2fa(c.get("totp_secret_key", ""))
     try:
         api_key = vault.crear({"email": c.get("email", ""),
                                "password": c.get("password", ""),
-                               "totp_secret_key": c.get("totp_secret_key", "")})
+                               "totp_secret_key": semilla})
     except Exception as e:
         return jsonify({"error": str(e)}), 400
-    return jsonify({"ok": True, "api_key": api_key,
-                    "aviso": "Guardá esta clave: es lo único que abre el vault y "
-                             "no se puede recuperar."})
+    return jsonify({"ok": True, **cocos.conectar(api_key, forzar_login=True, codigo_2fa=codigo)})
 
 
 @bp.post("/broker/conectar")
 def broker_conectar():
+    """Conecta con la clave guardada. Reusa la sesión salvo forzar_login.
+
+    Acepta un código 2FA puntual para cuando la sesión caducó y no hay semilla.
+    """
+    api_key = vault.clave_guardada()
+    if not api_key:
+        return jsonify({"error": "No hay credenciales cargadas."}), 400
     c = request.json or {}
-    if not c.get("api_key"):
-        return jsonify({"error": "Falta la API key del vault."}), 400
-    return jsonify(cocos.conectar(c["api_key"], c.get("forzar_login", False)))
+    _, codigo = _parte_2fa(c.get("codigo_2fa", ""))
+    return jsonify(cocos.conectar(api_key, c.get("forzar_login", False), codigo_2fa=codigo))
 
 
 @bp.post("/broker/desconectar")
 def broker_desconectar():
     cocos.desconectar()
     return jsonify({"ok": True})
+
+
+@bp.post("/broker/borrar")
+def broker_borrar():
+    """Desconecta y elimina credenciales, sesión y clave guardada."""
+    cocos.desconectar()
+    vault.borrar_todo()
+    return jsonify({"ok": True})
+
+
+# ── Cocos: datos personales de la cuenta (solo lectura) ────────────────────────
+# Cada endpoint devuelve lo crudo del broker o {"error": ...}. La app no
+# reescribe la forma: es un mirador de lo que Cocos expone, para ver qué hay
+# antes de construir nada encima.
+
+@bp.get("/cocos/resumen")
+def cocos_resumen():
+    """Todo en una llamada: posiciones, variación del día, saldos, banco, perfil."""
+    if not cocos.estado()["conectado"]:
+        return jsonify({"conectado": False})
+    return jsonify({
+        "conectado": True,
+        "posiciones": cocos.posiciones(),
+        "dia": cocos.posiciones_dia(),
+        "fondos": cocos.fondos_disponibles(),
+        "bancos": cocos.cuentas_bancarias(),
+        "perfil": cocos.mis_datos(),
+    })
+
+
+@bp.get("/cocos/posiciones")
+def cocos_posiciones():
+    return jsonify({"posiciones": cocos.posiciones(), "dia": cocos.posiciones_dia()})
+
+
+@bp.get("/cocos/movimientos")
+def cocos_movimientos():
+    limite = min(int(request.args.get("limite", 40)), 100)
+    offset = int(request.args.get("offset", 0))
+    return jsonify(cocos.movimientos(limite, offset))
+
+
+@bp.get("/cocos/fci")
+def cocos_fci():
+    return jsonify(cocos.fci_tracking())
+
+
+@bp.get("/cocos/fondos")
+def cocos_fondos():
+    return jsonify(cocos.fondos_disponibles())
+
+
+@bp.get("/cocos/datos")
+def cocos_datos():
+    return jsonify(cocos.mis_datos())
+
+
+@bp.get("/cocos/bancos")
+def cocos_bancos():
+    return jsonify({"cuentas": cocos.cuentas_bancarias()})
 
 
 # ── Caché ─────────────────────────────────────────────────────────────────────

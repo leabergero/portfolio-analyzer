@@ -125,8 +125,23 @@ def agregar(nombre: str, nuevas: list) -> dict:
 
 # ── P&L realizado ─────────────────────────────────────────────────────────────
 
+def _normalizar_trade(t: dict) -> dict:
+    """Fechas a ISO. Es lo único que hay que tocar: el resto ya viene tipado.
+
+    Sin esto la deduplicación no ve como iguales a dos importaciones del mismo
+    archivo: Yahoo exporta "20250919" y el CSV propio "2025-09-19", así que la
+    clave difiere y el mismo trade entra dos veces. Pasó en MAMI —11 operaciones
+    duplicadas, el realizado dio 4.588 en vez de 2.300— y no se ve a simple
+    vista, porque las dos copias son legítimas cada una por su lado.
+    """
+    from core.io.csv_native import normalizar_fecha
+
+    return {**t, "buy_date": normalizar_fecha(t.get("buy_date", "")),
+            "sell_date": normalizar_fecha(t.get("sell_date", ""))}
+
+
 def cargar_realizado(nombre: str) -> list:
-    return _leer(REALIZADO).get(nombre, [])
+    return [_normalizar_trade(t) for t in _leer(REALIZADO).get(nombre, [])]
 
 
 def agregar_realizado(nombre: str, trades: list, lote: str = None) -> dict:
@@ -142,7 +157,8 @@ def agregar_realizado(nombre: str, trades: list, lote: str = None) -> dict:
     no llevan lote y no los borra ninguna reimportación.
     """
     datos = _leer(REALIZADO)
-    existentes = datos.get(nombre, [])
+    existentes = [_normalizar_trade(t) for t in datos.get(nombre, [])]
+    trades = [_normalizar_trade(t) for t in trades]
     reemplazados = 0
     if lote:
         previos = len(existentes)

@@ -26,7 +26,9 @@ Descartadas y por qué, para no volver a intentarlas:
     que necesita todo el mundo.
 """
 
+import json
 from datetime import date, timedelta
+from pathlib import Path
 
 import pandas as pd
 import requests
@@ -34,6 +36,7 @@ import requests
 from core.data import cache
 
 INICIO = "2018-01-01"
+EVENTOS = Path(__file__).resolve().parents[2] / "data" / "eventos_mep.json"
 _URL_ARGDATOS = "https://api.argentinadatos.com/v1/cotizaciones/dolares/bolsa"
 _URL_DOLARAPI = "https://dolarapi.com/v1/dolares/bolsa"
 _HEADERS = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
@@ -44,15 +47,27 @@ _memoria = {"serie": None, "fuente": None}
 # ── Descarga ──────────────────────────────────────────────────────────────────
 
 def _filtrar_outliers(s: pd.Series) -> pd.Series:
-    """Descarta valores fuera de ±40 % de la mediana móvil de 30 ruedas.
+    """Descarta dos cosas distintas: valores fuera de nivel y picos de una rueda.
 
     Un solo dato malo en el MEP corrompe la valuación de toda la cartera para
     esa fecha, y las APIs públicas publican ceros y saltos de vez en cuando.
+
+    El nivel lo agarra la mediana móvil de 30 ruedas (±40 %). Pero un pico
+    aislado no sale del nivel y pasaba entero: el 2025-05-02 ArgentinaDatos
+    publicó $1.363,60 entre $1.182 y $1.170, un +15 % que al día siguiente ya no
+    estaba, y toda operación de esa fecha se valuaba 16 % mal. Ese se detecta
+    contra los vecinos inmediatos, no contra el mes — una devaluación real
+    (el 2023-08-14 también saltó 15 %) se queda arriba y la mediana de tres la
+    sigue, mientras que el pico queda solo. Los extremos de la serie no tienen
+    vecino de los dos lados: se conservan.
     """
     if len(s) < 5:
         return s
     med = s.rolling(30, min_periods=5).median().ffill().bfill()
-    return s[(s > med * 0.60) & (s < med * 1.40)]
+    s = s[(s > med * 0.60) & (s < med * 1.40)]
+    vecinos = s.rolling(3, center=True).median()
+    pico = ((s - vecinos).abs() > vecinos * 0.08).fillna(False)
+    return s[~pico]
 
 
 def _desde_argentinadatos() -> pd.Series:
@@ -127,7 +142,9 @@ def sincronizar(forzar: bool = False) -> dict:
 def serie() -> pd.Series:
     """La serie completa, cacheada en memoria (se lee muchas veces por request)."""
     if _memoria["serie"] is None:
-        _memoria["serie"] = cache.leer_mep()
+        # También al leer: la caché guarda lo que las fuentes publicaron el día
+        # que se sincronizó, y ya tiene adentro picos que el filtro viejo dejó pasar.
+        _memoria["serie"] = _filtrar_outliers(cache.leer_mep())
     return _memoria["serie"]
 
 
@@ -171,3 +188,20 @@ def serie_a_usd(precios_ars: pd.Series, mep: pd.Series = None) -> pd.Series:
         precios_ars.index = idx.tz_localize(None)
     alineado = s.reindex(precios_ars.index, method="ffill")
     return (precios_ars / alineado).dropna()
+
+
+def eventos(desde: str = None, hasta: str = None) -> list[dict]:
+    """Los hitos que movieron al MEP, para marcarlos sobre la serie.
+
+    Es una lista curada a mano en `data/eventos_mep.json`: ningún proveedor
+    publica "qué noticia movió al dólar", y adivinarlo con un detector de saltos
+    pondría una etiqueta genérica sobre cada rueda volátil. Se edita el archivo.
+    """
+    try:
+        ev = json.loads(EVENTOS.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    return sorted((e for e in ev
+                   if (not desde or e["fecha"] >= desde)
+                   and (not hasta or e["fecha"] <= hasta)),
+                  key=lambda e: e["fecha"])

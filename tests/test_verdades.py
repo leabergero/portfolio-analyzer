@@ -684,6 +684,79 @@ def test_yahoo_repara_coma_suelta_en_comment():
     assert casi(abiertas[0]["qty"], 10.0)
 
 
+
+def test_eventos_del_mep_caen_dentro_del_rango():
+    """Un hito fuera del rango pedido pinta un triángulo en el borde del gráfico.
+
+    El filtro compara fechas como texto ISO, que ordena bien solo si todas tienen
+    el mismo formato: un "2025-4-2" en el JSON se cuela en cualquier rango.
+    """
+    eventos = require("core.data.mep", "eventos")
+    todos = eventos()
+    assert todos, "data/eventos_mep.json vacío o ilegible."
+    for e in todos:
+        assert len(e["fecha"]) == 10 and e["fecha"][4] == e["fecha"][7] == "-", \
+            f"Fecha no ISO: {e['fecha']}"
+    recorte = eventos("2025-01-01", "2025-12-31")
+    assert all("2025-01-01" <= e["fecha"] <= "2025-12-31" for e in recorte)
+    assert len(recorte) < len(todos)
+
+
+
+def test_pico_de_una_rueda_no_entra_en_la_serie():
+    """Un valor que sube 15% y al día siguiente ya no está es un dato malo.
+
+    Pasó de verdad: ArgentinaDatos publicó el MEP del 2025-05-02 en $1.363,60
+    entre $1.182 y $1.170, y toda operación de esa fecha se valuaba 16% mal. El
+    filtro por nivel no lo veía porque el pico no sale del rango del mes. Lo que
+    NO puede hacer el filtro es comerse una devaluación real, que salta igual de
+    fuerte pero se queda arriba.
+    """
+    filtrar = require("core.data.mep", "_filtrar_outliers")
+    date_range, Series = require("pandas", "date_range", "Series")
+    fechas = date_range("2025-04-01", periods=40, freq="D")
+
+    pico = Series(1180.0, index=fechas)
+    pico.iloc[20] = 1363.6
+    assert fechas[20] not in filtrar(pico).index, "El pico de una rueda quedó en la serie."
+
+    salto = Series(1180.0, index=fechas)
+    salto.iloc[20:] = 1363.6
+    assert fechas[20] in filtrar(salto).index, "Se comió una devaluación real."
+    assert len(filtrar(salto)) == len(salto)
+
+
+
+def test_el_mismo_trade_con_otro_formato_de_fecha_no_se_duplica():
+    """Yahoo exporta "20250919" y el CSV propio "2025-09-19": es el mismo trade.
+
+    Pasó en MAMI: 11 operaciones entraron dos veces porque la clave de duplicado
+    comparaba las fechas como texto crudo, y el realizado dio 4.588 dólares en
+    lugar de 2.300. Las dos copias se ven legítimas leyendo el archivo.
+    """
+    normalizar = require("core.io.store", "_normalizar_trade")
+    crudo = {"ticker": "GLDD.BA", "buy_date": "20250919", "sell_date": "20260205",
+             "buy_price": 6.93, "sell_price": 9.17, "qty": 356.0}
+    iso = dict(crudo, buy_date="2025-09-19", sell_date="2026-02-05")
+    clave = lambda t: (t["ticker"], t["buy_date"], t["sell_date"],                # noqa: E731
+                       t["buy_price"], t["sell_price"], t["qty"])
+    assert clave(normalizar(crudo)) == clave(normalizar(iso))
+
+
+def test_bono_cargado_por_nominal_no_se_divide_de_nuevo():
+    """AL30D a 0,643 ya viene por nominal; a 64,30 viene por 100 nominales.
+
+    La fuente de precios publica los bonos cada 100 nominales, así que el núcleo
+    divide por 100. Aplicarlo también a un precio que el usuario cargó por
+    nominal convirtió una operación de 1.572 dólares en una de 15,72 —el AL30D
+    de MAMI cerró en −0,19 cuando el broker decía −19,44—.
+    """
+    divisor = require("core.data.sources", "divisor_nominal")
+    assert divisor("AL30D", 0.643) == 1.0, "Dividió un precio que ya era por nominal."
+    assert divisor("AL30D", 64.30) == 100.0, "No dividió una paridad por 100 nominales."
+    assert divisor("MELI.BA", 25580.0) == 1.0, "Una acción no se divide nunca."
+
+
 # ══════════════════════════════════════════════════════════════════════════
 
 def main():

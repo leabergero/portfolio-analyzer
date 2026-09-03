@@ -90,7 +90,7 @@ body{margin:0;background:var(--fondo);color:var(--texto);
 .barra .der{margin-left:auto;display:flex;align-items:center;gap:10px}
 
 select,input,button{font:inherit}
-select,input[type=text],input[type=number]{background:var(--panel);color:var(--texto);
+select,input[type=text],input[type=number],input[type=email],input[type=password]{background:var(--panel);color:var(--texto);
   border:1px solid var(--borde);border-radius:7px;padding:6px 10px;font-size:13.5px}
 .btn{background:var(--panel);color:var(--texto);border:1px solid var(--borde);
      border-radius:7px;padding:6px 12px;font-size:13.5px;cursor:pointer}
@@ -114,6 +114,7 @@ select,input[type=text],input[type=number]{background:var(--panel);color:var(--t
 .panel h3{margin:0 0 3px;font-size:14px;font-weight:600;letter-spacing:-.01em;
           display:flex;align-items:center;gap:7px}
 .pie{font-size:12.5px;color:var(--texto-3);margin-top:9px;line-height:1.45}
+.pie a{color:var(--acento)}
 
 /* ── KPI con explicación ── */
 .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(158px,1fr));gap:10px;margin-bottom:14px}
@@ -148,9 +149,18 @@ td{padding:7px 10px;border-bottom:1px solid var(--borde-suave)}
 tr:last-child td{border-bottom:0}
 td.n,th.n{text-align:right;font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums;white-space:nowrap}
 .pos{color:var(--positivo)} .neg{color:var(--negativo)}
+/* El resultado por tipo de cambio se lee de un vistazo: no alcanza el signo. */
+td.fx.pos{background:color-mix(in srgb,var(--positivo) 15%,transparent)}
+td.fx.neg{background:color-mix(in srgb,var(--negativo) 15%,transparent)}
+td.fx{font-weight:600}
 
 /* ── Pestañas ── */
-.tabs{display:flex;gap:3px;flex-wrap:wrap;margin-bottom:14px;border-bottom:1px solid var(--borde)}
+/* Fija bajo la barra superior: en Posición la tabla de tenencias es larga y
+   había que volver arriba del todo para cambiar de sección o de índice. */
+.tabs{position:sticky;top:56px;z-index:40;background:var(--fondo);
+      display:flex;gap:3px;flex-wrap:wrap;align-items:center;
+      margin:0 -20px 14px;padding:10px 20px 0;
+      border-bottom:1px solid var(--borde)}
 .tab{border:0;background:transparent;color:var(--texto-2);font:inherit;font-size:13.5px;
      padding:9px 13px;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px}
 .tab.on{color:var(--acento);border-bottom-color:var(--acento);font-weight:600}

@@ -12,6 +12,10 @@ data/*.json
 connectors.json
 *.enc
 .env
+# credenciales cifradas + la clave que las abre (config.json)
+data/vault/
+# backups de carteras y realizado
+data/*.bak*
 
 # Frontend compilado (se genera desde web/app.jsx)
 web/app.js

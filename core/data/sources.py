@@ -179,6 +179,20 @@ def info(ticker: str, ttl_horas: float = 24 * 7):
     return datos
 
 
+def divisor_nominal(ticker: str, precio: float, source: str = None) -> float:
+    """100 si ese precio viene por lámina de 100 nominales, 1 si viene por nominal.
+
+    Los bonos y ONs cotizan cada 100 nominales y así los publica la fuente de
+    precios (AL30D ~64 USD), por eso `precios_usd` divide por 100. Pero el
+    precio que carga el usuario no siempre está en esa escala: el CSV exportado
+    del broker trae AL30D a 0,643 —ya por nominal— y volver a dividirlo hace que
+    una operación de 1.572 dólares figure como una de 15,72, que fue lo que pasó
+    en MAMI. Ninguna paridad real anda por debajo de 5, así que ese es el corte
+    entre las dos escalas.
+    """
+    return 100.0 if is_bond(ticker, source) and abs(precio or 0) >= 5 else 1.0
+
+
 def precios_usd(ticker: str, desde: str = None, hasta: str = None,
                 source: str = None) -> pd.Series:
     """Serie de cierres YA convertida a dólares, lista para calcular retornos.
