@@ -163,10 +163,14 @@ La columna `record` dice qué es cada fila (vacío = posición abierta, `cerrada
 ## Arranque
 
 ```bash
+git clone https://github.com/leabergero/portfolio-analyzer.git
+cd portfolio-analyzer
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 npm install && npm run build      # precompila el JSX a web/app.js
 .venv/bin/python -m api.app       # http://127.0.0.1:5002
 ```
+
+Después, abrí <http://127.0.0.1:5002> en el navegador.
 
 `tests/test_verdades.py` corre sin instalar nada: cada caso es un bug real que ya
 se pagó una vez en las apps anteriores.
