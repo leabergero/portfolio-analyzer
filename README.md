@@ -148,6 +148,18 @@ por ticker), movimientos clasificados con filtro, y cuentas bancarias.
 
 ---
 
+## Datos de ejemplo
+
+El repo trae una cartera de muestra en
+[`examples/cartera_ejemplo.csv`](examples/cartera_ejemplo.csv) — 8 posiciones
+abiertas, 71 operaciones cerradas y 33 dividendos — para poder recorrer la app
+sin cargar nada a mano. Al clonar no hay carteras (los datos propios quedan fuera
+de git), así que este archivo es el punto de partida.
+
+Para cargarla: pestaña **Carteras → Importar → Formato propio**, y elegí el CSV.
+La columna `record` dice qué es cada fila (vacío = posición abierta, `cerrada`,
+`dividendo`), así que el mismo archivo sirve de respaldo completo de una cartera.
+
 ## Arranque
 
 ```bash
@@ -172,6 +184,26 @@ web/            interfaz (React + Plotly, JSX precompilado)
 tests/          las verdades
 docs/           decisiones, modelos, pendientes, capturas
 ```
+
+## Créditos
+
+Este proyecto se apoya en el trabajo de otros. Gracias a quienes mantienen:
+
+- **[pyCocos](https://github.com/nacho-herrera/pyCocos)** (Nacho Herrera) — el
+  conector con Cocos Capital para bonos, ONs y letras. `core/broker/_cocos_patch.py`
+  repara en caliente el login nuevo del broker sobre esta librería.
+- **[yfinance](https://github.com/ranaroussi/yfinance)** (Ran Aroussi) — precios
+  de acciones, CEDEARs, ETFs y benchmarks.
+- **[PyOBD](https://github.com/franco-lamas/PyOBD)** (Franco Lamas) — acceso a
+  BYMA Open Data.
+
+Y sobre las bases de siempre: Flask, pandas, NumPy, SciPy, cryptography y
+Matplotlib. Los datos del dólar MEP salen de las APIs públicas de
+[ArgentinaDatos](https://argentinadatos.com) y [dolarapi](https://dolarapi.com).
+
+## Licencia
+
+[MIT](LICENSE) — © 2026 Leandro R. Bergero.
 
 ---
 
