@@ -137,7 +137,19 @@ def conectar(api_key: str, forzar_login: bool = False, codigo_2fa: str = "") -> 
         if sesion:
             try:
                 _cliente = _restaurar(Cocos, kwargs, sesion)
-                _estado.update(conectado=True, detalle="sesión restaurada",
+                # El access_token dura ~1 h; si venció, se renueva con el
+                # refresh_token (que vive mucho más) sin volver a pedir 2FA. Sin
+                # esto, reconectar tras una hora daba 401 "jwt expired" en cada
+                # llamada de datos aunque el login figurara conectado.
+                import time
+                if time.time() > sesion.get("token_expiration", 0) - 60:
+                    _cliente.connected = True
+                    _cliente._refresh_access_token()
+                    _guardar_sesion(api_key)
+                    detalle = "sesión renovada"
+                else:
+                    detalle = "sesión restaurada"
+                _estado.update(conectado=True, detalle=detalle,
                                cuenta=getattr(_cliente, "account_number", None))
                 return estado()
             except Exception as e:
@@ -150,15 +162,20 @@ def conectar(api_key: str, forzar_login: bool = False, codigo_2fa: str = "") -> 
         _estado.update(conectado=False, detalle=f"login: {e}")
         return estado()
 
+    _guardar_sesion(api_key)
+    _estado.update(conectado=True, detalle="login nuevo",
+                   cuenta=getattr(_cliente, "account_number", None))
+    return estado()
+
+
+def _guardar_sesion(api_key: str):
+    """Persiste los JWT vivos del cliente para reconectar sin 2FA."""
     vault.guardar_sesion(api_key, {
         "access_token": _cliente.access_token,
         "refresh_token": _cliente.refresh_token,
         "token_expiration": _cliente.token_expiration,
         "account_number": getattr(_cliente, "account_number", ""),
     })
-    _estado.update(conectado=True, detalle="login nuevo",
-                   cuenta=getattr(_cliente, "account_number", None))
-    return estado()
 
 
 def desconectar():
