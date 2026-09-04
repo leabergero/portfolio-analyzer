@@ -297,8 +297,9 @@ def cocos_fci_importar():
     t = cocos.tenencias_fci()
     if t.get("error"):
         return jsonify(t), 502
-    if not t["lotes"]:
-        return jsonify({"error": "La cuenta no tiene participaciones en FCI."}), 400
+    # Sin fondos en la cuenta la importación igual corre, y limpia: si rescataste
+    # todo, la cartera tiene que quedar sin el fondo. Rechazarlo acá dejaba una
+    # tenencia fantasma que ya no existe en el broker.
 
     previa = connectors.cartera_de_cuenta(t.get("cuenta"))
     if previa and previa != cartera:
@@ -308,7 +309,7 @@ def cocos_fci_importar():
     r = store.reemplazar_source(cartera, sources.SOURCE_FCI, t["lotes"])
     if t.get("cuenta"):
         connectors.asociar_cuenta(t["cuenta"], cartera)
-    return jsonify({"ok": True, "cartera": cartera,
+    return jsonify({"ok": True, "cartera": cartera, "cuenta_nueva": not previa,
                     "tickers": [l["ticker"] for l in t["lotes"]], **r})
 
 

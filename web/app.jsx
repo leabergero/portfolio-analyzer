@@ -3341,11 +3341,13 @@ function MiCocos() {
             </>}
 
         {/* Llevar la participación a una cartera: sólo la posición y el resultado. */}
-        {tenFci && !tenFci.error && (tenFci.lotes || []).length > 0 && (
+        {tenFci && !tenFci.error && ((tenFci.lotes || []).length > 0 || tenFci.cartera) && (
           <div style={{ borderTop: "1px solid var(--borde)", marginTop: 12, paddingTop: 12,
                         display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
             <span style={{ fontSize: 13 }}>
-              Llevar {tenFci.lotes.map((l) => l.ticker).join(" y ")} a la cartera
+              {(tenFci.lotes || []).length
+                ? <>Llevar {tenFci.lotes.map((l) => l.ticker).join(" y ")} a la cartera</>
+                : <>No te queda ningún FCI: sincronizá para sacarlos de la cartera</>}
             </span>
             <select value={destino} onChange={(e) => setDestino(e.target.value)}
                     disabled={!!tenFci.cartera}>
@@ -3354,19 +3356,23 @@ function MiCocos() {
             </select>
             <button className="btn" disabled={!destino || importando?.estado === "yendo"}
                     onClick={importarFci}>
-              {importando?.estado === "yendo" ? "Importando…" : "Importar"}
+              {importando?.estado === "yendo" ? "Sincronizando…"
+                : (tenFci.lotes || []).length ? "Importar" : "Sincronizar"}
             </button>
             {importando?.ok && <span className="ok" style={{ fontSize: 12 }}>
               Listo: {importando.importadas} en {importando.cartera}
               {importando.reemplazadas ? ` (pisó ${importando.reemplazadas})` : ""}.
             </span>}
+            {importando?.ok && !importando.importadas && !importando.reemplazadas &&
+              <span style={{ fontSize: 12, color: "var(--texto-3)" }}>Nada que sincronizar.</span>}
             {importando?.error && <span className="mal" style={{ fontSize: 12 }}>{importando.error}</span>}
           </div>)}
-        {tenFci && !tenFci.error && (tenFci.lotes || []).length > 0 && (
+        {tenFci && !tenFci.error && ((tenFci.lotes || []).length > 0 || tenFci.cartera) && (
           <div className="pie">
             Va sólo la tenencia y su resultado. Un FCI no tiene serie de precios, así que
-            queda fuera del riesgo y de la optimización. Re-importar pisa la anterior, no
-            duplica. La cuenta queda asociada a esa cartera.
+            queda fuera del riesgo y de la optimización. Sincronizar pisa la importación
+            anterior —no duplica— y si ya no te queda el fondo, lo saca de la cartera.
+            El resultado de lo que rescataste vive en la tabla de arriba, no en la cartera.
           </div>)}
       </div>
 
