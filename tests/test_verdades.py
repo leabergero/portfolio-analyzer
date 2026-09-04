@@ -786,6 +786,38 @@ def test_fci_cada_1000_cuotapartes():
         "Un CEDEAR no se toca: la escala /1000 es sólo de los FCI."
 
 
+def test_un_fci_no_es_un_bono_ni_cotiza_en_dolares():
+    """Un lote de FCI importado del broker no puede entrar con source="cocos".
+
+    Ese valor activa las dos reglas de los bonos: dividir el precio por 100 y
+    tratar el ticker como renta fija. Un COCOSPPA a 1,4489 pasaría a valer
+    0,014489. Por eso los lotes de FCI llevan su propio `source`.
+    """
+    from core.data.symbols import SOURCE_FCI, is_bond
+    from core.data.sources import divisor_nominal
+
+    assert SOURCE_FCI != "cocos", "El tag de los FCI tiene que ser distinto al de los bonos."
+    for t in ("COCOSPPA", "COCOAUSD", "COCORMA", "COCOUSDPA"):
+        assert not is_bond(t, SOURCE_FCI), f"{t} no cotiza cada 100 nominales."
+        assert divisor_nominal(t, 1448.934, SOURCE_FCI) == 1.0, \
+            f"El precio de {t} no se divide por 100."
+
+
+def test_la_moneda_del_lote_manda_sobre_la_del_ticker():
+    """COCOAUSD es un fondo en dólares y COCOSPPA en pesos, pero ninguno de los
+    dos termina en .BA: `ticker_currency` los da a los dos por dólares. El lote
+    trae su `currency` y es el que tiene que mandar, si no un fondo en pesos se
+    valúa 1.500 veces de más.
+    """
+    from core.data.sources import ticker_currency
+
+    assert ticker_currency("COCOSPPA") == "USD", \
+        "Si esto cambia, revisar que valuar() siga prefiriendo la moneda del lote."
+    lote = {"ticker": "COCOSPPA", "currency": "ARS"}
+    moneda = (lote.get("currency") or ticker_currency(lote["ticker"])).upper()
+    assert moneda == "ARS", "La moneda del lote tiene prioridad sobre la del ticker."
+
+
 # ══════════════════════════════════════════════════════════════════════════
 
 def main():

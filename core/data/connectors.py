@@ -62,3 +62,23 @@ def borrar(nombre: str) -> bool:
     del datos[nombre]
     ARCHIVO.write_text(json.dumps(datos, indent=2))
     return True
+
+
+# ── Qué cartera es cada comitente ─────────────────────────────────────────────
+# No es una credencial, pero vive acá por lo mismo: es configuración local que no
+# se versiona. Cada cartera es una cuenta distinta de Cocos y el vault guarda una
+# sesión por vez, así que sin este mapa no hay forma de saber si las tenencias
+# que estás mirando son las de la cartera a la que las querés importar.
+
+_CARTERAS = "cocos_carteras"
+
+
+def cartera_de_cuenta(cuenta: str):
+    """Nombre de la cartera asociada a ese número de comitente, o None."""
+    return (_leer().get(_CARTERAS) or {}).get(str(cuenta)) if cuenta else None
+
+
+def asociar_cuenta(cuenta: str, cartera: str) -> None:
+    mapa = dict(_leer().get(_CARTERAS) or {})
+    mapa[str(cuenta)] = cartera
+    guardar(_CARTERAS, mapa)

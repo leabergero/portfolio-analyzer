@@ -275,6 +275,43 @@ def cocos_fci():
     return jsonify(cocos.fci_tracking())
 
 
+@bp.get("/cocos/fci/tenencias")
+def cocos_fci_tenencias():
+    """Las participaciones en FCI como lotes, y a qué cartera va esta cuenta."""
+    t = cocos.tenencias_fci()
+    if t.get("error"):
+        return jsonify(t)
+    return jsonify({**t, "cartera": connectors.cartera_de_cuenta(t.get("cuenta")),
+                    "carteras": store.nombres()})
+
+
+@bp.post("/cocos/fci/importar")
+def cocos_fci_importar():
+    """Lleva las participaciones en FCI a una cartera, pisando la importación
+    anterior. Recuerda la cuenta para no ofrecer después la cartera equivocada.
+    """
+    cartera = (request.json or {}).get("cartera", "").strip()
+    if cartera not in store.nombres():
+        return jsonify({"error": "Esa cartera no existe."}), 400
+
+    t = cocos.tenencias_fci()
+    if t.get("error"):
+        return jsonify(t), 502
+    if not t["lotes"]:
+        return jsonify({"error": "La cuenta no tiene participaciones en FCI."}), 400
+
+    previa = connectors.cartera_de_cuenta(t.get("cuenta"))
+    if previa and previa != cartera:
+        return jsonify({"error": f"Esta cuenta ya está asociada a «{previa}». "
+                                 "Desasociala antes de importarla en otra."}), 409
+
+    r = store.reemplazar_source(cartera, sources.SOURCE_FCI, t["lotes"])
+    if t.get("cuenta"):
+        connectors.asociar_cuenta(t["cuenta"], cartera)
+    return jsonify({"ok": True, "cartera": cartera,
+                    "tickers": [l["ticker"] for l in t["lotes"]], **r})
+
+
 @bp.get("/cocos/fondos")
 def cocos_fondos():
     return jsonify(cocos.fondos_disponibles())

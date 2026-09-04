@@ -28,6 +28,7 @@ from core.data.symbols import (  # noqa: F401  — API pública de la capa de da
     is_bond,
     is_cocos_only,
     is_d_variant,
+    SOURCE_FCI,
     strip_ba,
     ticker_currency,
 )
@@ -193,6 +194,28 @@ def divisor_nominal(ticker: str, precio: float, source: str = None) -> float:
     return 100.0 if is_bond(ticker, source) and abs(precio or 0) >= 5 else 1.0
 
 
+def _fci_usd(ticker: str) -> pd.Series:
+    """Un solo punto: la cuotaparte de hoy del FCI, en dólares.
+
+    Un FCI no tiene serie —Cocos no publica histórico de cuotapartes— y no se
+    inventa una. Con un punto alcanza para valuar la posición y calcular el
+    resultado, que es todo lo que se le pide; los modelos que necesitan
+    retornos descartan solos las series de menos de 30 ruedas, así que el fondo
+    queda fuera del riesgo y de la optimización sin ningún caso especial.
+
+    Tampoco se cachea: es el precio de hoy, y mañana es otro.
+    """
+    from core.broker import cocos
+    from core.data import mep as mep_mod
+
+    hoy = date.today()
+    # Cocos informa la cuotaparte en pesos, también la de los fondos en dólares.
+    usd = mep_mod.a_usd(cocos.precio_fci(ticker) or 0, hoy)
+    if not usd:
+        return pd.Series(dtype=float)
+    return pd.Series([usd], index=[pd.Timestamp(hoy)])
+
+
 def precios_usd(ticker: str, desde: str = None, hasta: str = None,
                 source: str = None) -> pd.Series:
     """Serie de cierres YA convertida a dólares, lista para calcular retornos.
@@ -203,6 +226,9 @@ def precios_usd(ticker: str, desde: str = None, hasta: str = None,
       3. lo que ya viene en dólares no se toca.
     """
     from core.data import mep as mep_mod
+
+    if source == SOURCE_FCI:
+        return _fci_usd(ticker)
 
     df = precios(ticker, desde, hasta, source=source)
     if df.empty or "Close" not in df.columns:

@@ -143,6 +143,13 @@ def is_cocos_only(ticker: str) -> bool:
             or _parece_soberano(base) or _parece_on(base))
 
 
+#: `source` de los lotes que salen de una participación en un FCI de Cocos.
+#: A propósito NO es "cocos": ese valor activa la regla de los 100 nominales y
+#: la de moneda de los bonos, y un fondo no es un bono. Con un tag propio,
+#: `is_bond` y `divisor_nominal` lo dejan en paz solos.
+SOURCE_FCI = "cocos-fci"
+
+
 def is_bond(ticker: str, source: str = None) -> bool:
     """¿Cotiza cada 100 nominales y hay que dividir el precio por 100?
 

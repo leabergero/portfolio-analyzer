@@ -499,6 +499,69 @@ def fci_tracking():
     return {"fci": salida, "cortado": hist["cortado"], "total_movs": len(movs)}
 
 
+# ── Participaciones en FCI, como lotes de cartera ─────────────────────────────
+
+def precio_fci(ticker: str):
+    """Cuotaparte de hoy de un FCI, en pesos (que es como la informa Cocos).
+
+    None si no hay posición en ese fondo o el broker no publicó precio: la
+    posición sale marcada «sin precio», que es mejor que valuarla mal.
+    """
+    pos = posiciones()
+    if not isinstance(pos, list):
+        return None
+    t = ticker.upper().strip()
+    for p in pos:
+        if (p.get("short_ticker") or p.get("instrument_code")) == t:
+            return p.get("last") or p.get("average_price")
+    return None
+
+
+def tenencias_fci():
+    """Las participaciones en FCI de la cuenta, como lotes listos para importar.
+
+    Una tenencia de FCI es una foto —cuotapartes y precio promedio de compra—,
+    no un historial de suscripciones. Alcanza para la posición y el resultado,
+    que es lo único que se le pide.
+
+    La moneda sale de los movimientos del fondo: las posiciones vienen todas en
+    pesos y ahí el broker no la dice. Un fondo en dólares se guarda con su PPC
+    en dólares, si no el resultado mezcla el movimiento del tipo de cambio con
+    el del fondo.
+    """
+    from core.data.symbols import SOURCE_FCI
+
+    pos = posiciones()
+    if not isinstance(pos, list):
+        return {"error": (pos or {}).get("error", "sin datos")}
+    seguimiento = fci_tracking()
+    if seguimiento.get("error"):
+        return seguimiento
+    fondos = {f["ticker"]: f for f in seguimiento["fci"]}
+
+    lotes = []
+    for p in pos:
+        if p.get("instrument_type") != "FCI":
+            continue
+        tk = p.get("short_ticker") or p.get("instrument_code")
+        cantidad, ppc = p.get("quantity"), p.get("average_price")
+        if not cantidad or not ppc:
+            continue
+        f = fondos.get(tk, {})
+        moneda = (f.get("moneda") or "ARS").upper()
+        fecha = f.get("hasta") or date.today().isoformat()
+        precio = ppc if moneda == "ARS" else mep.a_usd(ppc, fecha)
+        if not precio:
+            continue
+        lotes.append({
+            "ticker": tk, "buy_date": fecha, "buy_price": round(precio, 6),
+            "qty": cantidad, "commissions": 0.0, "source": SOURCE_FCI,
+            "currency": moneda, "asset_type": "FCI",
+            "notes": p.get("instrument_short_name") or "",
+        })
+    return {"lotes": lotes, "cuenta": _estado.get("cuenta")}
+
+
 def fondos_disponibles():
     return _llamar("funds_available")
 

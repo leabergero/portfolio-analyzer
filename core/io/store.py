@@ -123,6 +123,24 @@ def agregar(nombre: str, nuevas: list) -> dict:
     return {"agregadas": agregadas, "omitidas": omitidas, "total": len(existentes)}
 
 
+def reemplazar_source(nombre: str, source: str, nuevas: list) -> dict:
+    """Deja en la cartera exactamente los lotes que vienen de ese `source`.
+
+    Lo que llega del broker es una foto consolidada, no un historial: al
+    re-sincronizar cambian la cantidad y el PPC del mismo fondo, y `agregar` los
+    vería como lotes nuevos y los duplicaría. Acá se pisan los anteriores.
+
+    Lo cargado a mano no se toca nunca: sólo se reemplaza lo que tiene ese
+    mismo `source`.
+    """
+    previas = cargar(nombre)
+    resto = [p for p in previas if (p.get("source") or "") != source]
+    limpias = [_normalizar(x) for x in nuevas if str(x.get("ticker") or "").strip()]
+    guardar(nombre, resto + limpias)
+    return {"importadas": len(limpias), "reemplazadas": len(previas) - len(resto),
+            "total": len(resto) + len(limpias)}
+
+
 # ── P&L realizado ─────────────────────────────────────────────────────────────
 
 def _normalizar_trade(t: dict) -> dict:

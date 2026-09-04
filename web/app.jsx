@@ -3132,6 +3132,9 @@ function MiCocos() {
   const [cargandoMovs, setCargandoMovs] = useState(false);
   const [cat, setCat] = useState(null);           // filtro de categoría
   const [fci, setFci] = useState(null);           // tracking de FCI
+  const [tenFci, setTenFci] = useState(null);     // participaciones como lotes
+  const [destino, setDestino] = useState("");     // cartera a la que se importan
+  const [importando, setImportando] = useState(null);
 
   const traerMovs = (offset = 0) => {
     setCargandoMovs(true);
@@ -3145,11 +3148,26 @@ function MiCocos() {
 
   const cargar = () => {
     setErr(null); setD(null); setMovs([]); setCat(null); setFci(null);
+    setTenFci(null); setImportando(null);
     api("/api/cocos/resumen").then((r) => {
       if (r.error) { setErr(r.error); return; }
       setD(r);
-      if (r.conectado) { traerMovs(0); api("/api/cocos/fci").then(setFci); }
+      if (!r.conectado) return;
+      traerMovs(0);
+      api("/api/cocos/fci").then(setFci);
+      api("/api/cocos/fci/tenencias").then((t) => {
+        setTenFci(t);
+        if (t.cartera) setDestino(t.cartera);
+      });
     });
+  };
+
+  const importarFci = () => {
+    setImportando({ estado: "yendo" });
+    api("/api/cocos/fci/importar", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cartera: destino }),
+    }).then((r) => setImportando(r));
   };
   useEffect(() => { cargar(); }, []);
 
@@ -3321,6 +3339,35 @@ function MiCocos() {
                 {fci.cortado && <> · Historial recortado a los {fci.total_movs} movimientos más recientes.</>}
               </div>
             </>}
+
+        {/* Llevar la participación a una cartera: sólo la posición y el resultado. */}
+        {tenFci && !tenFci.error && (tenFci.lotes || []).length > 0 && (
+          <div style={{ borderTop: "1px solid var(--borde)", marginTop: 12, paddingTop: 12,
+                        display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 13 }}>
+              Llevar {tenFci.lotes.map((l) => l.ticker).join(" y ")} a la cartera
+            </span>
+            <select value={destino} onChange={(e) => setDestino(e.target.value)}
+                    disabled={!!tenFci.cartera}>
+              <option value="">elegí una…</option>
+              {(tenFci.carteras || []).map((n) => <option key={n} value={n}>{n}</option>)}
+            </select>
+            <button className="btn" disabled={!destino || importando?.estado === "yendo"}
+                    onClick={importarFci}>
+              {importando?.estado === "yendo" ? "Importando…" : "Importar"}
+            </button>
+            {importando?.ok && <span className="ok" style={{ fontSize: 12 }}>
+              Listo: {importando.importadas} en {importando.cartera}
+              {importando.reemplazadas ? ` (pisó ${importando.reemplazadas})` : ""}.
+            </span>}
+            {importando?.error && <span className="mal" style={{ fontSize: 12 }}>{importando.error}</span>}
+          </div>)}
+        {tenFci && !tenFci.error && (tenFci.lotes || []).length > 0 && (
+          <div className="pie">
+            Va sólo la tenencia y su resultado. Un FCI no tiene serie de precios, así que
+            queda fuera del riesgo y de la optimización. Re-importar pisa la anterior, no
+            duplica. La cuenta queda asociada a esa cartera.
+          </div>)}
       </div>
 
       {/* ── Movimientos ── */}
