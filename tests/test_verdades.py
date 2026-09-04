@@ -818,6 +818,43 @@ def test_la_moneda_del_lote_manda_sobre_la_del_ticker():
     assert moneda == "ARS", "La moneda del lote tiene prioridad sobre la del ticker."
 
 
+
+def test_un_precio_suelto_valua_pero_no_entra_en_los_modelos():
+    """DELLD.BA, CEDEAR listado en septiembre de 2026: ni yfinance ni BYMA
+    devuelven una sola rueda, solo la cotización del día. Sin fallback el lote
+    quedaba sin precio y **fuera del total de la cartera**: la tenencia mostraba
+    menos plata de la que había.
+
+    Con el fallback valúa, pero un punto no es una serie: tiene que seguir
+    quedando afuera del riesgo, de la optimización y del momentum, igual que un
+    FCI. Si algún día entra, cualquier volatilidad o correlación que salga de
+    ahí es ruido presentado como número.
+    """
+    import pandas as pd
+    from core.data import cache, sources
+    from core.models.portfolio import matriz_retornos
+
+    original = cache.leer_respuesta
+    cache.leer_respuesta = lambda clave, ttl_horas=24, default=None: 7.26
+    try:
+        df = sources._spot_yfinance("DELLD.BA")
+    finally:
+        cache.leer_respuesta = original
+
+    assert len(df) == 1 and round(float(df["Close"].iloc[0]), 2) == 7.26, \
+        "Sin serie, el spot tiene que devolver igual un punto valuable."
+
+    original_usd = sources.precios_usd
+    sources.precios_usd = lambda t, **kw: pd.Series(
+        [7.26], index=[pd.Timestamp("2026-09-04")])
+    try:
+        ret_df, precios = matriz_retornos([{"ticker": "DELLD.BA", "qty": 146}])
+    finally:
+        sources.precios_usd = original_usd
+
+    assert ret_df.empty and "DELLD.BA" not in precios, \
+        "Un solo punto no puede entrar en la matriz de retornos."
+
 # ══════════════════════════════════════════════════════════════════════════
 
 def main():

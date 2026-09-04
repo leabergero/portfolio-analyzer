@@ -134,7 +134,44 @@ def precios(ticker: str, desde: str = None, hasta: str = None,
             return df.loc[desde:hasta]
 
     # Sin fuente disponible: lo que haya en la caché es mejor que nada.
-    return cache.leer_precios(ticker, desde, hasta)
+    cacheado = cache.leer_precios(ticker, desde, hasta)
+    if not cacheado.empty or usar_cocos:
+        return cacheado
+    return _spot_yfinance(ticker)
+
+
+def _spot_yfinance(ticker: str, ttl_horas: float = 1.0) -> pd.DataFrame:
+    """Último precio suelto, para lo que no tiene ni una rueda de historia.
+
+    Un CEDEAR recién listado —DELLD.BA, septiembre de 2026— no devuelve nada ni
+    en yfinance ni en BYMA, pero sí tiene cotización de hoy. Sin esto el lote
+    quedaba sin precio y, peor, **fuera del total de la cartera**: la tenencia
+    mostraba menos plata de la que había.
+
+    Un punto no es una serie y no pretende serlo: los modelos descartan solos
+    todo lo que tenga menos de 30 ruedas, así que el papel sigue quedando fuera
+    del riesgo, de la optimización y del momentum, que es lo que corresponde.
+    Mismo criterio que los FCI (ver `_fci_usd`).
+
+    No entra a la caché de precios: es una cotización de hoy, posiblemente
+    intradiaria, y mezclarla con cierres reales ensuciaría los retornos el día
+    que el papel empiece a tener historia de verdad.
+    """
+    clave = f"yf:spot:{ticker.upper()}"
+    precio = cache.leer_respuesta(clave, ttl_horas, default="__falta__")
+    if precio == "__falta__":
+        try:
+            import yfinance as yf
+            i = yf.Ticker(ticker).info or {}
+            precio = (i.get("currentPrice") or i.get("regularMarketPrice")
+                      or i.get("previousClose"))
+        except Exception:
+            precio = None
+        cache.guardar_respuesta(clave, precio)
+    if not precio:
+        return pd.DataFrame()
+    return pd.DataFrame({"Close": [float(precio)]},
+                        index=[pd.Timestamp(date.today())])
 
 
 def _suficiente(df: pd.DataFrame, hasta: str) -> bool:
