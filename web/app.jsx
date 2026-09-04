@@ -3172,7 +3172,10 @@ function MiCocos() {
   const bancos = Array.isArray(d.bancos) ? d.bancos : [];
 
   // Totales de las tenencias, en pesos, tal como los da Cocos.
-  const valor = pos.reduce((s, p) => s + (p.quantity || 0) * (p.last || 0), 0);
+  // Un FCI recién suscripto todavía no tiene cuotaparte del día: se valúa al PPC
+  // en vez de contarlo como cero.
+  const precio = (p) => p.last ?? p.average_price ?? 0;
+  const valor = pos.reduce((s, p) => s + (p.quantity || 0) * precio(p), 0);
   const resultado = pos.reduce((s, p) => s + (p.result || 0), 0);
   const costo = valor - resultado;
   const efectivo = fondos.CI || {};
@@ -3214,7 +3217,7 @@ function MiCocos() {
                 <th className="n">Resultado</th><th className="n">Rend.</th>
               </tr></thead>
               <tbody>{pos.map((p) => {
-                const v = (p.quantity || 0) * (p.last || 0);
+                const v = (p.quantity || 0) * precio(p);
                 const dd = porDia[p.instrument_code];
                 const varDia = dd && dd.previous_price && dd.last_price
                   ? (dd.last_price / dd.previous_price - 1) * 100 : null;
@@ -3237,6 +3240,9 @@ function MiCocos() {
         <div className="pie">
           PPC = precio promedio de compra. «Día» es la variación de hoy (precio previo vs.
           último). Los bonos y ONs vienen cada 100 nominales; hoy no tenés en cartera.
+          Los FCI llegan del broker cada 1000 cuotapartes y en pesos aun los que son en
+          dólares: acá ya están por cuotaparte. Si el fondo todavía no publicó la del día,
+          «Último» queda vacío y el valor se calcula con el PPC.
         </div>
       </div>
 

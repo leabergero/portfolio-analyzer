@@ -22,6 +22,7 @@ from datetime import date
 import pandas as pd
 
 from core.broker import _cocos_patch, vault
+from core.data import mep
 
 _cliente = None
 _estado = {"conectado": False, "detalle": "sin conectar", "cuenta": None}
@@ -308,13 +309,37 @@ def _rendimiento(timeframe: str):
         return {"error": f"{type(e).__name__}: {e}"}
 
 
+# Cocos cotiza los FCI **en pesos y cada 1000 cuotapartes**, incluso los fondos
+# cuya cuotaparte es en dólares (esos los pasa a pesos con su propio MEP). Sin
+# dividir, la tenencia sale mil veces más grande. Verificado contra los propios
+# movimientos del broker: COCOSPPA suscribió 2331,23929815 cuotapartes por
+# $3.371 (cuotaparte 1,446012) y el broker informa `average_price` 1446,012.
+_FACTOR_FCI = 1000
+
+
+def _normalizar_fci(pos: list) -> list:
+    """Deja los precios de los FCI referidos a UNA cuotaparte.
+
+    `result` ya viene en la escala buena (es cantidad × (last − ppc) / 1000), así
+    que se toca sólo el par de precios.
+    """
+    for p in pos:
+        if p.get("instrument_type") != "FCI":
+            continue
+        for campo in ("last", "average_price"):
+            if p.get(campo):
+                p[campo] = p[campo] / _FACTOR_FCI
+    return pos
+
+
 def posiciones():
     """Tenencias con precio promedio de compra y resultado total, en pesos.
 
     Sale de wallet/performance/historic: `my_portfolio()` de pyCocos apunta a un
     endpoint que Cocos dio de baja (404). Devuelve una lista de instrumentos.
     """
-    return _rendimiento("HISTORICAL")
+    pos = _rendimiento("HISTORICAL")
+    return _normalizar_fci(pos) if isinstance(pos, list) else pos
 
 
 def posiciones_dia():
@@ -418,9 +443,11 @@ def fci_tracking():
     if isinstance(pos, list):
         for p in pos:
             t = p.get("short_ticker") or p.get("instrument_code")
+            # `last` viene nulo mientras el fondo no publicó la cuotaparte del
+            # día (típico de una suscripción de ayer): el PPC es la mejor
+            # aproximación disponible y evita valuar la tenencia en cero.
             tenencia[t] = {"cantidad": p.get("quantity"),
-                           "valor": (p.get("quantity") or 0) * (p.get("last") or 0),
-                           "ultimo": p.get("last")}
+                           "ultimo": p.get("last") or p.get("average_price")}
 
     fondos = {}
     for m in movs:
@@ -443,13 +470,24 @@ def fci_tracking():
         f["hasta"] = max(f["hasta"], m.get("fecha"))
 
     salida = []
+    hoy = date.today()
     for tk, f in fondos.items():
         ten = tenencia.get(tk, {})
-        valor = ten.get("valor", 0) or 0
+        precio = ten.get("ultimo") or 0
+        # El broker cotiza en pesos también los fondos en dólares; las
+        # suscripciones y rescates de este bloque están en la moneda del fondo,
+        # así que el precio tiene que venir a la misma moneda antes de valuar.
+        # Se convierte con el MEP de la app, igual que el resto de la cartera.
+        # Cocos armó el precio con el suyo, y está bien que así sea: la
+        # diferencia entre fuentes (~0,3 %) es una decisión tomada, no una
+        # deuda — no cablear `get_dolar_mep_info()` para emparejarlas.
+        if precio and f["moneda"] and f["moneda"] != "ARS":
+            precio = mep.a_usd(precio, hoy) or 0
+        valor = (ten.get("cantidad") or 0) * precio
         resultado = valor + f["rescatado"] - f["suscrito"]
         f.update({
             "cantidad": ten.get("cantidad"),
-            "ultimo": ten.get("ultimo"),
+            "ultimo": precio or None,
             "valor_actual": valor,
             "neto": f["suscrito"] - f["rescatado"],
             "resultado": resultado,

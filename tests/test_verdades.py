@@ -757,6 +757,35 @@ def test_bono_cargado_por_nominal_no_se_divide_de_nuevo():
     assert divisor("MELI.BA", 25580.0) == 1.0, "Una acción no se divide nunca."
 
 
+def test_fci_cada_1000_cuotapartes():
+    """Cocos cotiza los FCI cada 1000 cuotapartes: sin dividir, la tenencia sale
+    mil veces más grande (COCOSPPA mostraba $3.377.811 sobre $3.371 reales, y
+    COCOAUSD llegó a informar una tenencia de miles de millones).
+
+    Los números son los del broker el 2026-09-04, con la cuotaparte verificada
+    contra el propio movimiento de suscripción (3.371 / 2331,23929815 = 1,446012).
+    """
+    from core.broker.cocos import _normalizar_fci
+
+    pos = _normalizar_fci([
+        {"short_ticker": "COCOSPPA", "instrument_type": "FCI", "quantity": 2331.23929815,
+         "last": 1448.934, "average_price": 1446.012, "result": 6.8118812291943},
+        {"short_ticker": "COCOAUSD", "instrument_type": "FCI", "quantity": 3729.10407907,
+         "last": None, "average_price": 1674338.3090890225, "result": None},
+        {"short_ticker": "KO", "instrument_type": "CEDEARS", "quantity": 179,
+         "last": 28320, "average_price": 20690.614525139667, "result": 1365660},
+    ])
+
+    assert abs(pos[0]["average_price"] - 1.446012) < 1e-9, \
+        "El PPC de un FCI tiene que quedar por cuotaparte."
+    assert abs(pos[0]["quantity"] * pos[0]["last"] - 3377.81) < 0.01, \
+        "La tenencia de COCOSPPA son ~$3.378, no $3.377.811."
+    assert pos[1]["last"] is None, \
+        "Un `last` nulo se deja nulo: no hay precio del día que inventar."
+    assert pos[2]["last"] == 28320 and pos[2]["average_price"] == 20690.614525139667, \
+        "Un CEDEAR no se toca: la escala /1000 es sólo de los FCI."
+
+
 # ══════════════════════════════════════════════════════════════════════════
 
 def main():
