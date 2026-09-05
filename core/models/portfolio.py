@@ -550,6 +550,9 @@ def evolucion(posiciones, trades=None, n_ruedas: int = 30) -> dict:
         "sin_serie": sorted(sin_serie),
         "resultado_serie": [round(float(v), 2) for v in resultado],
         "valor_usd": [round(float(v), 2) for v in tenencias],
+        # Cuánto capital había puesto en cada rueda: es la línea contra la que
+        # se mira el valor. Por debajo, la cartera vale menos de lo que costó.
+        "puesto_serie": [round(float(v), 2) for v in puesto],
         "fechas": [str(f.date()) for f in resultado.index],
         "ruedas": {
             "fechas": [str(f.date()) for f in var.index],

@@ -1178,7 +1178,7 @@ function RendimientoTotal({ ev }) {
   const y = (v) => 34 - 4 - ((v - mn) / rango) * 26;
   const linea = serie.map((v, i) => (i ? "L" : "M") +
     ((i / (serie.length - 1)) * 300).toFixed(1) + "," + y(v).toFixed(1)).join(" ");
-  const color = ev.resultado_usd >= 0 ? c.positivo : c.negativo;
+
 
   return (
     <div className="panel" style={{ position: "relative" }}>
@@ -1209,9 +1209,18 @@ function RendimientoTotal({ ev }) {
         </div>)}
       <svg viewBox="0 0 300 34" preserveAspectRatio="none"
            style={{ width: "100%", height: 40, marginTop: 12, display: "block" }}>
+        <defs>
+          {/* El corte va exactamente en el cero, así que un degradé vertical con
+              los dos stops pegados alcanza: verde arriba, rojo abajo. */}
+          <linearGradient id="labrt" x1="0" y1="0" x2="0" y2="34" gradientUnits="userSpaceOnUse">
+            <stop offset={Math.max(0, Math.min(1, y(0) / 34))} stopColor={c.positivo} />
+            <stop offset={Math.max(0, Math.min(1, y(0) / 34))} stopColor={c.negativo} />
+          </linearGradient>
+        </defs>
         <line x1="0" y1={y(0)} x2="300" y2={y(0)} stroke={c.borde} strokeWidth="1"
               strokeDasharray="3 3" />
-        <path d={linea} fill="none" stroke={color} strokeWidth="1.8" strokeLinejoin="round" />
+        <path d={linea} fill="none" stroke="url(#labrt)" strokeWidth="1.8"
+              strokeLinejoin="round" />
       </svg>
       <div className="pie">
         La curva es el resultado acumulado en dólares, rueda por rueda, contando las
@@ -1528,12 +1537,22 @@ function RadarCarteras({ mk, bl }) {
 function ValorCartera({ ev, mep }) {
   const c = colores();
   const v = ev.valor_usd || [];
-  const mn = Math.min(...v), mx = Math.max(...v), rango = mx - mn || 1;
-  const y = (x) => 74 - 8 - ((x - mn) / rango) * 52;
-  const d = v.map((x, i) => (i ? "L" : "M") +
-    ((i / (v.length - 1)) * 300).toFixed(1) + "," + y(x).toFixed(1)).join(" ");
+  const puesto = ev.puesto_serie || [];
+  const W = 300, H = 74;
+  // La escala abraza las dos series: si el capital se sale del cuadro, el cruce
+  // se dibuja donde no está.
+  const todos = puesto.length === v.length ? v.concat(puesto) : v;
+  const mn = Math.min(...todos), mx = Math.max(...todos), rango = mx - mn || 1;
+  const y = (x) => H - 8 - ((x - mn) / rango) * (H - 22);
+  const px = (i) => (i / Math.max(1, v.length - 1)) * W;
+  const camino = (arr) => arr.map((x, i) => (i ? "L" : "M") +
+    px(i).toFixed(1) + "," + y(x).toFixed(1)).join(" ");
+  const d = camino(v);
+  const dCap = puesto.length === v.length ? camino(puesto) : null;
   const mesAtras = v[Math.max(0, v.length - 22)];
   const cambio = mesAtras ? (v[v.length - 1] / mesAtras - 1) * 100 : 0;
+  const bajoAgua = dCap && v[v.length - 1] < puesto[puesto.length - 1];
+
   return (
     <div className="panel lab-valor">
       <h3>Valor de cartera</h3>
@@ -1541,13 +1560,36 @@ function ValorCartera({ ev, mep }) {
       <div className="pie" style={{ marginTop: 6 }}>
         <span className={signo(cambio)}>{cambio >= 0 ? "▲" : "▼"} {pct(Math.abs(cambio), 1)}</span>
         {" "}en el último mes{mep ? ` · MEP $${mep}` : ""}
+        {dCap && <> · {bajoAgua ? "por debajo de" : "por encima de"} los{" "}
+          {usd(ev.puesto_neto_usd)} puestos</>}
       </div>
-      <svg viewBox="0 0 300 74" preserveAspectRatio="none">
-        <defs><linearGradient id="labvg" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stopColor={c.acento} stopOpacity=".30" />
-          <stop offset="1" stopColor={c.acento} stopOpacity="0" /></linearGradient></defs>
-        <path d={`${d} L300,74 L0,74 Z`} fill="url(#labvg)" />
-        <path d={d} fill="none" stroke={c.acento} strokeWidth="2" strokeLinejoin="round" />
+      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
+        <defs>
+          <linearGradient id="labvg" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stopColor={c.acento} stopOpacity=".30" />
+            <stop offset="1" stopColor={c.acento} stopOpacity="0" /></linearGradient>
+          {dCap && (<>
+            {/* Recortes contra la línea del capital: un umbral que se mueve no
+                se puede resolver con un degradé horizontal. */}
+            <clipPath id="labSobre"><path d={`${dCap} L${W},0 L0,0 Z`} /></clipPath>
+            <clipPath id="labBajo"><path d={`${dCap} L${W},${H} L0,${H} Z`} /></clipPath>
+            <linearGradient id="labvr" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stopColor={c.negativo} stopOpacity=".34" />
+              <stop offset="1" stopColor={c.negativo} stopOpacity=".05" /></linearGradient>
+          </>)}
+        </defs>
+        {dCap ? (<>
+          <path d={`${d} L${W},${H} L0,${H} Z`} fill="url(#labvg)" clipPath="url(#labSobre)" />
+          <path d={`${d} L${W},0 L0,0 Z`} fill="url(#labvr)" clipPath="url(#labBajo)" />
+          <path className="cap" d={dCap} />
+          <path d={d} fill="none" stroke={c.acento} strokeWidth="2" strokeLinejoin="round"
+                clipPath="url(#labSobre)" />
+          <path d={d} fill="none" stroke={c.negativo} strokeWidth="2" strokeLinejoin="round"
+                clipPath="url(#labBajo)" />
+        </>) : (<>
+          <path d={`${d} L${W},${H} L0,${H} Z`} fill="url(#labvg)" />
+          <path d={d} fill="none" stroke={c.acento} strokeWidth="2" strokeLinejoin="round" />
+        </>)}
       </svg>
     </div>
   );
