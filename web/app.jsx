@@ -33,11 +33,6 @@ const pct = (n, dec = 2) => (n == null ? "—" : Number(n).toFixed(dec) + " %");
 const num = (n, dec = 2) => (n == null ? "—" : Number(n).toFixed(dec));
 const signo = (n) => (n == null ? "" : n > 0 ? "pos" : n < 0 ? "neg" : "");
 
-/* Componentes en evaluación: se ven sólo con ?lab=1 en la URL. El flag también
-   se marca en el <html>, para las variantes que se resuelven en CSS. */
-const LAB = new URLSearchParams(location.search).has("lab");
-if (LAB) document.documentElement.dataset.lab = "1";
-
 /* Lee la paleta del CSS para que los gráficos sigan el tema. */
 function colores() {
   const c = getComputedStyle(document.documentElement);
@@ -170,8 +165,6 @@ const AYUDA = {
 /* ═══════════════ Barra superior ═══════════════ */
 
 function Barra({ modo, setModo, tema, setTema, carteras, cartera, setCartera }) {
-  const iconos = { auto: "◐", light: "☀", dark: "☾" };
-  const siguiente = { auto: "light", light: "dark", dark: "auto" };
   // El switch es binario y el tema tiene tres estados: "auto" se resuelve
   // mirando qué prefiere el sistema, y queda un enlace para volver a él.
   const sistemaOscuro = window.matchMedia?.("(prefers-color-scheme: dark)").matches;
@@ -194,18 +187,14 @@ function Barra({ modo, setModo, tema, setTema, carteras, cartera, setCartera }) 
         </select>
       )}
       <div className="der">
-        {LAB ? (<>
-          {tema !== "auto" && (
-            <button className="btn auto" onClick={() => setTema("auto")}
-                    title="Seguir el tema del sistema">auto</button>)}
-          <label className="lab-dianoche" title={esOscuro ? "Pasar a claro" : "Pasar a oscuro"}>
-            <input type="checkbox" checked={!esOscuro} aria-label="Tema claro"
-                   onChange={() => setTema(esOscuro ? "light" : "dark")} />
-            <span className="g"><span className="estrellas" /></span>
-          </label>
-        </>) : (
-          <button className="btn tema" title={`Tema: ${tema}`}
-                  onClick={() => setTema(siguiente[tema])}>{iconos[tema]}</button>)}
+        {tema !== "auto" && (
+          <button className="btn auto" onClick={() => setTema("auto")}
+                  title="Seguir el tema del sistema">auto</button>)}
+        <label className="lab-dianoche" title={esOscuro ? "Pasar a claro" : "Pasar a oscuro"}>
+          <input type="checkbox" checked={!esOscuro} aria-label="Tema claro"
+                 onChange={() => setTema(esOscuro ? "light" : "dark")} />
+          <span className="g"><span className="estrellas" /></span>
+        </label>
       </div>
     </div>
   );
@@ -266,11 +255,7 @@ function Analisis({ cartera, recargar }) {
   return (
     <>
       {estado.estado !== "terminado" && (
-        LAB ? <PasosModelos M={M} listos={listos} />
-        : <div className="aviso ojo">
-            Calculando: <b>{listos} de {Object.keys(M).length}</b> modelos listos.
-            Cada panel aparece apenas termina — no hace falta esperar a todos.
-          </div>
+        <PasosModelos M={M} listos={listos} />
       )}
       <div className="tabs">
         {PESTANAS.filter(([k]) => k in M).map(([k, t]) => (
@@ -412,7 +397,7 @@ function Posicion({ d, cartera, recargar, extras, bench }) {
   useEffect(() => { setReal(null);
     api(`/api/carteras/${encodeURIComponent(cartera)}/realizado`).then(setReal); }, [cartera, n]);
   const [ev, setEv] = useState(null);
-  useEffect(() => { if (!LAB) return; setEv(null);
+  useEffect(() => { setEv(null);
     api(`/api/evolucion/${encodeURIComponent(cartera)}`).then(setEv); }, [cartera]);
   const cerrado = real?.n ? real.total_usd : null;
 
@@ -423,7 +408,7 @@ function Posicion({ d, cartera, recargar, extras, bench }) {
 
       {/* 2 · Qué tengo */}
       <div className="kpis">
-        {!(LAB && ev && !ev.error) && (
+        {!(ev && !ev.error) && (
           <Kpi etiqueta="Valor total" valor={usd(d.valor_total)} ayuda={AYUDA.valor}
                sub={d.mep_hoy ? `MEP $${d.mep_hoy}` : null} />)}
         <Kpi etiqueta="Costo" valor={usd(d.costo_total)} sub="comisiones incluidas" />
@@ -437,7 +422,7 @@ function Posicion({ d, cartera, recargar, extras, bench }) {
                tono={signo(d.pnl + cerrado)} sub="abierto + cerrado" />)}
         <Kpi etiqueta="Posiciones" valor={filas.length} sub={`${new Set(filas.map(f=>f.ticker)).size} activos`} />
       </div>
-      {LAB && ev && !ev.error && (<>
+      {ev && !ev.error && (<>
         <div className="fila f2">
           <ValorCartera ev={ev} mep={d.mep_hoy} />
           <RendimientoTotal ev={ev} />
@@ -487,7 +472,7 @@ function Posicion({ d, cartera, recargar, extras, bench }) {
 
       {real && <PnlRealizado real={real} cartera={cartera} recargar={() => setN((x) => x + 1)} />}
 
-      {LAB && ev && <RuedasTicker ev={ev} />}
+      {ev && <RuedasTicker ev={ev} />}
 
       {/* 3 · En qué está invertida */}
       <Seccion titulo="En qué está invertida" />
@@ -1036,12 +1021,15 @@ function Distribucion({ d }) {
   );
 }
 
-/* ═══════════════ Lab ═══════════════
+/* ═══════════════ Componentes de la librería UX-UI ═══════════════
 
-   Componentes en evaluación. Se ven sólo con `?lab=1` en la URL: la web de
-   todos los días queda exactamente igual hasta que decidamos cuáles se quedan.
-   Vienen de la librería UX-UI (DAT-03/16/17, PNL-05, PRG-16), traducidos a los
-   tokens de esta app —ningún color literal, como el resto del archivo—. */
+   DAT-03 heatmap, DAT-15 radar, DAT-16 bullet, DAT-17 treemap, DAT-21 frontera,
+   PNL-05 métrica, PNL-16 card con gráfico, PRG-07 stepper, PRG-16 zonas de
+   riesgo, TGL-02 día/noche, BTN-02 trazo y el spinner de FDB-05. Traducidos a
+   los tokens de esta app: ningún color literal, como el resto del archivo.
+
+   Se desarrollaron detrás de `?lab=1` y se aprobaron uno por uno; de ahí el
+   prefijo `lab-` de sus clases, que quedó como marca de origen. */
 
 /* Umbrales de riesgo. No salen de ningún cálculo: son la tolerancia que uno
    decide de antemano, y por eso están acá y no en el backend. */
@@ -1837,7 +1825,7 @@ function Composicion({ d }) {
           // sector, pero no qué papel lo trae.
           // La industria es el corte con más categorías: en dona son seis
           // porciones finitas con las etiquetas peleándose el borde.
-          if (LAB && k === "por_industria") return (
+          if (k === "por_industria") return (
             <div className="panel" key={k}>
               <h3>{t}</h3>
               <TreemapSectores detalle={d.detalle} campo="industria" />
@@ -1881,7 +1869,7 @@ function Riesgo({ d, cartera, extras }) {
   return (
     <>
       <KpisRiesgo d={d} />
-      {LAB && <ZonasRiesgo d={d} />}
+      <ZonasRiesgo d={d} />
       <Seccion titulo="¿Cuándo se disparó el riesgo?" />
       <RiesgoEvolucion cartera={cartera} />
       <Seccion titulo="El riesgo de cada activo por separado" />
@@ -2277,7 +2265,7 @@ function RiesgoLimite({ cartera, d }) {
             </div>
           </div>
 
-          {LAB && (
+          {(
             <div className="panel">
               <h3>Cuánto se corre cada peso</h3>
               <BulletPesos nota="El objetivo es el peso que cumple el límite pedido."
@@ -2332,26 +2320,6 @@ function Markowitz({ d, cartera, bench, extras }) {
   const acciones = objetivo === "max_sharpe" ? d.acciones_max_sharpe : d.acciones_min_varianza;
   const destino = objetivo === "max_sharpe" ? d.max_sharpe : d.min_varianza;
 
-  const frontera = [
-    { type: "scattergl", mode: "markers", name: "carteras posibles",
-      x: d.nube?.vol, y: d.nube?.ret, marker: { size: 3, color: c.texto3, opacity: 0.28 },
-      hoverinfo: "skip" },
-    { type: "scatter", mode: "lines", name: "frontera eficiente",
-      x: (d.frontera || []).map((p) => p.vol), y: (d.frontera || []).map((p) => p.ret),
-      line: { color: c.acento, width: 2.5 } },
-    { type: "scatter", mode: "markers+text", name: "tu cartera",
-      x: [d.actual.vol_pct], y: [d.actual.ret_pct], text: ["actual"], textposition: "top center",
-      marker: { size: 17, color: c.marcaActual, symbol: "star",
-                line: { width: 1, color: c.panel } } },
-    { type: "scatter", mode: "markers+text", name: "máximo Sharpe",
-      x: [d.max_sharpe.vol_pct], y: [d.max_sharpe.ret_pct], text: ["óptima"], textposition: "top center",
-      marker: { size: 14, color: c.marcaOptima, symbol: "triangle-up",
-                line: { width: 1, color: c.panel } } },
-    { type: "scatter", mode: "markers+text", name: "mínima varianza",
-      x: [d.min_varianza.vol_pct], y: [d.min_varianza.ret_pct], text: ["mín. riesgo"],
-      textposition: "bottom center", marker: { size: 12, color: c.series[1], symbol: "diamond" } },
-  ];
-
   return (
     <>
       <div className="kpis">
@@ -2365,17 +2333,7 @@ function Markowitz({ d, cartera, bench, extras }) {
       </div>
 
       <div className="fila f2">
-        {LAB ? <FronteraEficiente d={d} /> : (
-        <div className="panel">
-          <h3>Frontera eficiente</h3>
-          <Grafico datos={frontera} alto={380}
-                   layout={{ xaxis: { title: "Volatilidad anual", ticksuffix: " %" },
-                             yaxis: { title: "Retorno anual", ticksuffix: " %" } }} />
-          <div className="pie">
-            La nube gris son carteras posibles con tus mismos activos; la línea es lo mejor
-            alcanzable para cada nivel de riesgo. Tu cartera nunca puede quedar por encima.
-          </div>
-        </div>)}
+        <FronteraEficiente d={d} />
 
         <div className="panel">
           <h3>Cómo quedarían los pesos</h3>
@@ -2414,7 +2372,7 @@ function Markowitz({ d, cartera, bench, extras }) {
             Destino: {pct(destino.ret_pct)} de retorno con {pct(destino.vol_pct)} de
             volatilidad — Sharpe {num(destino.sharpe, 3)}.
           </div>
-          {LAB && (acciones || []).length > 0 && (
+          {(acciones || []).length > 0 && (
             <BulletPesos nota="El objetivo es la cartera óptima del modelo elegido arriba."
               filas={acciones.map((a) => ({ nombre: a.ticker, hoy: a.peso_actual_pct,
                                             objetivo: a.peso_objetivo_pct, monto: a.delta_usd }))} />)}
@@ -3115,7 +3073,7 @@ function ObjetivosYBL({ cartera, extras, d, bench }) {
        : bl.error ? <div className="aviso mal">{bl.error}</div>
        : <BlackLitterman bl={bl} actual={d.actual} />}
 
-      {LAB && bl && bl !== "cargando" && !bl.error && (
+      {bl && bl !== "cargando" && !bl.error && (
         <>
           <Seccion titulo="Las cuatro carteras, lado a lado" />
           <RadarCarteras mk={d} bl={bl} />
@@ -3228,7 +3186,7 @@ function BlackLitterman({ bl, actual }) {
         <>
           <div className="panel">
             <h3>Qué operar según Black-Litterman</h3>
-            {LAB && acc.length > 0 && (
+            {acc.length > 0 && (
               <BulletPesos nota="El objetivo es el peso posterior, ya con tus views incorporadas."
                 filas={acc.map((a) => ({ nombre: a.ticker, hoy: a.peso_actual_pct,
                                          objetivo: a.peso_bl_pct, monto: a.delta_usd }))} />)}
@@ -3426,17 +3384,11 @@ function Comparacion({ carteras }) {
             <button key={x.nombre} className={"btn" + (sel.includes(x.nombre) ? " primario" : "")}
                     onClick={() => alternar(x.nombre)}>{x.nombre}</button>
           ))}
-          {LAB ? (
-            <button className="lab-trazo" disabled={sel.length < 2 || cargando}
-                    onClick={comparar} style={{ marginLeft: "auto" }}>
-              <svg><rect x="1" y="1" width="98%" height="90%" rx="6" pathLength="100" /></svg>
-              {cargando ? "Comparando…" : "Comparar"}
-            </button>
-          ) : (
-            <button className="btn primario" disabled={sel.length < 2 || cargando}
-                    onClick={comparar} style={{ marginLeft: "auto" }}>
-              {cargando ? "Comparando…" : "Comparar"}
-            </button>)}
+          <button className="lab-trazo" disabled={sel.length < 2 || cargando}
+                  onClick={comparar} style={{ marginLeft: "auto" }}>
+            <svg><rect x="1" y="1" width="98%" height="90%" rx="6" pathLength="100" /></svg>
+            {cargando ? "Comparando…" : "Comparar"}
+          </button>
         </div>
       </div>
 
@@ -3548,7 +3500,7 @@ function ResultadoComparacion({ d, c }) {
     <>
       <VeredictoComparacion d={d} concluyente={concluyente} />
 
-      {LAB && seriesRadar.length > 1 && (
+      {seriesRadar.length > 1 && (
         <div className="panel">
           <h3>Quién gana en qué</h3>
           <div className="lab-radarfila">

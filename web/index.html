@@ -211,9 +211,9 @@ footer{max-width:1400px;margin:26px auto 0;padding:18px 20px 40px;border-top:1px
        gap:12px;flex-wrap:wrap}
 footer a{color:var(--acento);text-decoration:none}
 footer a:hover{text-decoration:underline}
-/* ── Lab: componentes en evaluación (se ven con ?lab=1) ─────────────────────
-   Bloque autocontenido. Cuando decidamos qué se queda, lo que sobre se borra
-   de acá sin tocar nada más. */
+/* ── Componentes traídos de la librería UX-UI ───────────────────────────────
+   Estuvieron detrás de ?lab=1 hasta que se aprobaron; el prefijo `lab-` quedó
+   como marca de origen. Bloque autocontenido: se puede leer y podar de una. */
 .lab-zona{display:grid;grid-template-columns:132px 1fr 156px;gap:16px;align-items:center;
           padding:16px 0;border-bottom:1px solid var(--borde-suave)}
 .lab-zona:last-of-type{border-bottom:0}
@@ -435,8 +435,8 @@ footer a:hover{text-decoration:underline}
 .lab-pasos .pies b{color:var(--texto-2)}
 
 /* El cuarto spinner de FDB-05 acompaña a cada "Calculando…". */
-[data-lab] .cargando{display:flex;flex-direction:column;align-items:center;gap:15px}
-[data-lab] .cargando::before{content:"";width:24px;height:24px;background:var(--acento);
+.cargando{display:flex;flex-direction:column;align-items:center;gap:15px}
+.cargando::before{content:"";width:24px;height:24px;background:var(--acento);
   animation:morph 1.8s ease-in-out infinite;
   box-shadow:0 0 14px -3px var(--acento)}
 @keyframes morph{0%,100%{border-radius:50%;transform:rotate(0)}
