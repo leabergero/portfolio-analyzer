@@ -1194,11 +1194,21 @@ function RendimientoTotal({ ev }) {
            className={signo(ev.resultado_usd)}>{pct(ev.rendimiento_pct)}</div>
       <div style={{ fontSize: 15, marginTop: 2 }} className={signo(ev.resultado_usd)}>
         {usd(ev.resultado_usd)} sobre {usd(ev.puesto_neto_usd)} puestos de tu bolsillo</div>
-      {ev.tir_anual_pct != null && (
+      {(ev.tir_cartera_pct != null || ev.tir_anual_pct != null) && (
         <div className="lab-tir">
-          <span>equivale a</span>
-          <b className={signo(ev.tir_anual_pct)}>{pct(ev.tir_anual_pct)} anual</b>
-          <span>en {num(ev.anos, 1)} años · TIR</span>
+          {ev.tir_cartera_pct != null && (
+            <div className="foco">
+              <s>lo que tenés hoy rinde</s>
+              <b className={signo(ev.tir_cartera_pct)}>{pct(ev.tir_cartera_pct)} anual</b>
+              <s>{usd(ev.cartera_valor_usd)} sobre {usd(ev.cartera_costo_usd)} de costo,
+                 en {num(ev.cartera_anos, 1)} años</s>
+            </div>)}
+          {ev.tir_anual_pct != null && (
+            <div className="tenue">
+              <s>toda tu historia en esta cartera</s>
+              <b className={signo(ev.tir_anual_pct)}>{pct(ev.tir_anual_pct)} anual</b>
+              <s>{num(ev.anos, 1)} años, con lo cerrado adentro</s>
+            </div>)}
         </div>)}
       <div className="pie" style={{ marginTop: 8 }}>
         <span className={signo(delta)}>{delta >= 0 ? "▲" : "▼"} {usd(Math.abs(delta))}</span>
@@ -1221,11 +1231,13 @@ function RendimientoTotal({ ev }) {
         posiciones que ya cerraste y los dividendos cobrados. En dólares y no en porcentaje
         porque un porcentaje sobre capital variable cae de golpe el día que ponés plata
         nueva, sin que haya pasado nada en el mercado. La línea punteada es el cero.
-        {ev.tir_anual_pct != null && (
-          <> La <b>TIR</b> es el mismo resultado leído como tasa anual: a cuánto habría que
-          colocar cada aporte, el día que entró, para llegar a lo de hoy. Es el número que se
-          compara contra un plazo fijo o una letra — el acumulado no sirve para eso porque no
-          sabe cuánto tiempo estuvo adentro cada peso.</>)}
+        {ev.tir_cartera_pct != null && (
+          <> Las dos tasas de abajo son TIR: a cuánto habría que colocar cada peso, el día
+          que entró, para llegar a lo de hoy. La primera mira <b>solo lo que sigue abierto</b>,
+          así que es la que se compara contra un plazo fijo antes de decidir si conviene
+          seguir; la segunda arrastra todo lo que pasó por la cartera, aciertos y errores ya
+          liquidados. Los dividendos quedan fuera de la primera: no se sabe cuáles
+          corresponden a posiciones que todavía tenés.</>)}
       </div>
     </div>
   );

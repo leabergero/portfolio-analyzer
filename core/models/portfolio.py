@@ -305,6 +305,39 @@ def correlaciones(posiciones, ventana: int = 252) -> dict:
     }
 
 
+def tir(movimientos) -> float:
+    """Tasa anual que hace cero el valor presente de una lista (fecha, monto).
+
+    Convención del inversor: lo que sale del bolsillo va negativo, lo que vuelve
+    —o lo que hoy vale la tenencia— positivo.
+
+    Bisección y no Newton: con flujos irregulares una derivada mal condicionada
+    manda la tasa al infinito. El intervalo cubre desde perderlo casi todo hasta
+    multiplicar por diez en un año, que es más de lo que cualquier cartera real
+    necesita.
+    """
+    movimientos = [(pd.Timestamp(f), float(m)) for f, m in movimientos if abs(m) > 1e-9]
+    if not any(m < 0 for _, m in movimientos) or not any(m > 0 for _, m in movimientos):
+        return None
+
+    t0 = min(f for f, _ in movimientos)
+
+    def vpn(r):
+        return sum(m / (1.0 + r) ** ((f - t0).days / 365.25) for f, m in movimientos)
+
+    bajo, alto = -0.95, 10.0
+    if (vpn(bajo) > 0) == (vpn(alto) > 0):
+        return None
+    creciente = vpn(bajo) < vpn(alto)
+    for _ in range(200):
+        medio = (bajo + alto) / 2
+        if (vpn(medio) > 0) == creciente:
+            alto = medio
+        else:
+            bajo = medio
+    return round((bajo + alto) / 2 * 100, 2)
+
+
 def evolucion(posiciones, trades=None, n_ruedas: int = 30) -> dict:
     """Cómo se movió la cartera en el tiempo: rendimiento acumulado y últimas ruedas.
 
@@ -328,7 +361,8 @@ def evolucion(posiciones, trades=None, n_ruedas: int = 30) -> dict:
     tramos, dividendos, sin_serie = [], [], set()
 
     precios_ref = precios_actuales(posiciones)
-    for l in valuar(posiciones, precios_ref)["posiciones"]:
+    lotes = valuar(posiciones, precios_ref)["posiciones"]
+    for l in lotes:
         if l["costo_usd"] is None or not l["buy_date"]:
             continue
         tramos.append((l["ticker"], l["qty"], l["buy_date"], None, l["costo_usd"], None))
@@ -422,39 +456,35 @@ def evolucion(posiciones, trades=None, n_ruedas: int = 30) -> dict:
     neto = float(puesto.iloc[-1])
     final = float(resultado.iloc[-1])
 
-    # ── TIR anual (money-weighted) ────────────────────────────────────────────
-    # Responde otra pregunta que el rendimiento total: a qué tasa anual habría
-    # que colocar cada aporte, el día que entró, para llegar al valor de hoy. Es
-    # el número comparable contra un plazo fijo o una letra, que el acumulado no
-    # puede dar porque no sabe cuánto tiempo estuvo cada peso adentro.
-    movimientos = [(f, -float(v)) for f, v in flujo.items() if abs(v) > 1e-9]
+    # ── Dos tasas anuales, que contestan preguntas distintas ─────────────────
+    # La histórica arrastra todo lo que pasó por la cartera, aciertos y errores
+    # ya liquidados. La de composición mira solo lo que sigue abierto: a qué
+    # tasa viene rindiendo lo que uno tiene HOY, que es lo que se compara contra
+    # un plazo fijo antes de decidir si conviene seguir.
+    hoy = px.index[-1]
+    movimientos = [(f, -float(v)) for f, v in flujo.items()]
     inicial = float(tenencias.iloc[0]) - float(flujo.iloc[0])
     if inicial > 1e-9:                       # tenencia previa a la ventana
         movimientos.insert(0, (px.index[0], -inicial))
-    movimientos.append((px.index[-1], float(tenencias.iloc[-1] + caja.iloc[-1])))
+    movimientos.append((hoy, float(tenencias.iloc[-1] + caja.iloc[-1])))
+    anos = (hoy - px.index[0]).days / 365.25
 
-    anos = (px.index[-1] - px.index[0]).days / 365.25
-    tir = None
-    if anos >= 0.25 and any(m < 0 for _, m in movimientos) and any(m > 0 for _, m in movimientos):
-        t0 = movimientos[0][0]
-        def _vpn(r):
-            return sum(m / (1.0 + r) ** ((f - t0).days / 365.25) for f, m in movimientos)
-        # Bisección y no Newton: acá una derivada mal condicionada manda la tasa
-        # al infinito, y este intervalo cubre desde perderlo casi todo hasta
-        # multiplicar por diez en un año.
-        bajo, alto = -0.95, 10.0
-        if _vpn(bajo) > 0 > _vpn(alto) or _vpn(bajo) < 0 < _vpn(alto):
-            for _ in range(200):
-                medio = (bajo + alto) / 2
-                if _vpn(medio) > 0:
-                    bajo = medio
-                else:
-                    alto = medio
-            tir = round((bajo + alto) / 2 * 100, 2)
+    abiertos = [(l["buy_date"], -l["costo_usd"]) for l in lotes
+                if l["costo_usd"] is not None and l["valor_usd"] is not None and l["buy_date"]]
+    valor_abierto = sum(l["valor_usd"] for l in lotes if l["valor_usd"] is not None)
+    costo_abierto = sum(-m for _, m in abiertos)
+    anos_cartera = ((hoy - pd.Timestamp(min(f for f, _ in abiertos))).days / 365.25
+                    if abiertos else 0.0)
 
     return {
-        "tir_anual_pct": tir,
+        # Anualizar menos de un trimestre da un número que no significa nada.
+        "tir_anual_pct": tir(movimientos) if anos >= 0.25 else None,
         "anos": round(anos, 2),
+        "tir_cartera_pct": (tir(abiertos + [(hoy, valor_abierto)])
+                            if anos_cartera >= 0.25 else None),
+        "cartera_costo_usd": round(costo_abierto, 2),
+        "cartera_valor_usd": round(valor_abierto, 2),
+        "cartera_anos": round(anos_cartera, 2),
         # Lo que ganó o perdió sobre la plata que salió del bolsillo: el mismo
         # número que suman los KPIs de arriba (abierto + realizado).
         "resultado_usd": round(final, 2),
