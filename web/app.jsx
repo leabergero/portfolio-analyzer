@@ -1220,6 +1220,111 @@ function RendimientoTotal({ ev }) {
   );
 }
 
+/* DAT-15 · las cuatro carteras en un radar. Cada eje va normalizado entre la
+   mejor y la peor de las cuatro: el radar compara, no mide en absoluto, y con
+   escalas crudas el Sharpe (1,4) desaparecía al lado del retorno (33 %). */
+function RadarCarteras({ mk, bl }) {
+  const c = colores();
+  const T = mk.tickers || [];
+  const hhi = (w) => w.reduce((a, x) => a + (x / 100) ** 2, 0);
+  const rota = (w) => w.reduce((a, x, i) => a + Math.abs(x - mk.actual.pesos[i]), 0) / 200;
+
+  const pesosBl = T.map((t) => bl.pesos_bl_pct?.[t] ?? 0);
+  const C = [
+    ["Actual", c.marcaActual, mk.actual.ret_pct, mk.actual.vol_pct, mk.actual.sharpe, mk.actual.pesos],
+    ["Mín. varianza", c.series[2], mk.min_varianza.ret_pct, mk.min_varianza.vol_pct,
+     mk.min_varianza.sharpe, mk.min_varianza.pesos],
+    ["Máx. Sharpe", c.marcaOptima, mk.max_sharpe.ret_pct, mk.max_sharpe.vol_pct,
+     mk.max_sharpe.sharpe, mk.max_sharpe.pesos],
+    ["Black-Litterman", c.series[4], bl.ret_bl_pct, bl.vol_bl_pct, bl.sharpe_bl, pesosBl],
+  ];
+
+  // [etiqueta, valor crudo por cartera, cómo se escribe, si más es mejor]
+  const EJES = [
+    ["Retorno", C.map((x) => x[2]), (v) => pct(v, 1), true],
+    ["Estabilidad", C.map((x) => x[3]), (v) => pct(v, 1) + " de volatilidad", false],
+    ["Sharpe", C.map((x) => x[4]), (v) => num(v, 2), true],
+    ["Diversificación", C.map((x) => 1 - hhi(x[5])), (v) => num(v, 2) + " (1 − HHI)", true],
+    ["Sin mover", C.map((x) => rota(x[5])), (v) => pct(v * 100, 0) + " de rotación", false],
+  ];
+
+  const cx = 165, cy = 118, R = 82;
+  const punto = (i, v) => {
+    const a = (i / EJES.length) * 2 * Math.PI - Math.PI / 2;
+    return [cx + Math.cos(a) * R * v, cy + Math.sin(a) * R * v];
+  };
+  // Normaliza al rango de las cuatro, con un piso para que la peor se siga viendo.
+  const norm = (vals, mejorEsMas) => {
+    const mn = Math.min(...vals), mx = Math.max(...vals), r = mx - mn;
+    return vals.map((v) => {
+      const t = r === 0 ? 1 : (v - mn) / r;
+      return 0.18 + 0.82 * (mejorEsMas ? t : 1 - t);
+    });
+  };
+  const escalados = EJES.map(([, vals, , mas]) => norm(vals, mas));
+
+  return (
+    <div className="fila f2">
+      <div className="panel">
+        <h3>Cómo se comparan</h3>
+        <svg viewBox="0 0 330 250" className="lab-radar">
+          <g className="malla">
+            {[0.25, 0.5, 0.75, 1].map((k) => (
+              <polygon key={k} points={EJES.map((_, i) => punto(i, k).join(",")).join(" ")} />))}
+            {EJES.map((_, i) => (
+              <line key={i} x1={cx} y1={cy} x2={punto(i, 1)[0]} y2={punto(i, 1)[1]} />))}
+          </g>
+          {C.map(([nombre, color], j) => (
+            <polygon key={nombre} className="forma" style={{ stroke: color, fill: color }}
+                     points={escalados.map((e, i) => punto(i, e[j]).join(",")).join(" ")} />))}
+          {EJES.map(([et, vals, fmt], i) => {
+            const [x, y] = punto(i, 1.26);
+            return (
+              <g key={et}>
+                <text className="eje" x={x} y={y} textAnchor="middle" dominantBaseline="middle">{et}</text>
+                <circle cx={punto(i, 1)[0]} cy={punto(i, 1)[1]} r="22" fill="transparent">
+                  <title>{`${et}\n` + C.map((cc, j) => `${cc[0]}: ${fmt(vals[j])}`).join("\n")}</title>
+                </circle>
+              </g>);
+          })}
+        </svg>
+        <div className="lab-radar-lg">
+          {C.map(([nombre, color]) => (
+            <span key={nombre}><u style={{ background: color }} />{nombre}</span>))}
+        </div>
+        <div className="pie">
+          Cada eje va de la peor a la mejor de las cuatro, no en escala absoluta: sirve para
+          ver quién gana en qué, no cuánto vale cada número. "Sin mover" es cuánto de la
+          cartera queda quieta — la actual siempre llega al borde, y ahí está su ventaja.
+        </div>
+      </div>
+      <div className="panel">
+        <h3>Los números detrás</h3>
+        <div className="tabla-wrap"><table>
+          <thead><tr><th>Cartera</th><th className="n">Retorno</th><th className="n">Volatilidad</th>
+            <th className="n">Sharpe</th><th className="n">Diversif.</th>
+            <th className="n">Rotación</th></tr></thead>
+          <tbody>{C.map(([nombre, color, ret, vol, sh, w]) => (
+            <tr key={nombre}>
+              <td><span style={{ display: "inline-block", width: 9, height: 9, borderRadius: 2,
+                                 background: color, marginRight: 7 }} />{nombre}</td>
+              <td className={"n " + signo(ret)}>{pct(ret, 1)}</td>
+              <td className="n">{pct(vol, 1)}</td>
+              <td className="n">{num(sh, 3)}</td>
+              <td className="n">{num(1 - hhi(w), 2)}</td>
+              <td className="n">{pct(rota(w) * 100, 0)}</td>
+            </tr>))}</tbody>
+        </table></div>
+        <div className="pie">
+          Diversificación es 1 − HHI: 0 sería todo en un solo papel. Rotación es cuánto de la
+          cartera hay que dar vuelta para llegar a esa mezcla, y es el precio de entrada de
+          cada una de las tres alternativas.
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* PNL-16 · el valor de la cartera con su curva, en lugar del KPI suelto. */
 function ValorCartera({ ev, mep }) {
   const c = colores();
@@ -1987,7 +2092,7 @@ function Markowitz({ d, cartera, bench, extras }) {
         </div>
       </div>
 
-      <Seccion titulo="¿Y si además uso los precios objetivo?" />
+      <Seccion titulo="Black-Litterman · ¿Y si además uso los precios objetivo?" />
       <ObjetivosYBL cartera={cartera} extras={extras} d={d} bench={bench} />
     </>
   );
@@ -2632,6 +2737,12 @@ function ObjetivosYBL({ cartera, extras, d, bench }) {
        : !bl ? <div className="cargando">Calculando Black-Litterman…</div>
        : bl.error ? <div className="aviso mal">{bl.error}</div>
        : <BlackLitterman bl={bl} actual={d.actual} />}
+
+      {LAB && bl && bl !== "cargando" && !bl.error && (
+        <>
+          <Seccion titulo="Las cuatro carteras, lado a lado" />
+          <RadarCarteras mk={d} bl={bl} />
+        </>)}
     </>
   );
 }
@@ -2737,60 +2848,9 @@ function BlackLitterman({ bl, actual }) {
       {acc.length === 0 ? (
         <div className="aviso ojo">{bl.nota || "Sin views: el modelo devuelve el punto de partida."}</div>
       ) : (
-        <div className="fila f2">
+        <>
           <div className="panel">
-            <h3>De dónde a dónde se mueve cada peso</h3>
-            {(() => {
-              // Un activo por fila, con la línea que va del peso de hoy al que
-              // sugiere el modelo. La versión anterior ponía los dos pesos en un
-              // eje vertical compartido y los tickers de pesos parecidos —o dos
-              // activos que van los dos a 0 %— se escribían uno encima del otro.
-              // Con una fila por activo eso no puede pasar, y la dirección del
-              // movimiento se sigue leyendo de un vistazo.
-              const orden = [...acc].sort((a, b) => a.peso_actual_pct - b.peso_actual_pct);
-              const tick = orden.map((a) => a.ticker);
-              const tope = Math.max(...orden.map((a) => Math.max(a.peso_actual_pct, a.peso_bl_pct)));
-              const linea = (arr, color) => ({
-                type: "scatter", mode: "lines", showlegend: false, hoverinfo: "skip",
-                x: arr.flatMap((a) => [a.peso_actual_pct, a.peso_bl_pct, null]),
-                y: arr.flatMap((a) => [a.ticker, a.ticker, null]),
-                line: { width: 3, color },
-              });
-              return (
-                <Grafico alto={Math.max(280, acc.length * 52 + 90)}
-                  datos={[
-                    linea(orden.filter((a) => a.peso_bl_pct >= a.peso_actual_pct), c.positivo),
-                    linea(orden.filter((a) => a.peso_bl_pct < a.peso_actual_pct), c.negativo),
-                    { type: "scatter", mode: "markers", name: "hoy", x: orden.map((a) => a.peso_actual_pct),
-                      y: tick, marker: { size: 10, color: c.texto3 },
-                      hovertemplate: "%{y}: %{x:.1f} % hoy<extra></extra>" },
-                    { type: "scatter", mode: "markers+text", name: "Black-Litterman",
-                      x: orden.map((a) => a.peso_bl_pct), y: tick,
-                      text: orden.map((a) => `${a.peso_bl_pct.toFixed(1)} %`),
-                      textposition: orden.map((a) => a.peso_bl_pct >= a.peso_actual_pct
-                                                     ? "middle right" : "middle left"),
-                      textfont: { size: 11.5 }, marker: { size: 11, color: c.acento },
-                      hovertemplate: "%{y}: %{x:.1f} % sugerido<extra></extra>" },
-                  ]}
-                  layout={{ legend: { orientation: "h", y: -0.14, x: 0.5, xanchor: "center" },
-                            xaxis: { ticksuffix: " %", zeroline: false,
-                                     range: [-tope * 0.14, tope * 1.16] },
-                            // Sin categoryarray Plotly ordena por orden de
-                            // aparición, y como las subidas y las bajadas van en
-                            // traces distintos las filas salían mezcladas.
-                            yaxis: { automargin: true, showgrid: false,
-                                     categoryorder: "array", categoryarray: tick },
-                            margin: { l: 10, r: 16, t: 10, b: 30 } }} />
-              );
-            })()}
-            <div className="pie">
-              Cada línea es un activo: arranca en su peso de hoy y termina en el que sugiere
-              el modelo. En verde lo que sube, en rojo lo que baja.
-            </div>
-          </div>
-
-          <div className="panel">
-            <h3>Qué operar</h3>
+            <h3>Qué operar según Black-Litterman</h3>
             {LAB && acc.length > 0 && (
               <BulletPesos nota="El objetivo es el peso posterior, ya con tus views incorporadas."
                 filas={acc.map((a) => ({ nombre: a.ticker, hoy: a.peso_actual_pct,
@@ -2814,7 +2874,7 @@ function BlackLitterman({ bl, actual }) {
               implícito en tu cartera y lo que dicen las views, pesada por confianza.
             </div>
           </div>
-        </div>
+        </>
       )}
     </>
   );
