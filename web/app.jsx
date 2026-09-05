@@ -3409,10 +3409,9 @@ function ResultadoComparacion({ d, c }) {
   ];
 
   const M = d.metricas || {};
-  // Dos lecturas del mismo dato. En la de arriba cada eje se llama por la
-  // virtud y los de riesgo van dados vuelta, así que el polígono más grande es
-  // la mejor cartera. En la de abajo van crudos: ahí el polígono más grande es
-  // la que más de todo tiene, riesgo incluido.
+  // Cada eje se llama por la virtud y los de riesgo van dados vuelta, así que
+  // el polígono más grande es la mejor cartera. La tabla de al lado los repite
+  // en crudo, con su signo, para el que quiera el número y no la comparación.
   const ejesRadar = [
     { et: "Retorno", col: "Retorno anual", mas: true, fmt: (v) => pct(v, 1), k: "retorno_anual_pct" },
     { et: "Sharpe", col: "Sharpe", mas: true, fmt: (v) => num(v, 3), k: "sharpe" },
@@ -3422,7 +3421,6 @@ function ResultadoComparacion({ d, c }) {
       k: "max_drawdown_pct" },
     { et: "Día malo", col: "Día malo", mas: false, fmt: (v) => pct(v, 2), k: "var95_pct" },
   ];
-  const ejesCrudos = ejesRadar.map((e) => ({ ...e, et: e.col, mas: true }));
   // Peor caída y día malo llegan en negativo: sin el valor absoluto, "menos es
   // mejor" premiaría justo a la que más cae.
   const valores = (n) => ejesRadar.map((e) => e.k.startsWith("max_") || e.k.startsWith("var")
@@ -3434,7 +3432,7 @@ function ResultadoComparacion({ d, c }) {
     <>
       <VeredictoComparacion d={d} concluyente={concluyente} />
 
-      {LAB && seriesRadar.length > 1 && (<>
+      {LAB && seriesRadar.length > 1 && (
         <div className="panel">
           <h3>Quién gana en qué</h3>
           <div className="lab-radarfila">
@@ -3466,30 +3464,7 @@ function ResultadoComparacion({ d, c }) {
             <b> más lejos del centro es mejor</b>. La tabla los muestra como se los cita,
             con su signo.
           </div>
-        </div>
-
-        <div className="panel">
-          <h3>Los mismos ejes, sin dar vuelta nada</h3>
-          <div className="lab-radarfila">
-            <div><Radar ejes={ejesCrudos} series={seriesRadar} alto={270} /></div>
-            <div className="pie" style={{ marginTop: 0 }}>
-              El de arriba y este dibujan los mismos números; lo único que cambia es hacia
-              dónde apunta cada eje de riesgo. Acá <b>más lejos del centro es más</b>: más
-              retorno, pero también más volatilidad, más caída y más pérdida en un día malo.
-              Sirve para ver la otra mitad de la historia — el polígono grande de arriba es
-              la mejor cartera, el polígono grande de acá es la que más se mueve.
-              {seriesRadar.length > 1 && (() => {
-                const may = seriesRadar.reduce((a, b) =>
-                  Math.abs(M[a.nombre].volatilidad_anual_pct) > Math.abs(M[b.nombre].volatilidad_anual_pct) ? a : b);
-                return <> En estas carteras, <b>{may.nombre}</b> es la que más estira este
-                  segundo radar: {pct(M[may.nombre].retorno_anual_pct, 1)} de retorno con{" "}
-                  {pct(M[may.nombre].volatilidad_anual_pct, 1)} de volatilidad y una caída
-                  máxima de {pct(M[may.nombre].max_drawdown_pct, 1)}.</>;
-              })()}
-            </div>
-          </div>
-        </div>
-      </>)}
+        </div>)}
 
       <div className="fila f2">
         <div className="panel">
@@ -3578,8 +3553,10 @@ function ResultadoComparacion({ d, c }) {
           <div className="pie">
             El Sharpe que ves no es un dato exacto: es una <b>estimación</b> hecha con las
             ruedas que hubo. Con otras ruedas —el mismo mercado, otro tramo— habría dado
-            distinto. La columna del medio es hasta dónde puede moverse ese número sin que
-            los datos lo desmientan, y se calcula remuestreando las ruedas reales mil veces.
+            distinto. La columna del medio es el <b>intervalo al 95 %</b>: remuestreando las
+            ruedas reales mil veces, en 95 de cada 100 reconstrucciones el Sharpe cae adentro
+            de ese rango. Cuanto más ancho, menos historia hay detrás — un ancho de más de
+            1 punto de Sharpe quiere decir que el número todavía no está para decidir nada.
             {(() => {
               const pares = [];
               for (let a = 0; a < nombres.length; a++)
@@ -3623,7 +3600,10 @@ function ResultadoComparacion({ d, c }) {
             carteras hechas de puro ruido — todo lo que no supere ese umbral no prueba nada.
             La última es el <b>Sharpe deflactado</b> (Bailey y López de Prado): la
             probabilidad de que la habilidad sea real y no el premio a haber probado mucho.
-            Por debajo del 80 % conviene desconfiar.
+            Los tres tramos, que son los que pintan la columna:
+            <b> 95 % o más</b> el resultado se sostiene solo;
+            <b> entre 80 % y 95 %</b> probablemente real, pero convendría más historia;
+            <b> menos de 80 %</b> no alcanza para descartar la casualidad.
             {(() => {
               const flojas = nombres.filter((n) => (d.sharpe_deflactado[n]?.dsr ?? 1) < 0.8);
               return flojas.length
