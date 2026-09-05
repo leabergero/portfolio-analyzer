@@ -222,8 +222,17 @@ footer a:hover{text-decoration:underline}
 .lab-zona .val b{font-size:19px;font-variant-numeric:tabular-nums}
 .lab-zona .val s{display:block;text-decoration:none;font-size:11.5px;color:var(--texto-3);margin-top:4px}
 
-.lab-tree{display:flex;flex-direction:column;gap:3px;height:288px}
-.lab-tree .sec{display:flex;gap:3px;min-height:0}
+.lab-tree{display:flex;flex-direction:column;gap:4px;height:300px}
+.lab-tree .sec{display:grid;grid-template-columns:118px 1fr;gap:10px;align-items:center;
+               min-height:30px}
+.lab-tree .rot{display:flex;align-items:baseline;gap:6px;font-size:10.5px;line-height:1.3;
+               color:var(--texto-3);overflow:hidden}
+.lab-tree .rot u{width:8px;height:8px;border-radius:2px;text-decoration:none;flex:none;
+                 position:relative;top:1px}
+.lab-tree .rot b{color:var(--texto-2);font-weight:600;display:-webkit-box;-webkit-line-clamp:2;
+                 -webkit-box-orient:vertical;overflow:hidden}
+.lab-tree .rot i{font-style:normal;white-space:nowrap;flex:none;margin-left:auto}
+.lab-tree .cajas{display:flex;gap:3px;height:100%;min-height:0}
 .lab-tree i{border-radius:4px;display:flex;flex-direction:column;justify-content:center;
   align-items:center;gap:2px;font-style:normal;font-size:11.5px;font-weight:600;text-align:center;
   padding:2px;overflow:hidden;cursor:default;color:var(--fondo);
@@ -231,11 +240,11 @@ footer a:hover{text-decoration:underline}
 .lab-tree i:hover{filter:brightness(1.12)}
 .lab-tree i s{text-decoration:none;font-weight:400;font-size:10.5px;opacity:.8}
 .lab-tree i.chico{font-size:10px}.lab-tree i.chico s{font-size:9px}
-.lab-tree .sec.bajo i{flex-direction:row;gap:6px;font-size:10.5px}
-.lab-tree .sec.bajo i s{font-size:10px}
-.lab-tree-lg{display:flex;flex-wrap:wrap;gap:14px;margin-top:11px;font-size:11.5px;color:var(--texto-3)}
-.lab-tree-lg span{display:flex;align-items:center;gap:6px}
-.lab-tree-lg u{width:9px;height:9px;border-radius:2px;text-decoration:none}
+.lab-tree .cajas.bajo i{flex-direction:row;gap:6px;font-size:10.5px}
+.lab-tree .cajas.bajo i s{font-size:10px}
+.lab-valor{position:relative;overflow:hidden;justify-content:flex-start}
+.lab-valor .cifra{font-size:31px;font-weight:700;margin-top:8px;font-variant-numeric:tabular-nums}
+.lab-valor svg{position:absolute;left:0;right:0;bottom:0;width:100%;height:74px}
 
 .lab-bullet{display:grid;grid-template-columns:88px 1fr 136px;gap:14px;align-items:center;
             padding:9px 0}

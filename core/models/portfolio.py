@@ -314,11 +314,12 @@ def evolucion(posiciones, trades=None, n_ruedas: int = 30) -> dict:
     haber tenido siempre lo de hoy— y en carteras con mucha rotación el número
     que sale no se parece a nada.
 
-    El rendimiento va desde la primera compra y es **TWR**: encadena el retorno
-    de cada rueda descontando el movimiento de capital de ese día —lo que entró
-    a comprar, lo que salió al vender—. Un aporte no es ganancia; sin descontarlo
-    la curva salta cada vez que entra plata. Los dividendos no son un retiro:
-    quedan como caja adentro, que es donde suman al rendimiento.
+    El rendimiento es el resultado sobre la plata puesta: cuánto valen las
+    tenencias más los dividendos cobrados, menos lo que salió del bolsillo hasta
+    ahí. La curva va en dólares porque es la única que no se mueve sola —un
+    porcentaje sobre capital variable cae de golpe el día de un aporte, sin que
+    haya pasado nada en el mercado—. Los dividendos no son un retiro: quedan como
+    caja adentro, que es donde suman al resultado.
     """
     from core.data import sources as _src
 
@@ -399,16 +400,18 @@ def evolucion(posiciones, trades=None, n_ruedas: int = 30) -> dict:
         if f is not None:
             caja.loc[f:] += monto
 
-    valor = (cant * px).sum(axis=1) + caja
-    anterior = valor.shift(1)
-    r = ((valor - flujo) / anterior - 1).iloc[1:]
-    r = r.replace([np.inf, -np.inf], 0.0).fillna(0.0)
-    indice = (1.0 + r).cumprod() * 100.0
+    # El valor de las tenencias va sin la caja de dividendos, para que coincida
+    # con el KPI "Valor total" de arriba; el resultado sí la cuenta.
+    tenencias = (cant * px).sum(axis=1)
+    puesto = flujo.cumsum()
+    resultado = tenencias + caja - puesto
 
-    # Referencia para el "vs. mes anterior": el índice al último cierre del mes pasado.
+    # Referencia para el "vs. mes anterior": el resultado al último cierre del
+    # mes pasado. En dólares y no en porcentaje: el porcentaje se mueve solo
+    # cuando entra plata, y ese salto no es rendimiento de nada.
     mes = px.index[-1].to_period("M")
-    previos = indice.index[indice.index.to_period("M") < mes]
-    ref = float(indice.loc[previos[-1]]) if len(previos) else 100.0
+    previos = resultado.index[resultado.index.to_period("M") < mes]
+    ref = float(resultado.loc[previos[-1]]) if len(previos) else 0.0
 
     ult = px.tail(n_ruedas + 1)
     var = ult.pct_change().iloc[1:] * 100.0
@@ -416,23 +419,25 @@ def evolucion(posiciones, trades=None, n_ruedas: int = 30) -> dict:
     abiertos = [t for t in px.columns if hoy[t] > 0]
     orden = sorted(abiertos, key=lambda t: -(hoy[t] * float(px[t].iloc[-1])))
 
+    neto = float(puesto.iloc[-1])
+    final = float(resultado.iloc[-1])
     return {
-        "retorno_pct": round(float(indice.iloc[-1]) - 100.0, 2),
-        "retorno_mes_anterior_pct": round(ref - 100.0, 2),
+        # Lo que ganó o perdió sobre la plata que salió del bolsillo: el mismo
+        # número que suman los KPIs de arriba (abierto + realizado).
+        "resultado_usd": round(final, 2),
+        "puesto_neto_usd": round(neto, 2),
+        "rendimiento_pct": round(final / neto * 100, 2) if neto > 0 else None,
+        "resultado_mes_anterior_usd": round(ref, 2),
         "desde": str(px.index[0].date()),
         "aportado_usd": round(float(flujo[flujo > 0].sum()), 2),
         "retirado_usd": round(float(-flujo[flujo < 0].sum()), 2),
         "dividendos_usd": round(float(caja.iloc[-1]), 2),
-        # El mismo resultado que suman los KPIs de arriba (abierto + realizado),
-        # puesto al lado del TWR: cuando los dos no cuentan la misma historia,
-        # la diferencia es el efecto de cuándo entró la plata, no un error.
-        "puesto_neto_usd": round(float(flujo.sum()), 2),
-        "resultado_usd": round(float(valor.iloc[-1] - flujo.sum()), 2),
+        "valor_hoy_usd": round(float(tenencias.iloc[-1]), 2),
         "cerradas": sum(1 for x in tramos if x[3]),
         "sin_serie": sorted(sin_serie),
-        "indice": [round(float(v), 3) for v in indice],
-        "valor_usd": [round(float(v), 2) for v in valor.iloc[1:]],
-        "fechas": [str(f.date()) for f in indice.index],
+        "resultado_serie": [round(float(v), 2) for v in resultado],
+        "valor_usd": [round(float(v), 2) for v in tenencias],
+        "fechas": [str(f.date()) for f in resultado.index],
         "ruedas": {
             "fechas": [str(f.date()) for f in var.index],
             "tickers": [{

@@ -409,8 +409,9 @@ function Posicion({ d, cartera, recargar, extras, bench }) {
 
       {/* 2 · Qué tengo */}
       <div className="kpis">
-        <Kpi etiqueta="Valor total" valor={usd(d.valor_total)} ayuda={AYUDA.valor}
-             sub={d.mep_hoy ? `MEP $${d.mep_hoy}` : null} />
+        {!(LAB && ev && !ev.error) && (
+          <Kpi etiqueta="Valor total" valor={usd(d.valor_total)} ayuda={AYUDA.valor}
+               sub={d.mep_hoy ? `MEP $${d.mep_hoy}` : null} />)}
         <Kpi etiqueta="Costo" valor={usd(d.costo_total)} sub="comisiones incluidas" />
         <Kpi etiqueta="Resultado abierto" valor={usd(d.pnl)} tono={signo(d.pnl)} ayuda={AYUDA.pnl}
              sub={pct(d.pnl_pct)} />
@@ -422,7 +423,11 @@ function Posicion({ d, cartera, recargar, extras, bench }) {
                tono={signo(d.pnl + cerrado)} sub="abierto + cerrado" />)}
         <Kpi etiqueta="Posiciones" valor={filas.length} sub={`${new Set(filas.map(f=>f.ticker)).size} activos`} />
       </div>
-      {LAB && ev && <KpiYtd ev={ev} />}
+      {LAB && ev && !ev.error && (
+        <div className="fila f2">
+          <ValorCartera ev={ev} mep={d.mep_hoy} />
+          <RendimientoTotal ev={ev} />
+        </div>)}
       <AltaRapida cartera={cartera} recargar={recargar} />
       {d.sin_precio?.length > 0 && (
         <div className="aviso ojo">
@@ -1084,12 +1089,12 @@ function ZonasRiesgo({ d }) {
 
 /* DAT-17 · treemap por sector: alto de banda = sector, ancho = ticker. Dice de
    una lo que la dona no: qué papel concreto trae cada sector. */
-function TreemapSectores({ detalle, total }) {
+function TreemapSectores({ detalle, campo = "sector" }) {
   const c = colores();
   const sectores = {};
   (detalle || []).forEach((x) => {
     if (!x.valor_usd) return;
-    const k = x.sector || "Sin sector";
+    const k = x[campo] || "Sin dato";
     (sectores[k] = sectores[k] || { valor: 0, items: [] });
     sectores[k].valor += x.valor_usd;
     sectores[k].items.push(x);
@@ -1099,11 +1104,14 @@ function TreemapSectores({ detalle, total }) {
   if (!orden.length) return <div className="cargando">Sin sectores clasificados.</div>;
 
   return (
-    <>
-      <div className="lab-tree">
-        {orden.map(([nombre, s], i) => (
-          <div className={"sec" + (s.valor / suma < 0.09 ? " bajo" : "")}
-               key={nombre} style={{ flex: s.valor }}>
+    <div className="lab-tree">
+      {orden.map(([nombre, s], i) => (
+        <div className="sec" key={nombre} style={{ flex: s.valor }}>
+          <span className="rot" title={`${nombre} · ${usd(s.valor)}`}>
+            <u style={{ background: c.series[i % c.series.length] }} />
+            <b>{nombre}</b><i>{pct((s.valor / suma) * 100, 1)}</i>
+          </span>
+          <div className={"cajas" + (s.valor / suma < 0.09 ? " bajo" : "")}>
             {s.items.sort((a, b) => b.valor_usd - a.valor_usd).map((x) => {
               const w = (x.valor_usd / suma) * 100;
               return (
@@ -1113,16 +1121,9 @@ function TreemapSectores({ detalle, total }) {
                   {x.ticker}<s>{pct(w, 1)}</s>
                 </i>);
             })}
-          </div>))}
-      </div>
-      <div className="lab-tree-lg">
-        {orden.map(([nombre, s], i) => (
-          <span key={nombre}>
-            <u style={{ background: c.series[i % c.series.length] }} />
-            {nombre} {pct((s.valor / suma) * 100, 1)}
-          </span>))}
-      </div>
-    </>
+          </div>
+        </div>))}
+    </div>
   );
 }
 
@@ -1157,7 +1158,7 @@ function BulletPesos({ filas, nota }) {
 }
 
 /* PNL-05 · rendimiento del año, con su curva y el menú de acciones. */
-function KpiYtd({ ev }) {
+function RendimientoTotal({ ev }) {
   const [abierto, setAbierto] = useState(false);
   const c = colores();
   useEffect(() => {
@@ -1168,17 +1169,17 @@ function KpiYtd({ ev }) {
   }, [abierto]);
   if (!ev || ev.error) return null;
 
-  const delta = ev.retorno_pct - ev.retorno_mes_anterior_pct;
-  const serie = ev.indice || [];
-  const mn = Math.min(...serie), mx = Math.max(...serie), rango = mx - mn || 1;
-  const y = (v) => 30 - 4 - ((v - mn) / rango) * 22;
+  const delta = ev.resultado_usd - ev.resultado_mes_anterior_usd;
+  const serie = ev.resultado_serie || [];
+  const mn = Math.min(...serie, 0), mx = Math.max(...serie, 0), rango = mx - mn || 1;
+  const y = (v) => 34 - 4 - ((v - mn) / rango) * 26;
   const linea = serie.map((v, i) => (i ? "L" : "M") +
     ((i / (serie.length - 1)) * 300).toFixed(1) + "," + y(v).toFixed(1)).join(" ");
-  const color = ev.retorno_pct >= 0 ? c.positivo : c.negativo;
+  const color = ev.resultado_usd >= 0 ? c.positivo : c.negativo;
 
   return (
     <div className="panel" style={{ position: "relative" }}>
-      <h3>Rendimiento desde el inicio
+      <h3>Rendimiento total
         <button className="btn" style={{ marginLeft: "auto", padding: "2px 9px" }}
                 onClick={(e) => { e.stopPropagation(); setAbierto((x) => !x); }}>⋯</button>
       </h3>
@@ -1190,34 +1191,60 @@ function KpiYtd({ ev }) {
             <div key={t} className="pie" style={{ margin: 0, padding: "7px 11px", cursor: "pointer" }}>{t}</div>))}
         </div>)}
       <div style={{ fontSize: 30, fontWeight: 700, marginTop: 6 }}
-           className={signo(ev.retorno_pct)}>{pct(ev.retorno_pct)}</div>
-      <div className="pie" style={{ marginTop: 4 }}>
-        <span className={signo(delta)}>{delta >= 0 ? "▲" : "▼"} {num(Math.abs(delta))} pts</span>
+           className={signo(ev.resultado_usd)}>{pct(ev.rendimiento_pct)}</div>
+      <div style={{ fontSize: 15, marginTop: 2 }} className={signo(ev.resultado_usd)}>
+        {usd(ev.resultado_usd)} sobre {usd(ev.puesto_neto_usd)} puestos de tu bolsillo</div>
+      <div className="pie" style={{ marginTop: 8 }}>
+        <span className={signo(delta)}>{delta >= 0 ? "▲" : "▼"} {usd(Math.abs(delta))}</span>
         {" "}desde el cierre del mes pasado · arranca el {ev.desde}, con la primera compra
         {ev.cerradas > 0 && ` · incluye ${ev.cerradas} posiciones ya cerradas`}
-      </div>
-      <div className="pie" style={{ marginTop: 6 }}>
-        Resultado: <b className={signo(ev.resultado_usd)}>{usd(ev.resultado_usd)}</b> sobre{" "}
-        {usd(ev.puesto_neto_usd)} puestos de tu bolsillo
         {ev.dividendos_usd > 0 && ` · ${usd(ev.dividendos_usd)} de dividendos cobrados`}
       </div>
       {ev.sin_serie?.length > 0 && (
         <div className="pie" style={{ marginTop: 6 }}>
           Sin serie de precios y fuera de la cuenta: <b>{ev.sin_serie.join(", ")}</b>.
         </div>)}
-      <svg viewBox="0 0 300 30" preserveAspectRatio="none"
-           style={{ width: "100%", height: 34, marginTop: 10, display: "block" }}>
-        <line x1="0" y1={y(100)} x2="300" y2={y(100)} stroke={c.borde} strokeWidth="1"
+      <svg viewBox="0 0 300 34" preserveAspectRatio="none"
+           style={{ width: "100%", height: 40, marginTop: 12, display: "block" }}>
+        <line x1="0" y1={y(0)} x2="300" y2={y(0)} stroke={c.borde} strokeWidth="1"
               strokeDasharray="3 3" />
         <path d={linea} fill="none" stroke={color} strokeWidth="1.8" strokeLinejoin="round" />
       </svg>
       <div className="pie">
-        Time-weighted: cada rueda se encadena descontando lo que entró y salió ese día, así
-        que mide las decisiones, no el tamaño de la cartera. Cuando el porcentaje y el
-        resultado en dólares no coinciden, la diferencia es <b>cuándo</b> pusiste la plata:
-        los meses con poco invertido pesan igual que los de ahora.
-        {" "}La línea punteada es el arranque de la cartera.
+        La curva es el resultado acumulado en dólares, rueda por rueda, contando las
+        posiciones que ya cerraste y los dividendos cobrados. En dólares y no en porcentaje
+        porque un porcentaje sobre capital variable cae de golpe el día que ponés plata
+        nueva, sin que haya pasado nada en el mercado. La línea punteada es el cero.
       </div>
+    </div>
+  );
+}
+
+/* PNL-16 · el valor de la cartera con su curva, en lugar del KPI suelto. */
+function ValorCartera({ ev, mep }) {
+  const c = colores();
+  const v = ev.valor_usd || [];
+  const mn = Math.min(...v), mx = Math.max(...v), rango = mx - mn || 1;
+  const y = (x) => 74 - 8 - ((x - mn) / rango) * 52;
+  const d = v.map((x, i) => (i ? "L" : "M") +
+    ((i / (v.length - 1)) * 300).toFixed(1) + "," + y(x).toFixed(1)).join(" ");
+  const mesAtras = v[Math.max(0, v.length - 22)];
+  const cambio = mesAtras ? (v[v.length - 1] / mesAtras - 1) * 100 : 0;
+  return (
+    <div className="panel lab-valor">
+      <h3>Valor de cartera</h3>
+      <div className="cifra">{usd(ev.valor_hoy_usd)}</div>
+      <div className="pie" style={{ marginTop: 6 }}>
+        <span className={signo(cambio)}>{cambio >= 0 ? "▲" : "▼"} {pct(Math.abs(cambio), 1)}</span>
+        {" "}en el último mes{mep ? ` · MEP $${mep}` : ""}
+      </div>
+      <svg viewBox="0 0 300 74" preserveAspectRatio="none">
+        <defs><linearGradient id="labvg" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor={c.acento} stopOpacity=".30" />
+          <stop offset="1" stopColor={c.acento} stopOpacity="0" /></linearGradient></defs>
+        <path d={`${d} L300,74 L0,74 Z`} fill="url(#labvg)" />
+        <path d={d} fill="none" stroke={c.acento} strokeWidth="2" strokeLinejoin="round" />
+      </svg>
     </div>
   );
 }
@@ -1327,10 +1354,12 @@ function Composicion({ d }) {
         {cortes.map(([k, t]) => {
           // El corte por sector pasa a treemap: la dona dice cuánto pesa cada
           // sector, pero no qué papel lo trae.
-          if (LAB && k === "por_sector") return (
+          // La industria es el corte con más categorías: en dona son seis
+          // porciones finitas con las etiquetas peleándose el borde.
+          if (LAB && k === "por_industria") return (
             <div className="panel" key={k}>
               <h3>{t}</h3>
-              <TreemapSectores detalle={d.detalle} />
+              <TreemapSectores detalle={d.detalle} campo="industria" />
             </div>);
           const g = dona(d[k] || [], t);
           return (
