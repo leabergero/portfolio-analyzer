@@ -3221,24 +3221,50 @@ function Regimenes({ d, cartera }) {
 
 /* ── Stress ── */
 function Stress({ d }) {
+  const filas = d.escenarios || [];
+  const conProxy = filas.some((e) => e.proxies?.length);
+  const parcial = filas.some((e) => e.cobertura_pct != null && e.cobertura_pct < 99.5
+                                    && e.pnl_pct != null);
   return (
     <div className="panel">
-      <h3>Qué le habría pasado a esta cartera en cinco crisis reales</h3>
+      <h3>Qué le habría pasado a esta cartera en {filas.length} crisis reales</h3>
       <div className="tabla-wrap"><table>
         <thead><tr><th>Escenario</th><th>Período</th><th>Qué pasó</th>
-                   <th className="n">Impacto</th><th className="n">En dólares</th></tr></thead>
-        <tbody>{(d.escenarios || []).map((e, i) => (
+                   <th className="n">Impacto</th><th className="n">En dólares</th>
+                   <th className="n">Cartera cubierta</th></tr></thead>
+        <tbody>{filas.map((e, i) => (
           <tr key={i}>
             <td><b>{e.nombre}</b></td>
             <td className="mono" style={{ fontSize: 12 }}>{e.desde} → {e.hasta}</td>
-            <td style={{ fontSize: 12.5, color: "var(--texto-2)" }}>{e.descripcion}</td>
+            <td style={{ fontSize: 12.5, color: "var(--texto-2)" }}>
+              {e.descripcion}
+              {e.proxies?.length > 0 && (
+                <s style={{ display: "block", textDecoration: "none", color: "var(--texto-3)",
+                            fontSize: 11.5, marginTop: 3 }}>
+                  con la historia de {e.proxies.join(", ")}, que en esa fecha todavía no
+                  tenían CEDEAR acá</s>)}
+            </td>
             <td className={"n " + signo(e.pnl_pct)}>{e.pnl_pct == null ? "—" : pct(e.pnl_pct)}</td>
-            <td className={"n " + signo(e.pnl_usd)}>{e.pnl_usd == null ? e.nota : usd(e.pnl_usd)}</td>
+            <td className={"n " + signo(e.pnl_usd)}>{e.pnl_usd == null ? "—" : usd(e.pnl_usd)}</td>
+            <td className="n">
+              {e.pnl_pct == null ? <span style={{ color: "var(--texto-3)", fontSize: 12 }}>{e.nota}</span>
+               : e.cobertura_pct >= 99.5 ? pct(100, 0)
+               : <span className="chip ojo">{pct(e.cobertura_pct, 0)}</span>}
+            </td>
           </tr>))}</tbody>
       </table></div>
       <div className="pie">
-        Se aplican los retornos reales de esas ventanas a tu cartera de hoy. Los escenarios
-        anteriores a tu historia se informan como tales en vez de dar cero.
+        Se aplican los retornos reales de esas ventanas a tu cartera de hoy.
+        {conProxy && (
+          <> Cuando un CEDEAR todavía no listaba acá se usa la historia del papel que
+          representa: el ratio de conversión es constante y se cancela en el retorno, así que
+          lo que se pierde es el spread local de esos días. En una crisis global iban para el
+          mismo lado; en una crisis argentina —las PASO, una devaluación— el papel de afuera
+          no la sintió igual, y ese escenario conviene leerlo con reservas.</>)}
+        {parcial && (
+          <> Cuando falta la historia de algún activo, el escenario corre con los que sí
+          estaban y los pesos se reparten entre ellos: la columna dice qué porción de la
+          cartera quedó representada, y el monto en dólares corresponde solo a esa porción.</>)}
       </div>
     </div>
   );

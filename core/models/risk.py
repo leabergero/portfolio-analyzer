@@ -22,7 +22,10 @@ guarda así y se muestra como pérdida positiva. Fijarlo evita restar dos veces.
 """
 
 import numpy as np
+import pandas as pd
 from scipy import stats
+
+from core.data import sources, symbols
 
 RUEDAS = 252
 
@@ -324,26 +327,51 @@ def _ajustar_distribucion(retornos, var95: float, var99: float) -> dict:
 # ── Stress testing ────────────────────────────────────────────────────────────
 
 ESCENARIOS = [
+    {"nombre": "Crisis subprime", "desde": "2008-09-15", "hasta": "2008-11-20",
+     "descripcion": "Cae Lehman: S&P 500 −40 % en diez semanas"},
     {"nombre": "PASO 2019", "desde": "2019-08-12", "hasta": "2019-08-16",
      "descripcion": "Derrota del oficialismo: acciones −40 %, MEP +30 %"},
     {"nombre": "Crash COVID", "desde": "2020-03-09", "hasta": "2020-03-23",
      "descripcion": "S&P 500 −34 %, Merval −50 %"},
     {"nombre": "Reestructuración 2020", "desde": "2020-04-06", "hasta": "2020-08-31",
      "descripcion": "Bonos en default técnico hasta el canje"},
+    {"nombre": "Invasión de Ucrania", "desde": "2022-02-24", "hasta": "2022-03-08",
+     "descripcion": "Energía y granos por las nubes; Europa −10 %"},
     {"nombre": "Ajuste de la Fed 2022", "desde": "2022-06-01", "hasta": "2022-10-15",
      "descripcion": "Suba agresiva de tasas; caen los bonos emergentes"},
     {"nombre": "Devaluación diciembre 2023", "desde": "2023-12-12", "hasta": "2023-12-18",
      "descripcion": "Devaluación del 54 %; los bonos en dólares suben"},
+    {"nombre": "Tensión en Ormuz", "desde": "2025-06-13", "hasta": "2025-06-24",
+     "descripcion": "Israel ataca Irán y amenaza el estrecho: crudo +20 %"},
 ]
 
 
-def stress_test(posiciones) -> dict:
-    """Qué habría pasado con ESTA cartera en cinco crisis reales.
+def _serie_para(ticker, source, cache):
+    """Serie en dólares del ticker, y si no llega tan atrás, la del subyacente.
 
-    Usa los pesos reales por valor. La versión anterior había quedado con el
-    cálculo frágil que ya se corrigió en el resto de los modelos: si el número
-    de posiciones no coincidía con el de tickers con datos, caía a equiponderado
-    y el resultado dejaba de corresponder a la cartera del usuario.
+    Un CEDEAR de Coca-Cola lista en Buenos Aires desde 2021, pero Coca-Cola
+    cotiza desde hace décadas: para preguntarse qué habría pasado en 2008 el
+    dato que importa es el del papel, no el de su envoltorio local. El ratio de
+    conversión es constante, así que se cancela en el retorno; lo que se pierde
+    es el spread local y el MEP de esos días, que en una crisis global se movían
+    en la misma dirección que el activo.
+    """
+    if ticker not in cache:
+        cache[ticker] = sources.precios_usd(ticker, source=source)
+    base = symbols.base_symbol(ticker)
+    if base != symbols.strip_ba(ticker) and base not in cache:
+        cache[base] = sources.precios_usd(base)
+    return cache[ticker], (cache.get(base) if base != symbols.strip_ba(ticker) else None)
+
+
+def stress_test(posiciones) -> dict:
+    """Qué le habría pasado a ESTA cartera en crisis reales.
+
+    Usa los pesos reales por valor. Cuando un activo todavía no existía —o su
+    CEDEAR no había listado— el escenario no se descarta: se corre con los que
+    sí tienen historia, renormalizando los pesos entre ellos, y se informa qué
+    porción de la cartera quedó representada. Decir "no aplica" era la respuesta
+    cómoda y la menos útil: los papeles existían, aunque la cartera no.
     """
     from core.models.portfolio import matriz_retornos, value_weights
 
@@ -353,21 +381,55 @@ def stress_test(posiciones) -> dict:
 
     tickers = list(ret_df.columns)
     w = value_weights(posiciones, precios, tickers)
+    peso = dict(zip(tickers, (float(x) for x in w)))
+    origen = {str(p["ticker"]).upper(): (p.get("source") or None) for p in posiciones}
     valor_total = sum(float(p.get("qty", 0)) * precios[t]
                       for p in posiciones
                       for t in [str(p["ticker"]).upper()] if t in precios)
 
+    cache = {}
     salida = []
     for e in ESCENARIOS:
-        ventana = ret_df.loc[(ret_df.index >= e["desde"]) & (ret_df.index <= e["hasta"])]
-        if len(ventana) < 2:
-            salida.append({**e, "pnl_pct": None, "pnl_usd": None, "ruedas": len(ventana),
-                           "nota": "la cartera no tenía historia en esa fecha"})
+        columnas, proxies, afuera = {}, [], []
+        for t in tickers:
+            propia, subyacente = _serie_para(t, origen.get(t), cache)
+            tramo = propia.loc[e["desde"]:e["hasta"]]
+            if len(tramo) < 2 and subyacente is not None:
+                tramo = subyacente.loc[e["desde"]:e["hasta"]]
+                if len(tramo) >= 2:
+                    proxies.append(symbols.base_symbol(t))
+            if len(tramo) >= 2:
+                columnas[t] = tramo
+            else:
+                afuera.append(t)
+
+        cubierto = sum(peso[t] for t in columnas)
+        if not columnas or cubierto < 1e-9:
+            salida.append({**e, "pnl_pct": None, "pnl_usd": None, "ruedas": 0,
+                           "cobertura_pct": 0.0, "proxies": [], "fuera": afuera,
+                           "nota": "ninguno de tus activos cotizaba todavía"})
             continue
-        acumulado = float(np.prod(1 + ventana[tickers].to_numpy() @ w) - 1)
+
+        px = pd.DataFrame(columnas).sort_index().ffill().dropna()
+        ret = px.pct_change().dropna()
+        if len(ret) < 1:
+            salida.append({**e, "pnl_pct": None, "pnl_usd": None, "ruedas": len(ret),
+                           "cobertura_pct": 0.0, "proxies": [], "fuera": afuera,
+                           "nota": "no hay ruedas en común dentro del período"})
+            continue
+
+        # Los pesos se reparten entre los que sí estaban: el escenario responde
+        # qué le habría pasado a esa parte de la cartera, no a una cartera con
+        # un agujero valuado en cero.
+        sub = np.array([peso[t] for t in ret.columns])
+        sub = sub / sub.sum()
+        acumulado = float(np.prod(1 + ret.to_numpy() @ sub) - 1)
         salida.append({**e, "pnl_pct": round(acumulado * 100, 2),
-                       "pnl_usd": round(acumulado * valor_total, 2),
-                       "ruedas": len(ventana)})
+                       "pnl_usd": round(acumulado * valor_total * cubierto, 2),
+                       "ruedas": len(ret),
+                       "cobertura_pct": round(cubierto * 100, 1),
+                       "proxies": proxies,
+                       "fuera": afuera})
 
     return {"escenarios": salida, "valor_total": round(valor_total, 2), "moneda": "USD"}
 
