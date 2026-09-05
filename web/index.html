@@ -347,8 +347,16 @@ footer a:hover{text-decoration:underline}
 .lab-valor{position:relative;overflow:hidden;justify-content:flex-start}
 .lab-valor .cifra{font-size:31px;font-weight:700;margin-top:8px;font-variant-numeric:tabular-nums}
 /* El área crece con la tarjeta: al lado de una más alta quedaba un hueco. */
-.lab-valor svg{position:absolute;left:0;right:0;bottom:0;top:104px;width:100%;height:auto;
+.lab-valor svg{position:absolute;left:0;right:0;bottom:17px;top:104px;width:100%;height:auto;
                min-height:74px}
+.lab-valor .lab-ejeT{position:absolute;left:0;right:0;bottom:0;height:15px}
+
+/* Rótulos de tiempo: van fuera del SVG, que se estira y deformaría el texto. */
+.lab-ejeT{position:relative;font-size:10px;color:var(--texto-3)}
+.lab-ejeT span{position:absolute;transform:translateX(-50%);white-space:nowrap}
+.lab-ejeT span:first-child{transform:none}
+.lab-ejeT span:last-child{transform:translateX(-100%)}
+.ejeT line{stroke:var(--borde-suave);stroke-width:1;vector-effect:non-scaling-stroke}
 .lab-valor .cap{fill:none;stroke:var(--texto-3);stroke-width:1.2;stroke-dasharray:4 3;
                 opacity:.75;vector-effect:non-scaling-stroke}
 

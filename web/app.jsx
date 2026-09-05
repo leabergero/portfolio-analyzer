@@ -1178,6 +1178,7 @@ function RendimientoTotal({ ev }) {
   const y = (v) => 34 - 4 - ((v - mn) / rango) * 26;
   const linea = serie.map((v, i) => (i ? "L" : "M") +
     ((i / (serie.length - 1)) * 300).toFixed(1) + "," + y(v).toFixed(1)).join(" ");
+  const marcas = marcasTiempo(ev.fechas, 6);
 
 
   return (
@@ -1217,11 +1218,19 @@ function RendimientoTotal({ ev }) {
             <stop offset={Math.max(0, Math.min(1, y(0) / 34))} stopColor={c.negativo} />
           </linearGradient>
         </defs>
+        <g className="ejeT">
+          {marcas.map((m) => (
+            <line key={m.et} x1={m.pos * 300} y1="0" x2={m.pos * 300} y2="34" />))}
+        </g>
         <line x1="0" y1={y(0)} x2="300" y2={y(0)} stroke={c.borde} strokeWidth="1"
               strokeDasharray="3 3" />
         <path d={linea} fill="none" stroke="url(#labrt)" strokeWidth="1.8"
               strokeLinejoin="round" />
       </svg>
+      <div className="lab-ejeT" style={{ position: "relative", height: 15, marginTop: 2 }}>
+        {marcas.map((m) => (
+          <span key={m.et} style={{ left: `${(m.pos * 100).toFixed(2)}%` }}>{m.et}</span>))}
+      </div>
       <div className="pie">
         La curva es el resultado acumulado en dólares, rueda por rueda, contando las
         posiciones que ya cerraste y los dividendos cobrados. En dólares y no en porcentaje
@@ -1533,6 +1542,39 @@ function RadarCarteras({ mk, bl }) {
   );
 }
 
+const MESES_CORTOS = ["ene", "feb", "mar", "abr", "may", "jun",
+                      "jul", "ago", "sep", "oct", "nov", "dic"];
+
+/* Marcas de tiempo para las curvas: la posición relativa de cada inicio de
+   trimestre, semestre o año que haya en la serie. Van fuera del SVG porque los
+   tres gráficos se estiran con preserveAspectRatio="none" y el texto adentro
+   saldría deformado; adentro solo van las líneas, con vector-effect para que el
+   trazo no engorde con la escala. */
+function marcasTiempo(fechas, cada = 3, tope = 11) {
+  if (!fechas?.length) return [];
+  const armar = (paso) => {
+    const out = [];
+    let previa = null;
+    fechas.forEach((f, i) => {
+      const d = new Date(f + "T00:00:00");
+      if (d.getMonth() % paso !== 0) return;
+      const clave = `${d.getFullYear()}-${d.getMonth()}`;
+      if (clave === previa) return;
+      previa = clave;
+      out.push({ pos: i / Math.max(1, fechas.length - 1),
+                 et: paso >= 12 ? String(d.getFullYear())
+                                : `${MESES_CORTOS[d.getMonth()]} ${String(d.getFullYear()).slice(2)}` });
+    });
+    return out;
+  };
+  // Si el período es largo, el paso se agranda solo antes que amontonar rótulos.
+  for (const paso of [cada, cada * 2, 12]) {
+    const m = armar(paso);
+    if (m.length <= tope) return m;
+  }
+  return armar(12);
+}
+
 /* PNL-16 · el valor de la cartera con su curva, en lugar del KPI suelto. */
 function ValorCartera({ ev, mep }) {
   const c = colores();
@@ -1552,6 +1594,7 @@ function ValorCartera({ ev, mep }) {
   const mesAtras = v[Math.max(0, v.length - 22)];
   const cambio = mesAtras ? (v[v.length - 1] / mesAtras - 1) * 100 : 0;
   const bajoAgua = dCap && v[v.length - 1] < puesto[puesto.length - 1];
+  const marcas = marcasTiempo(ev.fechas, 3);
 
   return (
     <div className="panel lab-valor">
@@ -1578,6 +1621,10 @@ function ValorCartera({ ev, mep }) {
               <stop offset="1" stopColor={c.negativo} stopOpacity=".05" /></linearGradient>
           </>)}
         </defs>
+        <g className="ejeT">
+          {marcas.map((m) => (
+            <line key={m.et} x1={m.pos * W} y1="0" x2={m.pos * W} y2={H} />))}
+        </g>
         {dCap ? (<>
           <path d={`${d} L${W},${H} L0,${H} Z`} fill="url(#labvg)" clipPath="url(#labSobre)" />
           <path d={`${d} L${W},0 L0,0 Z`} fill="url(#labvr)" clipPath="url(#labBajo)" />
@@ -1591,6 +1638,10 @@ function ValorCartera({ ev, mep }) {
           <path d={d} fill="none" stroke={c.acento} strokeWidth="2" strokeLinejoin="round" />
         </>)}
       </svg>
+      <div className="lab-ejeT">
+        {marcas.map((m) => (
+          <span key={m.et} style={{ left: `${(m.pos * 100).toFixed(2)}%` }}>{m.et}</span>))}
+      </div>
     </div>
   );
 }
@@ -1641,6 +1692,7 @@ function TirVentana({ ev }) {
   const px_ = (i) => (i / Math.max(1, serie.length - 1)) * W;
   const linea = serie.map((t, i) => (i ? "L" : "M") + px_(i).toFixed(1) + "," + y(t).toFixed(1)).join(" ");
   const color = v.tir_pct >= 0 ? c.positivo : c.negativo;
+  const marcas = marcasTiempo((v.serie || []).map((p) => p.fecha), 3);
 
   return (
     <div className="panel">
@@ -1662,15 +1714,23 @@ function TirVentana({ ev }) {
       </div>
       {serie.length > 1 && (
         <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="lab-tirserie">
+          <g className="ejeT">
+            {marcas.map((m) => (
+              <line key={m.et} x1={m.pos * W} y1="0" x2={m.pos * W} y2={H} />))}
+          </g>
           <line x1="0" y1={y(0)} x2={W} y2={y(0)} />
           <path d={linea} style={{ stroke: color }} />
         </svg>)}
-      {serie.length > 1 && (
+      {serie.length > 1 && (<>
+        <div className="lab-ejeT" style={{ position: "relative", height: 15, marginTop: 3 }}>
+          {marcas.map((m) => (
+            <span key={m.et} style={{ left: `${(m.pos * 100).toFixed(2)}%` }}>{m.et}</span>))}
+        </div>
         <div className="lab-tirejes">
-          <span>{v.serie[0].fecha} · {pct(serie[0], 1)}</span>
+          <span>arranca en {pct(serie[0], 1)}</span>
           <span>máx {pct(mx, 1)} · mín {pct(mn, 1)}</span>
           <span>hoy · {pct(v.tir_pct, 1)}</span>
-        </div>)}
+        </div></>)}
       {ev.tir_anual_pct != null && !v.completa && (
         <div className="pie">
           Desde la primera compra, {num(ev.anos, 1)} años atrás, la misma cuenta da{" "}
