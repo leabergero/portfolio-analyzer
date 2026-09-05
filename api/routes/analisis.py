@@ -69,6 +69,13 @@ def comp(nombre):
     return _simple(nombre, composicion.analizar)
 
 
+@bp.get("/evolucion/<nombre>")
+def evolucion(nombre):
+    """Rendimiento del año (TWR) y variación diaria de las últimas ruedas."""
+    return _simple(nombre, portfolio.evolucion,
+                   request.args.get("ruedas", 30, type=int))
+
+
 @bp.get("/riesgo/<nombre>")
 def riesgo(nombre):
     return _simple(nombre, risk.analizar, request.args.get("benchmark", "SP500"))

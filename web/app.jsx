@@ -33,6 +33,9 @@ const pct = (n, dec = 2) => (n == null ? "—" : Number(n).toFixed(dec) + " %");
 const num = (n, dec = 2) => (n == null ? "—" : Number(n).toFixed(dec));
 const signo = (n) => (n == null ? "" : n > 0 ? "pos" : n < 0 ? "neg" : "");
 
+/* Componentes en evaluación: se ven sólo con ?lab=1 en la URL. */
+const LAB = new URLSearchParams(location.search).has("lab");
+
 /* Lee la paleta del CSS para que los gráficos sigan el tema. */
 function colores() {
   const c = getComputedStyle(document.documentElement);
@@ -391,6 +394,9 @@ function Posicion({ d, cartera, recargar, extras, bench }) {
   const [n, setN] = useState(0);
   useEffect(() => { setReal(null);
     api(`/api/carteras/${encodeURIComponent(cartera)}/realizado`).then(setReal); }, [cartera, n]);
+  const [ev, setEv] = useState(null);
+  useEffect(() => { if (!LAB) return; setEv(null);
+    api(`/api/evolucion/${encodeURIComponent(cartera)}`).then(setEv); }, [cartera]);
   const cerrado = real?.n ? real.total_usd : null;
 
   return (
@@ -413,6 +419,7 @@ function Posicion({ d, cartera, recargar, extras, bench }) {
                tono={signo(d.pnl + cerrado)} sub="abierto + cerrado" />)}
         <Kpi etiqueta="Posiciones" valor={filas.length} sub={`${new Set(filas.map(f=>f.ticker)).size} activos`} />
       </div>
+      {LAB && ev && <KpiYtd ev={ev} />}
       <AltaRapida cartera={cartera} recargar={recargar} />
       {d.sin_precio?.length > 0 && (
         <div className="aviso ojo">
@@ -454,6 +461,8 @@ function Posicion({ d, cartera, recargar, extras, bench }) {
       </div>
 
       {real && <PnlRealizado real={real} cartera={cartera} recargar={() => setN((x) => x + 1)} />}
+
+      {LAB && ev && <RuedasTicker ev={ev} />}
 
       {/* 3 · En qué está invertida */}
       <Seccion titulo="En qué está invertida" />
@@ -1002,6 +1011,255 @@ function Distribucion({ d }) {
   );
 }
 
+/* ═══════════════ Lab ═══════════════
+
+   Componentes en evaluación. Se ven sólo con `?lab=1` en la URL: la web de
+   todos los días queda exactamente igual hasta que decidamos cuáles se quedan.
+   Vienen de la librería UX-UI (DAT-03/16/17, PNL-05, PRG-16), traducidos a los
+   tokens de esta app —ningún color literal, como el resto del archivo—. */
+
+/* Umbrales de riesgo. No salen de ningún cálculo: son la tolerancia que uno
+   decide de antemano, y por eso están acá y no en el backend. */
+const ZONAS = { prudente: 1.5, moderado: 2.5, limite: 3.0, escala: 4.0 };
+
+/* PRG-16 · una pérdida contra las zonas de tolerancia y el límite.
+   La escala se estira si la cartera se pasa: con tope fijo, una cartera
+   volátil clava la aguja en el borde y 4,4 % se ve igual que 6,4 %. */
+function BarraRiesgo({ etiqueta, detalle, pct_, usd_, escala, nota }) {
+  const c = colores();
+  const v = Math.abs(pct_ || 0);
+  const en = (x) => (x / escala) * 100 + "%";
+  const [tono, texto] =
+    v > ZONAS.limite ? ["mal", "excedido"]
+    : v > ZONAS.moderado ? ["ojo", "agresivo"]
+    : v > ZONAS.prudente ? ["ojo", "moderado"] : ["ok", "prudente"];
+  return (
+    <div className="lab-zona">
+      <div className="et">{etiqueta}<s>{detalle}</s></div>
+      <div className="lab-barra" style={{ "--pct": en(Math.min(v, escala)), "--lim": en(ZONAS.limite) }}>
+        <div className="via" style={{ background: `linear-gradient(90deg,${c.positivo} 0 ${en(ZONAS.prudente)},`
+          + `${c.alerta} ${en(ZONAS.prudente)} ${en(ZONAS.moderado)},${c.negativo} ${en(ZONAS.moderado)})` }}>
+          <span className="tope"><s>límite {pct(ZONAS.limite, 1)}</s></span></div>
+        <span className="aguja" />
+        <div className="pies">
+          <span style={{ left: en(ZONAS.prudente / 2) }}>prudente</span>
+          <span style={{ left: en((ZONAS.prudente + ZONAS.moderado) / 2) }}>moderado</span>
+          <span style={{ left: en((ZONAS.moderado + escala) / 2) }}>agresivo</span>
+          <span style={{ left: "100%" }}>{pct(escala, 1)}</span></div>
+      </div>
+      <div className="val">
+        <b className="neg">{pct(-v)}</b>
+        <s>{usd(usd_)} · usa el {Math.round((v / ZONAS.limite) * 100)} % del límite</s>
+        <span className={"chip " + tono} style={{ marginTop: 6, display: "inline-block" }}>{texto}</span>
+        {nota && <s>{nota}</s>}
+      </div>
+    </div>
+  );
+}
+
+function ZonasRiesgo({ d }) {
+  // Una sola escala para las dos barras: si cada una se ajusta a lo suyo, el
+  // CVaR parece menos grave que el VaR justo cuando es peor.
+  const escala = Math.max(ZONAS.escala,
+    Math.ceil(Math.max(Math.abs(d.var95_pct || 0), Math.abs(d.cvar95_pct || 0)) * 1.15));
+  return (
+    <div className="panel">
+      <h3>¿Cuánto margen queda antes del límite?</h3>
+      <BarraRiesgo etiqueta="Día malo" detalle="VaR 95 % · 1 rueda de cada 20" escala={escala}
+                   pct_={d.var95_pct} usd_={d.var95_usd} />
+      <BarraRiesgo etiqueta="Día muy malo" detalle="CVaR 95 % · promedio de ese 5 % peor" escala={escala}
+                   pct_={d.cvar95_pct} usd_={d.cvar95_usd} />
+      <div className="pie">
+        Las zonas y el límite de {pct(ZONAS.limite, 1)} son una política, no un cálculo:
+        es cuánto estás dispuesto a perder en un día, decidido antes de que pase. El VaR dice
+        el piso de ese 5 % de días; el CVaR, lo que se pierde en promedio cuando se cruza
+        —siempre peor, y es el número que importa cuando el día malo llega—.
+      </div>
+    </div>
+  );
+}
+
+/* DAT-17 · treemap por sector: alto de banda = sector, ancho = ticker. Dice de
+   una lo que la dona no: qué papel concreto trae cada sector. */
+function TreemapSectores({ detalle, total }) {
+  const c = colores();
+  const sectores = {};
+  (detalle || []).forEach((x) => {
+    if (!x.valor_usd) return;
+    const k = x.sector || "Sin sector";
+    (sectores[k] = sectores[k] || { valor: 0, items: [] });
+    sectores[k].valor += x.valor_usd;
+    sectores[k].items.push(x);
+  });
+  const orden = Object.entries(sectores).sort((a, b) => b[1].valor - a[1].valor);
+  const suma = orden.reduce((a, [, s]) => a + s.valor, 0) || 1;
+  if (!orden.length) return <div className="cargando">Sin sectores clasificados.</div>;
+
+  return (
+    <>
+      <div className="lab-tree">
+        {orden.map(([nombre, s], i) => (
+          <div className={"sec" + (s.valor / suma < 0.09 ? " bajo" : "")}
+               key={nombre} style={{ flex: s.valor }}>
+            {s.items.sort((a, b) => b.valor_usd - a.valor_usd).map((x) => {
+              const w = (x.valor_usd / suma) * 100;
+              return (
+                <i key={x.ticker} className={w < 5 ? "chico" : ""}
+                   style={{ flex: x.valor_usd, background: c.series[i % c.series.length] }}
+                   title={`${x.ticker} · ${nombre} · ${usd(x.valor_usd)}`}>
+                  {x.ticker}<s>{pct(w, 1)}</s>
+                </i>);
+            })}
+          </div>))}
+      </div>
+      <div className="lab-tree-lg">
+        {orden.map(([nombre, s], i) => (
+          <span key={nombre}>
+            <u style={{ background: c.series[i % c.series.length] }} />
+            {nombre} {pct((s.valor / suma) * 100, 1)}
+          </span>))}
+      </div>
+    </>
+  );
+}
+
+/* DAT-16 · bullet: peso de hoy contra el objetivo, con el monto a operar. */
+function BulletPesos({ filas, nota }) {
+  const c = colores();
+  const tope = Math.max(...filas.flatMap((f) => [f.hoy, f.objetivo]), 1) * 1.12;
+  return (
+    <>
+      {filas.map((f) => {
+        const compra = f.monto > 0;
+        const mueve = Math.abs(f.hoy - f.objetivo) > 0.05;
+        return (
+          <div className="lab-bullet" key={f.nombre}>
+            <span className="mono">{f.nombre}</span>
+            <div className="via">
+              <span className="hoy" style={{ width: (f.hoy / tope) * 100 + "%",
+                background: mueve ? (compra ? c.positivo : c.negativo) : c.texto3 }} />
+              <span className="obj" style={{ left: (f.objetivo / tope) * 100 + "%" }} />
+            </div>
+            <span className={"monto " + (mueve ? signo(f.monto) : "")}>
+              {mueve ? (compra ? "comprar " : "vender ") + usd(Math.abs(f.monto)) : "—"}
+            </span>
+          </div>);
+      })}
+      <div className="pie">
+        Barra = peso de hoy, línea blanca = peso objetivo. Verde si hay que comprar,
+        rojo si hay que vender. {nota}
+      </div>
+    </>
+  );
+}
+
+/* PNL-05 · rendimiento del año, con su curva y el menú de acciones. */
+function KpiYtd({ ev }) {
+  const [abierto, setAbierto] = useState(false);
+  const c = colores();
+  useEffect(() => {
+    if (!abierto) return;
+    const cerrar = () => setAbierto(false);
+    document.addEventListener("click", cerrar);
+    return () => document.removeEventListener("click", cerrar);
+  }, [abierto]);
+  if (!ev || ev.error) return null;
+
+  const delta = ev.ytd_pct - ev.ytd_mes_anterior_pct;
+  const serie = ev.indice || [];
+  const mn = Math.min(...serie), mx = Math.max(...serie), rango = mx - mn || 1;
+  const y = (v) => 30 - 4 - ((v - mn) / rango) * 22;
+  const linea = serie.map((v, i) => (i ? "L" : "M") +
+    ((i / (serie.length - 1)) * 300).toFixed(1) + "," + y(v).toFixed(1)).join(" ");
+  const color = ev.ytd_pct >= 0 ? c.positivo : c.negativo;
+
+  return (
+    <div className="panel" style={{ position: "relative" }}>
+      <h3>Rendimiento del año
+        <button className="btn" style={{ marginLeft: "auto", padding: "2px 9px" }}
+                onClick={(e) => { e.stopPropagation(); setAbierto((x) => !x); }}>⋯</button>
+      </h3>
+      {abierto && (
+        <div style={{ position: "absolute", right: 16, top: 46, background: "var(--panel)",
+                      border: "1px solid var(--borde)", borderRadius: 8, padding: 4,
+                      boxShadow: "var(--sombra)", zIndex: 9 }}>
+          {["Ver detalle por posición", "Comparar con el benchmark", "Exportar CSV"].map((t) => (
+            <div key={t} className="pie" style={{ margin: 0, padding: "7px 11px", cursor: "pointer" }}>{t}</div>))}
+        </div>)}
+      <div style={{ fontSize: 30, fontWeight: 700, marginTop: 6 }}
+           className={signo(ev.ytd_pct)}>{pct(ev.ytd_pct)}</div>
+      <div className="pie" style={{ marginTop: 4 }}>
+        <span className={signo(delta)}>{delta >= 0 ? "▲" : "▼"} {num(Math.abs(delta))} pts</span>
+        {" "}desde el cierre del mes pasado · desde el {ev.desde}
+      </div>
+      <svg viewBox="0 0 300 30" preserveAspectRatio="none"
+           style={{ width: "100%", height: 34, marginTop: 10, display: "block" }}>
+        <line x1="0" y1={y(100)} x2="300" y2={y(100)} stroke={c.borde} strokeWidth="1"
+              strokeDasharray="3 3" />
+        <path d={linea} fill="none" stroke={color} strokeWidth="1.8" strokeLinejoin="round" />
+      </svg>
+      <div className="pie">
+        Time-weighted: cada rueda se encadena descontando el aporte de ese día. Sin eso,
+        poner plata nueva parecería ganancia. La línea punteada es el arranque del año.
+      </div>
+    </div>
+  );
+}
+
+/* DAT-03 · una fila por ticker, una columna por rueda. */
+function RuedasTicker({ ev }) {
+  const [abierto, setAbierto] = useState(false);
+  const c = colores();
+  if (!ev || ev.error || !ev.ruedas?.tickers?.length) return null;
+  const { fechas, tickers } = ev.ruedas;
+  const cols = { gridTemplateColumns: `repeat(${fechas.length},1fr)` };
+  // Satura en ±3 %: más allá, todos los días extremos se ven igual y el mapa
+  // deja de distinguir un día feo de uno histórico.
+  const tono = (v) => {
+    if (Math.abs(v) < 0.05) return "var(--panel-2)";
+    const m = 18 + Math.min(1, Math.abs(v) / 3) * 82;
+    return `color-mix(in srgb, ${v > 0 ? c.positivo : c.negativo} ${m.toFixed(0)}%, var(--panel-2))`;
+  };
+  return (
+    <div className="panel">
+      <h3>Las últimas {fechas.length} ruedas, ticker por ticker
+        <button className="btn" style={{ marginLeft: "auto" }}
+                onClick={() => setAbierto((x) => !x)}>
+          {abierto ? "Ocultar" : "Mostrar"}</button>
+      </h3>
+      {abierto && (<>
+        <div className="lab-ruedas">
+          {tickers.map((t) => (
+            <React.Fragment key={t.ticker}>
+              <span className="tk mono">{t.ticker}</span>
+              <div className="dias" style={cols}>
+                {t.var_pct.map((v, i) => (
+                  <i key={i} style={{ background: tono(v) }}
+                     title={`${t.ticker} · ${fechas[i]} · ${pct(v)}`} />))}
+              </div>
+              <span className={"acum mono " + signo(t.acum_pct)}>{pct(t.acum_pct, 1)}</span>
+            </React.Fragment>))}
+          <span />
+          <div className="eje" style={cols}>
+            {fechas.map((f, i) => (
+              <span key={f}>{i % 5 === 0 ? f.slice(8) + "/" + f.slice(5, 7) : ""}</span>))}
+          </div>
+          <span />
+        </div>
+        <div className="lab-escala">−3 %
+          <i style={{ background: tono(-3) }} /><i style={{ background: tono(-1.2) }} />
+          <i style={{ background: "var(--panel-2)" }} />
+          <i style={{ background: tono(1.2) }} /><i style={{ background: tono(3) }} />
+          +3 %
+          <span style={{ marginLeft: "auto" }}>
+            Última columna: acumulado de las {fechas.length} ruedas.
+          </span>
+        </div>
+      </>)}
+    </div>
+  );
+}
+
 /* ── Composición ── */
 function Composicion({ d }) {
   const c = colores();
@@ -1019,6 +1277,13 @@ function Composicion({ d }) {
     <>
       <div className="fila f3">
         {cortes.map(([k, t]) => {
+          // El corte por sector pasa a treemap: la dona dice cuánto pesa cada
+          // sector, pero no qué papel lo trae.
+          if (LAB && k === "por_sector") return (
+            <div className="panel" key={k}>
+              <h3>{t}</h3>
+              <TreemapSectores detalle={d.detalle} />
+            </div>);
           const g = dona(d[k] || [], t);
           return (
             <div className="panel" key={k}>
@@ -1058,6 +1323,7 @@ function Riesgo({ d, cartera, extras }) {
   return (
     <>
       <KpisRiesgo d={d} />
+      {LAB && <ZonasRiesgo d={d} />}
       <Seccion titulo="¿Cuándo se disparó el riesgo?" />
       <RiesgoEvolucion cartera={cartera} />
       <Seccion titulo="El riesgo de cada activo por separado" />
@@ -1453,6 +1719,14 @@ function RiesgoLimite({ cartera, d }) {
             </div>
           </div>
 
+          {LAB && (
+            <div className="panel">
+              <h3>Cuánto se corre cada peso</h3>
+              <BulletPesos nota="El objetivo es el peso que cumple el límite pedido."
+                filas={r.ordenes.map((o) => ({ nombre: o.ticker, hoy: o.peso_actual_pct,
+                                               objetivo: o.peso_nuevo_pct, monto: o.monto_usd }))} />
+            </div>)}
+
           <div className="panel">
             <h3>Órdenes</h3>
             <div className="tabla-wrap"><table>
@@ -1581,6 +1855,10 @@ function Markowitz({ d, cartera, bench, extras }) {
             Destino: {pct(destino.ret_pct)} de retorno con {pct(destino.vol_pct)} de
             volatilidad — Sharpe {num(destino.sharpe, 3)}.
           </div>
+          {LAB && (acciones || []).length > 0 && (
+            <BulletPesos nota="El objetivo es la cartera óptima del modelo elegido arriba."
+              filas={acciones.map((a) => ({ nombre: a.ticker, hoy: a.peso_actual_pct,
+                                            objetivo: a.peso_objetivo_pct, monto: a.delta_usd }))} />)}
           <div className="tabla-wrap"><table>
             <thead><tr><th>Ticker</th><th className="n">Hoy</th><th className="n">Objetivo</th>
                        <th className="n">Diferencia</th><th className="c">Acción</th></tr></thead>
@@ -2436,6 +2714,10 @@ function BlackLitterman({ bl, actual }) {
 
           <div className="panel">
             <h3>Qué operar</h3>
+            {LAB && acc.length > 0 && (
+              <BulletPesos nota="El objetivo es el peso posterior, ya con tus views incorporadas."
+                filas={acc.map((a) => ({ nombre: a.ticker, hoy: a.peso_actual_pct,
+                                         objetivo: a.peso_bl_pct, monto: a.delta_usd }))} />)}
             <div className="tabla-wrap"><table>
               <thead><tr><th>Ticker</th><th className="n">Hoy</th><th className="n">Sugerido</th>
                 <th className="n">Monto</th><th className="n">Retorno esperado</th>

@@ -103,6 +103,12 @@ def _de_cocos(ticker: str, desde: str, hasta: str) -> pd.DataFrame:
 
 # ── Ruteo ─────────────────────────────────────────────────────────────────────
 
+# Cuánto se espera antes de volver a preguntar por un ticker que no devolvió
+# nada. Un papel recién listado tarda a lo sumo eso en aparecer; `refrescar=True`
+# no pasa por acá.
+TTL_SIN_SERIE_H = 6.0
+
+
 def precios(ticker: str, desde: str = None, hasta: str = None,
             source: str = None, refrescar: bool = False) -> pd.DataFrame:
     """Serie histórica del ticker, en su moneda de cotización.
@@ -119,14 +125,22 @@ def precios(ticker: str, desde: str = None, hasta: str = None,
         cacheado = cache.leer_precios(ticker, desde, hasta)
         if _suficiente(cacheado, hasta):
             return cacheado
+        # Un ticker que ya dio vacío no se vuelve a preguntar por unas horas.
+        # Sin esto, cada panel reintenta yfinance y BYMA por los mismos tickers
+        # muertos —un FCI, un CEDEAR de otra plaza— y paga ~9 segundos por cada
+        # uno, en cada pedido. Es la espera más cara de la app y no aporta nada.
+        if cache.leer_respuesta(f"sin-serie:{ticker}", TTL_SIN_SERIE_H) is True:
+            return pd.DataFrame()
 
     usar_cocos = source == "cocos" or (source is None and is_cocos_only(ticker))
     fuentes = [_de_cocos] if usar_cocos else [_de_yfinance, _de_byma]
 
+    fallo_red = False
     for fn in fuentes:
         try:
             df = fn(ticker, desde, hasta)
         except Exception as e:
+            fallo_red = True
             print(f"  [precios] {ticker}: {fn.__name__} falló — {e}")
             continue
         if df is not None and not df.empty and "Close" in df.columns:
@@ -137,7 +151,13 @@ def precios(ticker: str, desde: str = None, hasta: str = None,
     cacheado = cache.leer_precios(ticker, desde, hasta)
     if not cacheado.empty or usar_cocos:
         return cacheado
-    return _spot_yfinance(ticker)
+    spot = _spot_yfinance(ticker)
+    # Solo se anota como muerto el que contestó y no tenía nada. Si la fuente
+    # se cayó, el ticker puede estar perfecto y silenciarlo por horas sería
+    # peor que reintentar.
+    if spot.empty and not fallo_red:
+        cache.guardar_respuesta(f"sin-serie:{ticker}", True)
+    return spot
 
 
 def _spot_yfinance(ticker: str, ttl_horas: float = 1.0) -> pd.DataFrame:

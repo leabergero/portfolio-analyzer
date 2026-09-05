@@ -303,3 +303,86 @@ def correlaciones(posiciones, ventana: int = 252) -> dict:
             min(pares, key=lambda x: x[2])) if pares else None,
         "ventana_ruedas": len(reciente),
     }
+
+
+def evolucion(posiciones, n_ruedas: int = 30) -> dict:
+    """Cómo se movió la cartera en el tiempo: rendimiento del año y últimas ruedas.
+
+    El rendimiento del año es **TWR**: encadena el retorno de cada rueda
+    descontando el aporte de ese día. Un aporte no es ganancia — sin descontarlo
+    la curva salta cada vez que entra plata, que es justo lo que no se quiere
+    medir. Es la diferencia entre "cuánto rindió" y "cuánto creció".
+
+    Las ruedas son la variación diaria de cada ticker, ordenados por peso, para
+    ver de un vistazo qué se movió y cuándo.
+    """
+    series = {}
+    for p in posiciones:
+        t = str(p["ticker"]).upper()
+        if t in series:
+            continue
+        s = sources.precios_usd(t, source=p.get("source") or None)
+        if not s.empty:
+            series[t] = s
+    if not series:
+        return {"error": "Sin series de precios para esta cartera."}
+
+    px = pd.DataFrame(series).sort_index().ffill().dropna(how="all")
+    if len(px) < 2:
+        return {"error": "Hacen falta al menos dos ruedas."}
+
+    precios = {t: float(s.iloc[-1]) for t, s in series.items()}
+    lotes = valuar(posiciones, precios)["posiciones"]
+
+    # El año arranca en el último cierre de diciembre: sin ese punto de partida
+    # el primer día del año sería un retorno contra la nada.
+    ano = px.index[-1].year
+    previas = px.index[px.index < pd.Timestamp(f"{ano}-01-01")]
+    px = px.loc[previas[-1]:] if len(previas) else px
+
+    cant = pd.DataFrame(0.0, index=px.index, columns=px.columns)
+    flujo = pd.Series(0.0, index=px.index)
+    for l in lotes:
+        t = l["ticker"]
+        if t not in cant.columns or l["costo_usd"] is None or not l["buy_date"]:
+            continue
+        compra = pd.Timestamp(l["buy_date"])
+        cant.loc[cant.index >= compra, t] += l["qty"]
+        # Solo cuenta como aporte lo comprado dentro de la ventana: un lote de
+        # 2024 ya está en el capital inicial, no es plata que entró este año.
+        if compra >= px.index[0]:
+            futuras = px.index[px.index >= compra]
+            if len(futuras):
+                flujo.loc[futuras[0]] += l["costo_usd"]
+
+    valor = (cant * px).sum(axis=1)
+    anterior = valor.shift(1)
+    r = ((valor - flujo) / anterior - 1).iloc[1:]
+    r = r.replace([np.inf, -np.inf], 0.0).fillna(0.0)
+    indice = (1.0 + r).cumprod() * 100.0
+
+    # Referencia para el "vs. mes anterior": el índice al último cierre del mes pasado.
+    mes = px.index[-1].to_period("M")
+    previos = indice.index[indice.index.to_period("M") < mes]
+    ref = float(indice.loc[previos[-1]]) if len(previos) else 100.0
+
+    ult = px.tail(n_ruedas + 1)
+    var = ult.pct_change().iloc[1:] * 100.0
+    orden = sorted(px.columns, key=lambda t: -(cant[t].iloc[-1] * precios.get(t, 0)))
+
+    return {
+        "ytd_pct": round(float(indice.iloc[-1]) - 100.0, 2),
+        "ytd_mes_anterior_pct": round(ref - 100.0, 2),
+        "desde": str(px.index[0].date()),
+        "indice": [round(float(v), 3) for v in indice],
+        "valor_usd": [round(float(v), 2) for v in valor.iloc[1:]],
+        "fechas": [str(f.date()) for f in indice.index],
+        "ruedas": {
+            "fechas": [str(f.date()) for f in var.index],
+            "tickers": [{
+                "ticker": t,
+                "var_pct": [round(float(v), 2) for v in var[t]],
+                "acum_pct": round((float(ult[t].iloc[-1]) / float(ult[t].iloc[0]) - 1) * 100, 2),
+            } for t in orden if t in var.columns],
+        },
+    }
