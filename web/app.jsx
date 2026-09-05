@@ -172,6 +172,10 @@ const AYUDA = {
 function Barra({ modo, setModo, tema, setTema, carteras, cartera, setCartera }) {
   const iconos = { auto: "◐", light: "☀", dark: "☾" };
   const siguiente = { auto: "light", light: "dark", dark: "auto" };
+  // El switch es binario y el tema tiene tres estados: "auto" se resuelve
+  // mirando qué prefiere el sistema, y queda un enlace para volver a él.
+  const sistemaOscuro = window.matchMedia?.("(prefers-color-scheme: dark)").matches;
+  const esOscuro = tema === "dark" || (tema === "auto" && sistemaOscuro);
   return (
     <div className="barra">
       <div className="marca">Portfolio <span>Analyzer</span></div>
@@ -190,8 +194,18 @@ function Barra({ modo, setModo, tema, setTema, carteras, cartera, setCartera }) 
         </select>
       )}
       <div className="der">
-        <button className="btn tema" title={`Tema: ${tema}`}
-                onClick={() => setTema(siguiente[tema])}>{iconos[tema]}</button>
+        {LAB ? (<>
+          {tema !== "auto" && (
+            <button className="btn auto" onClick={() => setTema("auto")}
+                    title="Seguir el tema del sistema">auto</button>)}
+          <label className="lab-dianoche" title={esOscuro ? "Pasar a claro" : "Pasar a oscuro"}>
+            <input type="checkbox" checked={!esOscuro} aria-label="Tema claro"
+                   onChange={() => setTema(esOscuro ? "light" : "dark")} />
+            <span className="g"><span className="estrellas" /></span>
+          </label>
+        </>) : (
+          <button className="btn tema" title={`Tema: ${tema}`}
+                  onClick={() => setTema(siguiente[tema])}>{iconos[tema]}</button>)}
       </div>
     </div>
   );
