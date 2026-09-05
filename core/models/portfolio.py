@@ -325,11 +325,21 @@ def tir(movimientos) -> float:
     def vpn(r):
         return sum(m / (1.0 + r) ** ((f - t0).days / 365.25) for f, m in movimientos)
 
-    bajo, alto = -0.95, 10.0
-    if (vpn(bajo) > 0) == (vpn(alto) > 0):
+    # Una cartera que compra y vende muchas veces alterna signos, y ahí el VPN
+    # puede cruzar el cero más de una vez: mirar solo los extremos del intervalo
+    # devuelve una raíz cualquiera, o ninguna cuando las hay. Se barre la grilla,
+    # se toma el primer cruce —la tasa más baja, la lectura conservadora— y se
+    # afina ahí.
+    grilla = np.linspace(-0.95, 10.0, 400)
+    valores = [vpn(r) for r in grilla]
+    cruces = [i for i in range(len(grilla) - 1)
+              if (valores[i] > 0) != (valores[i + 1] > 0)]
+    if not cruces:
         return None
+
+    bajo, alto = grilla[cruces[0]], grilla[cruces[0] + 1]
     creciente = vpn(bajo) < vpn(alto)
-    for _ in range(200):
+    for _ in range(80):
         medio = (bajo + alto) / 2
         if (vpn(medio) > 0) == creciente:
             alto = medio
@@ -469,22 +479,40 @@ def evolucion(posiciones, trades=None, n_ruedas: int = 30) -> dict:
     movimientos.append((hoy, float(tenencias.iloc[-1] + caja.iloc[-1])))
     anos = (hoy - px.index[0]).days / 365.25
 
-    abiertos = [(l["buy_date"], -l["costo_usd"]) for l in lotes
-                if l["costo_usd"] is not None and l["valor_usd"] is not None and l["buy_date"]]
-    valor_abierto = sum(l["valor_usd"] for l in lotes if l["valor_usd"] is not None)
-    costo_abierto = sum(-m for _, m in abiertos)
-    anos_cartera = ((hoy - pd.Timestamp(min(f for f, _ in abiertos))).days / 365.25
-                    if abiertos else 0.0)
+    def ventana(meses):
+        """TIR de los últimos N meses, mirando la cartera como una sola inversión.
+
+        Arranca con lo que ya valía la cartera ese día —el punto de partida, no
+        un aporte—, suma lo que entró y restó lo que salió durante el período, y
+        cierra con lo que vale hoy: las posiciones abiertas a precio de mercado
+        más los dividendos cobrados en la ventana. Por eso se mueve todos los
+        días: si mañana sube un papel pesado, el no realizado cambia y la tasa
+        con él.
+        """
+        desde = hoy - pd.DateOffset(months=meses)
+        dentro = px.index[px.index >= desde]
+        if len(dentro) < 2:
+            return None
+        ini = dentro[0]
+        mov = [(ini, -float(tenencias.loc[ini]))]
+        mov += [(f, -float(v)) for f, v in flujo.loc[dentro[1]:].items()]
+        cobrado = float(caja.iloc[-1] - caja.loc[ini])
+        mov.append((hoy, float(tenencias.iloc[-1]) + cobrado))
+        anual = (hoy - ini).days / 365.25
+        return {"tir_pct": tir(mov) if anual >= 0.25 else None,
+                "anos": round(anual, 2),
+                "desde": str(ini.date()),
+                "valor_inicial_usd": round(float(tenencias.loc[ini]), 2),
+                "aportado_usd": round(float(flujo.loc[dentro[1]:].clip(lower=0).sum()), 2),
+                "retirado_usd": round(float(-flujo.loc[dentro[1]:].clip(upper=0).sum()), 2),
+                "dividendos_usd": round(cobrado, 2),
+                "completa": ini <= px.index[0]}
 
     return {
         # Anualizar menos de un trimestre da un número que no significa nada.
         "tir_anual_pct": tir(movimientos) if anos >= 0.25 else None,
         "anos": round(anos, 2),
-        "tir_cartera_pct": (tir(abiertos + [(hoy, valor_abierto)])
-                            if anos_cartera >= 0.25 else None),
-        "cartera_costo_usd": round(costo_abierto, 2),
-        "cartera_valor_usd": round(valor_abierto, 2),
-        "cartera_anos": round(anos_cartera, 2),
+        "ultimos_12m": ventana(12),
         # Lo que ganó o perdió sobre la plata que salió del bolsillo: el mismo
         # número que suman los KPIs de arriba (abierto + realizado).
         "resultado_usd": round(final, 2),

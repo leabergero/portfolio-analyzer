@@ -1170,6 +1170,7 @@ function RendimientoTotal({ ev }) {
   if (!ev || ev.error) return null;
 
   const delta = ev.resultado_usd - ev.resultado_mes_anterior_usd;
+  const v12 = ev.ultimos_12m;
   const serie = ev.resultado_serie || [];
   const mn = Math.min(...serie, 0), mx = Math.max(...serie, 0), rango = mx - mn || 1;
   const y = (v) => 34 - 4 - ((v - mn) / rango) * 26;
@@ -1194,20 +1195,24 @@ function RendimientoTotal({ ev }) {
            className={signo(ev.resultado_usd)}>{pct(ev.rendimiento_pct)}</div>
       <div style={{ fontSize: 15, marginTop: 2 }} className={signo(ev.resultado_usd)}>
         {usd(ev.resultado_usd)} sobre {usd(ev.puesto_neto_usd)} puestos de tu bolsillo</div>
-      {(ev.tir_cartera_pct != null || ev.tir_anual_pct != null) && (
+      {(v12?.tir_pct != null || ev.tir_anual_pct != null) && (
         <div className="lab-tir">
-          {ev.tir_cartera_pct != null && (
+          {v12?.tir_pct != null && (<>
             <div className="foco">
-              <s>lo que tenés hoy rinde</s>
-              <b className={signo(ev.tir_cartera_pct)}>{pct(ev.tir_cartera_pct)} anual</b>
-              <s>{usd(ev.cartera_valor_usd)} sobre {usd(ev.cartera_costo_usd)} de costo,
-                 en {num(ev.cartera_anos, 1)} años</s>
-            </div>)}
+              <s>{v12.completa ? `desde el ${v12.desde}` : "últimos 12 meses"} · TIR</s>
+              <b className={signo(v12.tir_pct)}>{pct(v12.tir_pct)} anual</b>
+            </div>
+            <div className="detalle">
+              arrancó valiendo {usd(v12.valor_inicial_usd)}
+              {v12.aportado_usd > 0 && ` · pusiste ${usd(v12.aportado_usd)}`}
+              {v12.retirado_usd > 0 && ` · sacaste ${usd(v12.retirado_usd)}`}
+              {v12.dividendos_usd > 0 && ` · cobraste ${usd(v12.dividendos_usd)} de dividendos`}
+              {" · hoy vale "}{usd(ev.valor_hoy_usd)}
+            </div></>)}
           {ev.tir_anual_pct != null && (
             <div className="tenue">
-              <s>toda tu historia en esta cartera</s>
+              <s>desde la primera compra, {num(ev.anos, 1)} años</s>
               <b className={signo(ev.tir_anual_pct)}>{pct(ev.tir_anual_pct)} anual</b>
-              <s>{num(ev.anos, 1)} años, con lo cerrado adentro</s>
             </div>)}
         </div>)}
       <div className="pie" style={{ marginTop: 8 }}>
@@ -1231,13 +1236,13 @@ function RendimientoTotal({ ev }) {
         posiciones que ya cerraste y los dividendos cobrados. En dólares y no en porcentaje
         porque un porcentaje sobre capital variable cae de golpe el día que ponés plata
         nueva, sin que haya pasado nada en el mercado. La línea punteada es el cero.
-        {ev.tir_cartera_pct != null && (
-          <> Las dos tasas de abajo son TIR: a cuánto habría que colocar cada peso, el día
-          que entró, para llegar a lo de hoy. La primera mira <b>solo lo que sigue abierto</b>,
-          así que es la que se compara contra un plazo fijo antes de decidir si conviene
-          seguir; la segunda arrastra todo lo que pasó por la cartera, aciertos y errores ya
-          liquidados. Los dividendos quedan fuera de la primera: no se sabe cuáles
-          corresponden a posiciones que todavía tenés.</>)}
+        {v12?.tir_pct != null && (
+          <> La <b>TIR de los últimos 12 meses</b> toma lo que la cartera valía ese día como
+          punto de partida, suma lo que entró y resta lo que salió, y cierra con lo que vale
+          hoy: las posiciones abiertas a precio de mercado, lo que dejaron las que cerraste
+          dentro del período y los dividendos cobrados. Se mueve todos los días — si mañana
+          sube un papel pesado, cambia el no realizado y la tasa con él. Es la que se compara
+          contra un plazo fijo. La de abajo es la misma cuenta desde la primera compra.</>)}
       </div>
     </div>
   );
