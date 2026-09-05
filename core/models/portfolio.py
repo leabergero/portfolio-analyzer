@@ -421,7 +421,40 @@ def evolucion(posiciones, trades=None, n_ruedas: int = 30) -> dict:
 
     neto = float(puesto.iloc[-1])
     final = float(resultado.iloc[-1])
+
+    # ── TIR anual (money-weighted) ────────────────────────────────────────────
+    # Responde otra pregunta que el rendimiento total: a qué tasa anual habría
+    # que colocar cada aporte, el día que entró, para llegar al valor de hoy. Es
+    # el número comparable contra un plazo fijo o una letra, que el acumulado no
+    # puede dar porque no sabe cuánto tiempo estuvo cada peso adentro.
+    movimientos = [(f, -float(v)) for f, v in flujo.items() if abs(v) > 1e-9]
+    inicial = float(tenencias.iloc[0]) - float(flujo.iloc[0])
+    if inicial > 1e-9:                       # tenencia previa a la ventana
+        movimientos.insert(0, (px.index[0], -inicial))
+    movimientos.append((px.index[-1], float(tenencias.iloc[-1] + caja.iloc[-1])))
+
+    anos = (px.index[-1] - px.index[0]).days / 365.25
+    tir = None
+    if anos >= 0.25 and any(m < 0 for _, m in movimientos) and any(m > 0 for _, m in movimientos):
+        t0 = movimientos[0][0]
+        def _vpn(r):
+            return sum(m / (1.0 + r) ** ((f - t0).days / 365.25) for f, m in movimientos)
+        # Bisección y no Newton: acá una derivada mal condicionada manda la tasa
+        # al infinito, y este intervalo cubre desde perderlo casi todo hasta
+        # multiplicar por diez en un año.
+        bajo, alto = -0.95, 10.0
+        if _vpn(bajo) > 0 > _vpn(alto) or _vpn(bajo) < 0 < _vpn(alto):
+            for _ in range(200):
+                medio = (bajo + alto) / 2
+                if _vpn(medio) > 0:
+                    bajo = medio
+                else:
+                    alto = medio
+            tir = round((bajo + alto) / 2 * 100, 2)
+
     return {
+        "tir_anual_pct": tir,
+        "anos": round(anos, 2),
         # Lo que ganó o perdió sobre la plata que salió del bolsillo: el mismo
         # número que suman los KPIs de arriba (abierto + realizado).
         "resultado_usd": round(final, 2),
