@@ -63,13 +63,19 @@ def max_sharpe_weights(mu, covarianza, rf: float = 0.04, cap: float = None) -> n
     return r.x if r.success else np.ones(n) / n
 
 
-def frontera(mu, covarianza, puntos: int = 40, cap: float = None) -> list:
-    """Frontera eficiente analítica: mínima varianza para cada retorno objetivo.
+def frontera(mu, covarianza, puntos: int = 40, cap: float = None,
+             ineficiente: bool = False) -> list:
+    """Frontera analítica: mínima varianza para cada retorno objetivo.
 
     Se barre **desde el retorno de mínima varianza hacia arriba**. Barrer desde
     el mínimo de μ arrastra la rama ineficiente —a volatilidad baja, retornos muy
     negativos— y la curva zigzaguea. Era el bug que hacía que el gráfico "se
     viera raro".
+
+    `ineficiente=True` devuelve justamente esa rama de abajo, por separado: no
+    es una cartera que uno elegiría —para cada una de ellas hay otra con el
+    mismo riesgo y más retorno— pero dibujarla cierra la bala y deja ver dónde
+    empieza lo que sí conviene.
     """
     mu = np.asarray(mu, dtype=float)
     cov = np.asarray(covarianza, dtype=float)
@@ -77,8 +83,10 @@ def frontera(mu, covarianza, puntos: int = 40, cap: float = None) -> list:
 
     w_min = min_variance_weights(cov, cap)
     ret_min = float(w_min @ mu)
+    tramo = (np.linspace(float(mu.min()), ret_min, puntos) if ineficiente
+             else np.linspace(ret_min, float(mu.max()), puntos))
     salida = []
-    for objetivo in np.linspace(ret_min, float(mu.max()), puntos):
+    for objetivo in tramo:
         cons = (
             {"type": "eq", "fun": lambda w: w.sum() - 1.0},
             {"type": "eq", "fun": lambda w, o=objetivo: float(w @ mu) - o},
@@ -200,6 +208,13 @@ def optimizar(posiciones, benchmark: str = "SP500", cap: float = None) -> dict:
         "rf": round(rf, 4), "rf_label": rf_label, "benchmark": benchmark,
         "cap": cap,
         "frontera": frontera(mu, cov, cap=cap),
+        # La rama de abajo y cada activo suelto: con los dos, el gráfico se lee
+        # sin la nube de carteras al azar —queda claro de dónde sale la curva—.
+        "frontera_ineficiente": frontera(mu, cov, cap=cap, ineficiente=True),
+        "activos": [{"ticker": t,
+                     "ret_pct": round(float(mu[i]) * 100, 3),
+                     "vol_pct": round(float(np.sqrt(cov[i, i])) * 100, 3)}
+                    for i, t in enumerate(tickers)],
         "nube": nube_factible(mu, cov, rf),
         "actual": punto(w_actual),
         "max_sharpe": punto(w_sharpe),

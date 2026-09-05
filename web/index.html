@@ -242,6 +242,34 @@ footer a:hover{text-decoration:underline}
 .lab-tree i.chico{font-size:10px}.lab-tree i.chico s{font-size:9px}
 .lab-tree .cajas.bajo i{flex-direction:row;gap:6px;font-size:10.5px}
 .lab-tree .cajas.bajo i s{font-size:10px}
+.lab-front{width:100%;height:auto;display:block;overflow:visible;margin-top:4px}
+.lab-fhd{display:flex;align-items:baseline;gap:16px;flex-wrap:wrap;font-size:11px;
+         color:var(--texto-3);margin-top:6px}
+.lab-fhd span:first-child{flex:1;text-transform:uppercase;letter-spacing:.1em}
+.lab-fhd b{color:var(--texto-2);font-weight:600}
+.lab-front .malla line{stroke:var(--borde-suave);stroke-width:1}
+.lab-front .cero{stroke:var(--borde);stroke-width:1.4}
+.lab-front .eficiente{fill:none;stroke:var(--acento);stroke-width:2.4;stroke-linecap:round;
+  stroke-linejoin:round}
+.lab-front .ineficiente{fill:none;stroke:var(--texto-3);stroke-width:1.6;stroke-dasharray:3 3;
+  opacity:.7}
+.lab-front .cal{fill:none;stroke:var(--alerta);stroke-width:1.5;stroke-dasharray:5 4;opacity:.85}
+.lab-front .activo circle{fill:var(--panel);stroke:var(--texto-3);stroke-width:1.6;cursor:crosshair}
+.lab-front .activo text{font-size:9.5px;fill:var(--texto-3);pointer-events:none}
+.lab-front .activo:hover circle{stroke:var(--texto);r:6}
+.lab-front .marca circle{stroke:var(--panel);stroke-width:2;cursor:crosshair;transition:r .15s}
+.lab-front .marca:hover circle{r:8.5}
+.lab-front .ejes text{font-size:10px;fill:var(--texto-3)}
+.lab-front .ejes .ttl{font-size:8.5px;letter-spacing:.2em;fill:var(--texto-3)}
+.lab-flg{display:flex;flex-wrap:wrap;gap:13px;margin-top:10px;font-size:11px;color:var(--texto-3)}
+.lab-flg span{display:flex;align-items:center;gap:6px}
+.lab-flg u{width:12px;height:3px;text-decoration:none;flex:none}
+.lab-flg u.ueff{background:var(--acento);height:3px;border-radius:2px}
+.lab-flg u.uine{background:repeating-linear-gradient(90deg,var(--texto-3) 0 3px,transparent 3px 6px)}
+.lab-flg u.ucal{background:repeating-linear-gradient(90deg,var(--alerta) 0 4px,transparent 4px 7px)}
+.lab-flg u.uact{width:9px;height:9px;border-radius:50%;background:var(--panel);
+                box-shadow:inset 0 0 0 1.6px var(--texto-3)}
+
 .lab-radar{width:100%;max-width:430px;height:auto;display:block;margin:6px auto 0;overflow:visible}
 .lab-radar .malla polygon,.lab-radar .malla line{fill:none;stroke:var(--borde);stroke-width:1}
 .lab-radar .forma{fill-opacity:.10;stroke-width:2;stroke-linejoin:round}

@@ -1220,6 +1220,114 @@ function RendimientoTotal({ ev }) {
   );
 }
 
+/* DAT-21 · la frontera dibujada a mano, sin la nube de carteras al azar: con la
+   rama ineficiente y cada activo suelto se entiende de dónde sale la curva, y
+   además aparece la CAL —la recta desde la tasa libre por la cartera tangente—,
+   que es lo que convierte el gráfico en una decisión y no en una foto. */
+function FronteraEficiente({ d }) {
+  const c = colores();
+  const eff = d.frontera || [];
+  const ine = d.frontera_ineficiente || [];
+  const activos = d.activos || [];
+  const rf = (d.rf || 0) * 100;
+  const P = [
+    ["Tu cartera", d.actual, c.marcaActual, "act"],
+    ["Mínima varianza", d.min_varianza, c.series[2], "mvp"],
+    ["Máximo Sharpe", d.max_sharpe, c.marcaOptima, "tan"],
+  ];
+
+  const xs = [...eff, ...ine].map((p) => p.vol)
+    .concat(activos.map((a) => a.vol_pct), P.map(([, p]) => p.vol_pct));
+  const ys = [...eff, ...ine].map((p) => p.ret)
+    .concat(activos.map((a) => a.ret_pct), P.map(([, p]) => p.ret_pct), [rf]);
+  const xMax = Math.max(...xs) * 1.08;
+  const yMin = Math.min(...ys, 0), yMax = Math.max(...ys) * 1.06;
+
+  const L = 58, R = 606, T = 20, B = 258;
+  const x = (v) => L + (v / xMax) * (R - L);
+  const y = (v) => B - ((v - yMin) / (yMax - yMin)) * (B - T);
+
+  // Marcas redondas: 10, 20, 25, 50… según el rango, para no escribir "17,3 %".
+  const marcas = (mn, mx, n) => {
+    const bruto = (mx - mn) / n;
+    const base = Math.pow(10, Math.floor(Math.log10(bruto)));
+    const paso = [1, 2, 2.5, 5, 10].map((k) => k * base).find((k) => (mx - mn) / k <= n) || base * 10;
+    const out = [];
+    for (let v = Math.ceil(mn / paso) * paso; v <= mx + 1e-9; v += paso) out.push(+v.toFixed(6));
+    return out;
+  };
+  const mx = marcas(0, xMax, 5), my = marcas(yMin, yMax, 5);
+  const linea = (pts) => pts.map((p, i) => (i ? "L" : "M") +
+    x(p.vol).toFixed(1) + "," + y(p.ret).toFixed(1)).join(" ");
+
+  // La CAL sale de la tasa libre y pasa por la tangente; se extiende hasta el borde.
+  const tg = d.max_sharpe;
+  const pend = tg.vol_pct > 0 ? (tg.ret_pct - rf) / tg.vol_pct : 0;
+  const calFin = Math.min(xMax, yMax > rf ? (yMax - rf) / (pend || 1) : xMax);
+
+  return (
+    <div className="panel">
+      <h3>Frontera eficiente</h3>
+      <div className="lab-fhd">
+        <span>riesgo / retorno anual</span>
+        <span>Sharpe tangente <b>{num(tg.sharpe, 3)}</b></span>
+        <span>tasa libre <b>{pct(rf, 2)}</b></span>
+      </div>
+      <svg viewBox="0 0 620 300" className="lab-front">
+        <g className="malla">
+          {mx.map((v) => <line key={"x" + v} x1={x(v)} y1={T} x2={x(v)} y2={B} />)}
+          {my.map((v) => <line key={"y" + v} x1={L} y1={y(v)} x2={R} y2={y(v)} />)}
+        </g>
+        {yMin < 0 && <line className="cero" x1={L} y1={y(0)} x2={R} y2={y(0)} />}
+        <path className="cal" d={`M${x(0)},${y(rf)} L${x(calFin)},${y(rf + pend * calFin)}`} />
+        {ine.length > 0 && <path className="ineficiente" d={linea(ine)} />}
+        <path className="eficiente" d={linea(eff)} />
+        {[...activos].sort((a, b) => a.vol_pct - b.vol_pct).map((a, i, arr) => {
+          const px = x(a.vol_pct), py = y(a.ret_pct);
+          const pegado = i > 0 && Math.abs(px - x(arr[i - 1].vol_pct)) < 46
+                               && Math.abs(py - y(arr[i - 1].ret_pct)) < 26;
+          return (
+            <g className="activo" key={a.ticker}>
+              <circle cx={px} cy={py} r="4.5">
+                <title>{`${a.ticker}\nretorno ${pct(a.ret_pct, 1)} · volatilidad ${pct(a.vol_pct, 1)}`}</title>
+              </circle>
+              <text x={px} y={py + (pegado ? 16 : -10)} textAnchor="middle">{a.ticker}</text>
+            </g>);
+        })}
+        {P.map(([nombre, p, color, cls]) => (
+          <g className={"marca " + cls} key={nombre}>
+            <circle cx={x(p.vol_pct)} cy={y(p.ret_pct)} r="6.5" style={{ fill: color }}>
+              <title>{`${nombre}\nretorno ${pct(p.ret_pct, 1)} · volatilidad ${pct(p.vol_pct, 1)}`
+                      + `\nSharpe ${num(p.sharpe, 3)}`}</title>
+            </circle>
+          </g>))}
+        <g className="ejes">
+          {mx.map((v) => <text key={"tx" + v} x={x(v)} y={B + 18} textAnchor="middle">{pct(v, 0)}</text>)}
+          {my.map((v) => <text key={"ty" + v} x={L - 8} y={y(v) + 3.5} textAnchor="end">{pct(v, 0)}</text>)}
+          <text className="ttl" x={(L + R) / 2} y={B + 38} textAnchor="middle">VOLATILIDAD ANUAL σ</text>
+          <text className="ttl" x="14" y={(T + B) / 2} textAnchor="middle"
+                transform={`rotate(-90 14 ${(T + B) / 2})`}>RETORNO ESPERADO μ</text>
+        </g>
+      </svg>
+      <div className="lab-flg">
+        <span><u className="ueff" />frontera eficiente</span>
+        <span><u className="uine" />rama ineficiente</span>
+        <span><u className="ucal" />CAL</span>
+        {P.map(([nombre, , color]) => (
+          <span key={nombre}><u style={{ background: color, borderRadius: "50%" }} />{nombre}</span>))}
+        <span><u className="uact" />activo suelto</span>
+      </div>
+      <div className="pie">
+        La curva llena es lo mejor alcanzable para cada nivel de riesgo; la punteada gris es
+        su rama de abajo, donde para el mismo riesgo hay otra cartera con más retorno —nadie
+        elegiría estar ahí, pero muestra dónde empieza lo que sí conviene—. La recta ámbar es
+        la <b>CAL</b>: mezclando la tasa libre con la cartera tangente se llega a cualquier
+        punto sobre ella, y todos son mejores que la curva a igual riesgo.
+      </div>
+    </div>
+  );
+}
+
 /* DAT-15 · las cuatro carteras en un radar. Cada eje va normalizado entre la
    mejor y la peor de las cuatro: el radar compara, no mide en absoluto, y con
    escalas crudas el Sharpe (1,4) desaparecía al lado del retorno (33 %). */
@@ -1989,6 +2097,7 @@ function Markowitz({ d, cartera, bench, extras }) {
       </div>
 
       <div className="fila f2">
+        {LAB ? <FronteraEficiente d={d} /> : (
         <div className="panel">
           <h3>Frontera eficiente</h3>
           <Grafico datos={frontera} alto={380}
@@ -1998,7 +2107,7 @@ function Markowitz({ d, cartera, bench, extras }) {
             La nube gris son carteras posibles con tus mismos activos; la línea es lo mejor
             alcanzable para cada nivel de riesgo. Tu cartera nunca puede quedar por encima.
           </div>
-        </div>
+        </div>)}
 
         <div className="panel">
           <h3>Cómo quedarían los pesos</h3>
