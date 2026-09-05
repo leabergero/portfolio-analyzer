@@ -1406,9 +1406,61 @@ function FronteraEficiente({ d }) {
   );
 }
 
-/* DAT-15 · las cuatro carteras en un radar. Cada eje va normalizado entre la
-   mejor y la peor de las cuatro: el radar compara, no mide en absoluto, y con
-   escalas crudas el Sharpe (1,4) desaparecía al lado del retorno (33 %). */
+/* DAT-15 · radar comparativo. Cada eje va normalizado entre la mejor y la peor
+   de las series, porque el radar compara y no mide en absoluto: con escalas
+   crudas un Sharpe de 1,4 desaparece al lado de un retorno de 33 %. Los valores
+   reales viven en el tooltip de cada vértice y en la tabla de al lado. */
+function Radar({ ejes, series, alto = 250 }) {
+  const W = 330, H = alto;
+  const cx = W / 2, cy = H / 2 - 7, R = Math.min(W, H) / 2 - 42;
+  const punto = (i, v) => {
+    const a = (i / ejes.length) * 2 * Math.PI - Math.PI / 2;
+    return [cx + Math.cos(a) * R * v, cy + Math.sin(a) * R * v];
+  };
+  // Piso de 0,18 para que la peor de todas siga dibujando un polígono legible.
+  const escalados = ejes.map((eje, i) => {
+    const vals = series.map((s) => s.vals[i]);
+    const mn = Math.min(...vals), mx = Math.max(...vals), r = mx - mn;
+    return vals.map((v) => {
+      const t = r === 0 ? 1 : (v - mn) / r;
+      return 0.18 + 0.82 * (eje.mas ? t : 1 - t);
+    });
+  });
+
+  return (
+    <>
+      <svg viewBox={`0 0 ${W} ${H}`} className="lab-radar">
+        <g className="malla">
+          {[0.25, 0.5, 0.75, 1].map((k) => (
+            <polygon key={k} points={ejes.map((_, i) => punto(i, k).join(",")).join(" ")} />))}
+          {ejes.map((_, i) => (
+            <line key={i} x1={cx} y1={cy} x2={punto(i, 1)[0]} y2={punto(i, 1)[1]} />))}
+        </g>
+        {series.map((serie, j) => (
+          <polygon key={serie.nombre} className="forma"
+                   style={{ stroke: serie.color, fill: serie.color }}
+                   points={escalados.map((e, i) => punto(i, e[j]).join(",")).join(" ")} />))}
+        {ejes.map((eje, i) => {
+          const [x, y] = punto(i, 1.28);
+          return (
+            <g key={eje.et}>
+              <text className="eje" x={x} y={y} textAnchor="middle"
+                    dominantBaseline="middle">{eje.et}</text>
+              <circle cx={punto(i, 1)[0]} cy={punto(i, 1)[1]} r="22" fill="transparent">
+                <title>{`${eje.et}\n` + series.map((s) => `${s.nombre}: ${eje.fmt(s.vals[i])}`).join("\n")}</title>
+              </circle>
+            </g>);
+        })}
+      </svg>
+      <div className="lab-radar-lg">
+        {series.map((s) => (
+          <span key={s.nombre}><u style={{ background: s.color }} />{s.nombre}</span>))}
+      </div>
+    </>
+  );
+}
+
+/* Las cuatro carteras del optimizador, sobre los ejes que las distinguen. */
 function RadarCarteras({ mk, bl }) {
   const c = colores();
   const T = mk.tickers || [];
@@ -1424,60 +1476,21 @@ function RadarCarteras({ mk, bl }) {
      mk.max_sharpe.sharpe, mk.max_sharpe.pesos],
     ["Black-Litterman", c.series[4], bl.ret_bl_pct, bl.vol_bl_pct, bl.sharpe_bl, pesosBl],
   ];
-
-  // [etiqueta, valor crudo por cartera, cómo se escribe, si más es mejor]
-  const EJES = [
-    ["Retorno", C.map((x) => x[2]), (v) => pct(v, 1), true],
-    ["Estabilidad", C.map((x) => x[3]), (v) => pct(v, 1) + " de volatilidad", false],
-    ["Sharpe", C.map((x) => x[4]), (v) => num(v, 2), true],
-    ["Diversificación", C.map((x) => 1 - hhi(x[5])), (v) => num(v, 2) + " (1 − HHI)", true],
-    ["Sin mover", C.map((x) => rota(x[5])), (v) => pct(v * 100, 0) + " de rotación", false],
+  const ejes = [
+    { et: "Retorno", mas: true, fmt: (v) => pct(v, 1) },
+    { et: "Estabilidad", mas: false, fmt: (v) => pct(v, 1) + " de volatilidad" },
+    { et: "Sharpe", mas: true, fmt: (v) => num(v, 2) },
+    { et: "Diversificación", mas: true, fmt: (v) => num(v, 2) + " (1 − HHI)" },
+    { et: "Sin mover", mas: false, fmt: (v) => pct(v * 100, 0) + " de rotación" },
   ];
-
-  const cx = 165, cy = 118, R = 82;
-  const punto = (i, v) => {
-    const a = (i / EJES.length) * 2 * Math.PI - Math.PI / 2;
-    return [cx + Math.cos(a) * R * v, cy + Math.sin(a) * R * v];
-  };
-  // Normaliza al rango de las cuatro, con un piso para que la peor se siga viendo.
-  const norm = (vals, mejorEsMas) => {
-    const mn = Math.min(...vals), mx = Math.max(...vals), r = mx - mn;
-    return vals.map((v) => {
-      const t = r === 0 ? 1 : (v - mn) / r;
-      return 0.18 + 0.82 * (mejorEsMas ? t : 1 - t);
-    });
-  };
-  const escalados = EJES.map(([, vals, , mas]) => norm(vals, mas));
+  const series = C.map(([nombre, color, ret, vol, sh, w]) => ({
+    nombre, color, vals: [ret, vol, sh, 1 - hhi(w), rota(w)] }));
 
   return (
     <div className="fila f2">
       <div className="panel">
         <h3>Cómo se comparan</h3>
-        <svg viewBox="0 0 330 250" className="lab-radar">
-          <g className="malla">
-            {[0.25, 0.5, 0.75, 1].map((k) => (
-              <polygon key={k} points={EJES.map((_, i) => punto(i, k).join(",")).join(" ")} />))}
-            {EJES.map((_, i) => (
-              <line key={i} x1={cx} y1={cy} x2={punto(i, 1)[0]} y2={punto(i, 1)[1]} />))}
-          </g>
-          {C.map(([nombre, color], j) => (
-            <polygon key={nombre} className="forma" style={{ stroke: color, fill: color }}
-                     points={escalados.map((e, i) => punto(i, e[j]).join(",")).join(" ")} />))}
-          {EJES.map(([et, vals, fmt], i) => {
-            const [x, y] = punto(i, 1.26);
-            return (
-              <g key={et}>
-                <text className="eje" x={x} y={y} textAnchor="middle" dominantBaseline="middle">{et}</text>
-                <circle cx={punto(i, 1)[0]} cy={punto(i, 1)[1]} r="22" fill="transparent">
-                  <title>{`${et}\n` + C.map((cc, j) => `${cc[0]}: ${fmt(vals[j])}`).join("\n")}</title>
-                </circle>
-              </g>);
-          })}
-        </svg>
-        <div className="lab-radar-lg">
-          {C.map(([nombre, color]) => (
-            <span key={nombre}><u style={{ background: color }} />{nombre}</span>))}
-        </div>
+        <Radar ejes={ejes} series={series} />
         <div className="pie">
           Cada eje va de la peor a la mejor de las cuatro, no en escala absoluta: sirve para
           ver quién gana en qué, no cuánto vale cada número. "Sin mover" es cuánto de la
@@ -3297,10 +3310,17 @@ function Comparacion({ carteras }) {
             <button key={x.nombre} className={"btn" + (sel.includes(x.nombre) ? " primario" : "")}
                     onClick={() => alternar(x.nombre)}>{x.nombre}</button>
           ))}
-          <button className="btn primario" disabled={sel.length < 2 || cargando}
-                  onClick={comparar} style={{ marginLeft: "auto" }}>
-            {cargando ? "Comparando…" : "Comparar"}
-          </button>
+          {LAB ? (
+            <button className="lab-trazo" disabled={sel.length < 2 || cargando}
+                    onClick={comparar} style={{ marginLeft: "auto" }}>
+              <svg><rect x="1" y="1" width="98%" height="90%" rx="6" pathLength="100" /></svg>
+              {cargando ? "Comparando…" : "Comparar"}
+            </button>
+          ) : (
+            <button className="btn primario" disabled={sel.length < 2 || cargando}
+                    onClick={comparar} style={{ marginLeft: "auto" }}>
+              {cargando ? "Comparando…" : "Comparar"}
+            </button>)}
         </div>
       </div>
 
@@ -3385,9 +3405,63 @@ function ResultadoComparacion({ d, c }) {
     ["curtosis_exceso", "Curtosis", (v) => num(v, 2)],
   ];
 
+  const M = d.metricas || {};
+  // En el radar el eje se llama por la virtud —más lejos, mejor—; en la tabla,
+  // por la métrica cruda con su signo, que es como se la busca y se la cita.
+  const ejesRadar = [
+    { et: "Retorno", col: "Retorno anual", mas: true, fmt: (v) => pct(v, 1), k: "retorno_anual_pct" },
+    { et: "Sharpe", col: "Sharpe", mas: true, fmt: (v) => num(v, 3), k: "sharpe" },
+    { et: "Sortino", col: "Sortino", mas: true, fmt: (v) => num(v, 3), k: "sortino" },
+    { et: "Estabilidad", col: "Volatilidad", mas: false, fmt: (v) => pct(v, 1) + " anual",
+      k: "volatilidad_anual_pct" },
+    { et: "Aguante", col: "Peor caída", mas: false, fmt: (v) => pct(v, 1),
+      k: "max_drawdown_pct" },
+    { et: "Día malo", col: "Día malo", mas: false, fmt: (v) => pct(v, 2), k: "var95_pct" },
+  ];
+  // Peor caída y día malo llegan en negativo: sin el valor absoluto, "menos es
+  // mejor" premiaría justo a la que más cae.
+  const seriesRadar = nombres.filter((n) => M[n]).map((n, i) => ({
+    nombre: n, color: c.series[i % c.series.length],
+    vals: ejesRadar.map((e) => e.k.startsWith("max_") || e.k.startsWith("var")
+                              ? Math.abs(M[n][e.k]) : M[n][e.k]),
+  }));
+
   return (
     <>
       <VeredictoComparacion d={d} concluyente={concluyente} />
+
+      {LAB && seriesRadar.length > 1 && (
+        <div className="panel">
+          <h3>Quién gana en qué</h3>
+          <div className="lab-radarfila">
+            <div><Radar ejes={ejesRadar} series={seriesRadar} alto={270} /></div>
+            <div className="tabla-wrap"><table>
+              <thead><tr><th>Cartera</th>
+                {ejesRadar.map((e) => <th key={e.et} className="n">{e.col}</th>)}</tr></thead>
+              <tbody>{seriesRadar.map((s) => (
+                <tr key={s.nombre}>
+                  <td><span style={{ display: "inline-block", width: 9, height: 9, borderRadius: 2,
+                                     background: s.color, marginRight: 7 }} />{s.nombre}</td>
+                  {ejesRadar.map((e) => {
+                    const crudo = M[s.nombre][e.k];
+                    return (
+                      <td key={e.et} className={"n " + (e.k === "retorno_anual_pct" ? signo(crudo)
+                                                       : crudo < 0 ? "neg" : "")}>
+                        {e.k.endsWith("_pct") ? pct(crudo, e.k === "var95_pct" ? 2 : 1)
+                                              : num(crudo, 3)}
+                      </td>);
+                  })}
+                </tr>))}</tbody>
+            </table></div>
+          </div>
+          <div className="pie">
+            Cada eje va de la peor a la mejor de las carteras elegidas, no en escala absoluta:
+            sirve para ver quién gana en qué, no cuánto vale cada número. Los tres ejes de
+            riesgo van dados vuelta —estabilidad es poca volatilidad, aguante es poca caída—,
+            así que en los seis vale lo mismo: más lejos del centro es mejor. La tabla los
+            muestra como se los cita, con su signo.
+          </div>
+        </div>)}
 
       <div className="fila f2">
         <div className="panel">
