@@ -423,12 +423,13 @@ function Posicion({ d, cartera, recargar, extras, bench }) {
                tono={signo(d.pnl + cerrado)} sub="abierto + cerrado" />)}
         <Kpi etiqueta="Posiciones" valor={filas.length} sub={`${new Set(filas.map(f=>f.ticker)).size} activos`} />
       </div>
-      {LAB && ev && !ev.error && (
+      {LAB && ev && !ev.error && (<>
         <div className="fila f2">
           <ValorCartera ev={ev} mep={d.mep_hoy} />
           <RendimientoTotal ev={ev} />
-        </div>)}
-      <AltaRapida cartera={cartera} recargar={recargar} />
+        </div>
+        <TirVentana ev={ev} />
+      </>)}
       {d.sin_precio?.length > 0 && (
         <div className="aviso ojo">
           <b>{d.sin_precio.length} posiciones sin precio</b> y quedaron fuera del total:{" "}
@@ -436,6 +437,8 @@ function Posicion({ d, cartera, recargar, extras, bench }) {
         </div>
       )}
       {real?.n > 0 && <CalendarioRealizado real={real} />}
+
+      <AltaRapida cartera={cartera} recargar={recargar} />
 
       <div className="panel">
         <h3>Tenencias
@@ -1170,7 +1173,6 @@ function RendimientoTotal({ ev }) {
   if (!ev || ev.error) return null;
 
   const delta = ev.resultado_usd - ev.resultado_mes_anterior_usd;
-  const v12 = ev.ultimos_12m;
   const serie = ev.resultado_serie || [];
   const mn = Math.min(...serie, 0), mx = Math.max(...serie, 0), rango = mx - mn || 1;
   const y = (v) => 34 - 4 - ((v - mn) / rango) * 26;
@@ -1195,26 +1197,6 @@ function RendimientoTotal({ ev }) {
            className={signo(ev.resultado_usd)}>{pct(ev.rendimiento_pct)}</div>
       <div style={{ fontSize: 15, marginTop: 2 }} className={signo(ev.resultado_usd)}>
         {usd(ev.resultado_usd)} sobre {usd(ev.puesto_neto_usd)} puestos de tu bolsillo</div>
-      {(v12?.tir_pct != null || ev.tir_anual_pct != null) && (
-        <div className="lab-tir">
-          {v12?.tir_pct != null && (<>
-            <div className="foco">
-              <s>{v12.completa ? `desde el ${v12.desde}` : "últimos 12 meses"} · TIR</s>
-              <b className={signo(v12.tir_pct)}>{pct(v12.tir_pct)} anual</b>
-            </div>
-            <div className="detalle">
-              arrancó valiendo {usd(v12.valor_inicial_usd)}
-              {v12.aportado_usd > 0 && ` · pusiste ${usd(v12.aportado_usd)}`}
-              {v12.retirado_usd > 0 && ` · sacaste ${usd(v12.retirado_usd)}`}
-              {v12.dividendos_usd > 0 && ` · cobraste ${usd(v12.dividendos_usd)} de dividendos`}
-              {" · hoy vale "}{usd(ev.valor_hoy_usd)}
-            </div></>)}
-          {ev.tir_anual_pct != null && (
-            <div className="tenue">
-              <s>desde la primera compra, {num(ev.anos, 1)} años</s>
-              <b className={signo(ev.tir_anual_pct)}>{pct(ev.tir_anual_pct)} anual</b>
-            </div>)}
-        </div>)}
       <div className="pie" style={{ marginTop: 8 }}>
         <span className={signo(delta)}>{delta >= 0 ? "▲" : "▼"} {usd(Math.abs(delta))}</span>
         {" "}desde el cierre del mes pasado · arranca el {ev.desde}, con la primera compra
@@ -1236,13 +1218,7 @@ function RendimientoTotal({ ev }) {
         posiciones que ya cerraste y los dividendos cobrados. En dólares y no en porcentaje
         porque un porcentaje sobre capital variable cae de golpe el día que ponés plata
         nueva, sin que haya pasado nada en el mercado. La línea punteada es el cero.
-        {v12?.tir_pct != null && (
-          <> La <b>TIR de los últimos 12 meses</b> toma lo que la cartera valía ese día como
-          punto de partida, suma lo que entró y resta lo que salió, y cierra con lo que vale
-          hoy: las posiciones abiertas a precio de mercado, lo que dejaron las que cerraste
-          dentro del período y los dividendos cobrados. Se mueve todos los días — si mañana
-          sube un papel pesado, cambia el no realizado y la tasa con él. Es la que se compara
-          contra un plazo fijo. La de abajo es la misma cuenta desde la primera compra.</>)}
+
       </div>
     </div>
   );
@@ -1591,6 +1567,67 @@ function PasosModelos({ M, listos }) {
           {fallados > 0 && ` · ${fallados} con error`}</span>
         <span>{corriendo.length ? "Calculando " + corriendo.join(", ") + "…"
                                 : "Cada panel aparece apenas termina."}</span>
+      </div>
+    </div>
+  );
+}
+
+/* PNL-05 · la tasa anual de los últimos doce meses y cómo llegó hasta ahí.
+   Va en su propia tarjeta: mezclada con el resultado acumulado eran dos curvas
+   en distinta unidad compitiendo por la misma mirada. */
+function TirVentana({ ev }) {
+  const c = colores();
+  const v = ev.ultimos_12m;
+  if (!v || v.tir_pct == null) return null;
+  const serie = (v.serie || []).map((p) => p.tir_pct);
+  const W = 600, H = 86, pad = 10;
+  const mn = Math.min(...serie, 0), mx = Math.max(...serie, 0), rango = (mx - mn) || 1;
+  const y = (t) => H - pad - ((t - mn) / rango) * (H - pad * 2);
+  const px_ = (i) => (i / Math.max(1, serie.length - 1)) * W;
+  const linea = serie.map((t, i) => (i ? "L" : "M") + px_(i).toFixed(1) + "," + y(t).toFixed(1)).join(" ");
+  const color = v.tir_pct >= 0 ? c.positivo : c.negativo;
+
+  return (
+    <div className="panel">
+      <h3>Rendimiento anual · TIR
+        <span className="pie" style={{ margin: 0, marginLeft: "auto" }}>
+          {v.completa ? `toda la historia entra en la ventana, desde el ${v.desde}`
+                      : `ventana móvil de 12 meses, desde el ${v.desde}`}</span>
+      </h3>
+      <div className="lab-tirgrande">
+        <b className={signo(v.tir_pct)}>{pct(v.tir_pct)}</b>
+        <span>anual, comparable contra un plazo fijo o una letra</span>
+      </div>
+      <div className="pie" style={{ marginTop: 6 }}>
+        Arrancó valiendo {usd(v.valor_inicial_usd)}
+        {v.aportado_usd > 0 && ` · pusiste ${usd(v.aportado_usd)}`}
+        {v.retirado_usd > 0 && ` · sacaste ${usd(v.retirado_usd)}`}
+        {v.dividendos_usd > 0 && ` · cobraste ${usd(v.dividendos_usd)} de dividendos`}
+        {" · hoy vale "}{usd(ev.valor_hoy_usd)}
+      </div>
+      {serie.length > 1 && (
+        <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="lab-tirserie">
+          <line x1="0" y1={y(0)} x2={W} y2={y(0)} />
+          <path d={linea} style={{ stroke: color }} />
+        </svg>)}
+      {serie.length > 1 && (
+        <div className="lab-tirejes">
+          <span>{v.serie[0].fecha} · {pct(serie[0], 1)}</span>
+          <span>máx {pct(mx, 1)} · mín {pct(mn, 1)}</span>
+          <span>hoy · {pct(v.tir_pct, 1)}</span>
+        </div>)}
+      {ev.tir_anual_pct != null && !v.completa && (
+        <div className="pie">
+          Desde la primera compra, {num(ev.anos, 1)} años atrás, la misma cuenta da{" "}
+          <b className={signo(ev.tir_anual_pct)}>{pct(ev.tir_anual_pct)} anual</b>.
+        </div>)}
+      <div className="pie">
+        Toma lo que la cartera valía hace doce meses como punto de partida, suma lo que
+        entró, resta lo que salió y cierra con lo que vale hoy: las posiciones abiertas a
+        precio de mercado, lo que dejaron las que cerraste dentro del período y los
+        dividendos cobrados. Se mueve todos los días — si mañana sube un papel pesado, el no
+        realizado cambia y la tasa con él. La curva es esa misma tasa calculada parada en
+        cada semana del último año, así que dice si venís mejorando o desmejorando.
       </div>
     </div>
   );

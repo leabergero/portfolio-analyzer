@@ -311,35 +311,34 @@ def tir(movimientos) -> float:
     Convención del inversor: lo que sale del bolsillo va negativo, lo que vuelve
     —o lo que hoy vale la tenencia— positivo.
 
-    Bisección y no Newton: con flujos irregulares una derivada mal condicionada
-    manda la tasa al infinito. El intervalo cubre desde perderlo casi todo hasta
-    multiplicar por diez en un año, que es más de lo que cualquier cartera real
-    necesita.
+    Bisección sobre una grilla y no Newton: con flujos irregulares una derivada
+    mal condicionada manda la tasa al infinito. Y no alcanza con mirar los
+    extremos del intervalo: una cartera que compra y vende seguido alterna
+    signos, y ahí el VPN puede cruzar el cero más de una vez. Se barre, se toma
+    el primer cruce —la tasa más baja, la lectura conservadora— y se afina ahí.
     """
     movimientos = [(pd.Timestamp(f), float(m)) for f, m in movimientos if abs(m) > 1e-9]
     if not any(m < 0 for _, m in movimientos) or not any(m > 0 for _, m in movimientos):
         return None
 
     t0 = min(f for f, _ in movimientos)
+    montos = np.array([m for _, m in movimientos])
+    anos = np.array([(f - t0).days / 365.25 for f, _ in movimientos])
 
     def vpn(r):
-        return sum(m / (1.0 + r) ** ((f - t0).days / 365.25) for f, m in movimientos)
+        return float((montos / (1.0 + r) ** anos).sum())
 
-    # Una cartera que compra y vende muchas veces alterna signos, y ahí el VPN
-    # puede cruzar el cero más de una vez: mirar solo los extremos del intervalo
-    # devuelve una raíz cualquiera, o ninguna cuando las hay. Se barre la grilla,
-    # se toma el primer cruce —la tasa más baja, la lectura conservadora— y se
-    # afina ahí.
+    # Vectorizado: la serie móvil pide una TIR por semana y a mano son minutos.
     grilla = np.linspace(-0.95, 10.0, 400)
-    valores = [vpn(r) for r in grilla]
-    cruces = [i for i in range(len(grilla) - 1)
-              if (valores[i] > 0) != (valores[i + 1] > 0)]
-    if not cruces:
+    valores = (montos / (1.0 + grilla[:, None]) ** anos).sum(axis=1)
+    cruces = np.flatnonzero(np.diff(np.signbit(valores)))
+    if not len(cruces):
         return None
 
-    bajo, alto = grilla[cruces[0]], grilla[cruces[0] + 1]
-    creciente = vpn(bajo) < vpn(alto)
-    for _ in range(80):
+    i = int(cruces[0])
+    bajo, alto = grilla[i], grilla[i + 1]
+    creciente = valores[i] < valores[i + 1]
+    for _ in range(60):
         medio = (bajo + alto) / 2
         if (vpn(medio) > 0) == creciente:
             alto = medio
@@ -479,34 +478,57 @@ def evolucion(posiciones, trades=None, n_ruedas: int = 30) -> dict:
     movimientos.append((hoy, float(tenencias.iloc[-1] + caja.iloc[-1])))
     anos = (hoy - px.index[0]).days / 365.25
 
-    def ventana(meses):
-        """TIR de los últimos N meses, mirando la cartera como una sola inversión.
+    def movimientos_de(desde, hasta):
+        """La cartera vista como una sola inversión entre dos fechas.
 
-        Arranca con lo que ya valía la cartera ese día —el punto de partida, no
-        un aporte—, suma lo que entró y restó lo que salió durante el período, y
-        cierra con lo que vale hoy: las posiciones abiertas a precio de mercado
-        más los dividendos cobrados en la ventana. Por eso se mueve todos los
-        días: si mañana sube un papel pesado, el no realizado cambia y la tasa
-        con él.
+        Arranca con lo que ya valía ese día —el punto de partida, no un aporte—,
+        suma lo que entró y resta lo que salió, y cierra con lo que vale al
+        final: las posiciones abiertas a precio de mercado más los dividendos
+        cobrados dentro del tramo. Por eso se mueve todos los días: si mañana
+        sube un papel pesado, el no realizado cambia y la tasa con él.
         """
-        desde = hoy - pd.DateOffset(months=meses)
-        dentro = px.index[px.index >= desde]
+        medio = px.index[(px.index > desde) & (px.index <= hasta)]
+        mov = [(desde, -float(tenencias.loc[desde]))]
+        mov += [(f, -float(flujo.loc[f])) for f in medio]
+        cobrado = float(caja.loc[hasta] - caja.loc[desde])
+        mov.append((hasta, float(tenencias.loc[hasta]) + cobrado))
+        return mov, cobrado
+
+    def serie_movil(meses, paso):
+        """La misma tasa, calculada parada en cada semana del último año.
+
+        Un punto por semana: una ventana de doce meses no se mueve lo suficiente
+        entre dos ruedas como para justificar 250 optimizaciones, y la curva sale
+        igual.
+        """
+        fechas = [f for f in px.index if f >= hoy - pd.DateOffset(months=meses)]
+        puntos = []
+        for f in fechas[::paso] + fechas[-1:]:
+            tramo = px.index[(px.index >= f - pd.DateOffset(months=meses)) & (px.index <= f)]
+            if len(tramo) < 2 or (f - tramo[0]).days / 365.25 < 0.25:
+                continue
+            t = tir(movimientos_de(tramo[0], f)[0])
+            if t is not None and (not puntos or puntos[-1]["fecha"] != str(f.date())):
+                puntos.append({"fecha": str(f.date()), "tir_pct": t})
+        return puntos
+
+    def ventana(meses):
+        dentro = px.index[px.index >= hoy - pd.DateOffset(months=meses)]
         if len(dentro) < 2:
             return None
-        ini = dentro[0]
-        mov = [(ini, -float(tenencias.loc[ini]))]
-        mov += [(f, -float(v)) for f, v in flujo.loc[dentro[1]:].items()]
-        cobrado = float(caja.iloc[-1] - caja.loc[ini])
-        mov.append((hoy, float(tenencias.iloc[-1]) + cobrado))
-        anual = (hoy - ini).days / 365.25
+        arranque = dentro[0]
+        mov, cobrado = movimientos_de(arranque, hoy)
+        anual = (hoy - arranque).days / 365.25
+        movidos = flujo.loc[dentro[1]:]
         return {"tir_pct": tir(mov) if anual >= 0.25 else None,
                 "anos": round(anual, 2),
-                "desde": str(ini.date()),
-                "valor_inicial_usd": round(float(tenencias.loc[ini]), 2),
-                "aportado_usd": round(float(flujo.loc[dentro[1]:].clip(lower=0).sum()), 2),
-                "retirado_usd": round(float(-flujo.loc[dentro[1]:].clip(upper=0).sum()), 2),
+                "desde": str(arranque.date()),
+                "valor_inicial_usd": round(float(tenencias.loc[arranque]), 2),
+                "aportado_usd": round(float(movidos.clip(lower=0).sum()), 2),
+                "retirado_usd": round(float(-movidos.clip(upper=0).sum()), 2),
                 "dividendos_usd": round(cobrado, 2),
-                "completa": ini <= px.index[0]}
+                "completa": arranque <= px.index[0],
+                "serie": serie_movil(meses, paso=5)}
 
     return {
         # Anualizar menos de un trimestre da un número que no significa nada.
