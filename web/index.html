@@ -254,11 +254,33 @@ footer a:hover{text-decoration:underline}
 .lab-front .ineficiente{fill:none;stroke:var(--texto-3);stroke-width:1.6;stroke-dasharray:3 3;
   opacity:.7}
 .lab-front .cal{fill:none;stroke:var(--alerta);stroke-width:1.5;stroke-dasharray:5 4;opacity:.85}
-.lab-front .activo circle{fill:var(--panel);stroke:var(--texto-3);stroke-width:1.6;cursor:crosshair}
+.lab-front .nube{fill:none;stroke:var(--texto-3);stroke-width:1.4;stroke-linecap:round;
+  opacity:.26;pointer-events:none}
+.lab-front .activo circle:first-child{fill:var(--panel);stroke:var(--texto-3);stroke-width:1.6}
 .lab-front .activo text{font-size:9.5px;fill:var(--texto-3);pointer-events:none}
-.lab-front .activo:hover circle{stroke:var(--texto);r:6}
-.lab-front .marca circle{stroke:var(--panel);stroke-width:2;cursor:crosshair;transition:r .15s}
-.lab-front .marca:hover circle{r:8.5}
+.lab-front .activo:hover circle:first-child,
+.lab-front .activo:focus-visible circle:first-child{stroke:var(--texto);r:6}
+.lab-front .marca circle:first-child{stroke:var(--panel);stroke-width:2;transition:r .15s}
+.lab-front .marca:hover circle:first-child,
+.lab-front .marca:focus-visible circle:first-child{r:8.5}
+.lab-front .marca.tan circle:first-child{filter:drop-shadow(0 0 6px var(--marca-optima))}
+.lab-front .hit{fill:transparent;cursor:crosshair}
+.lab-front .activo:focus,.lab-front .marca:focus{outline:none}
+.lab-front .tip{opacity:0;transition:opacity .16s;pointer-events:none}
+.lab-front .activo:hover .tip,.lab-front .activo:focus-visible .tip,
+.lab-front .marca:hover .tip,.lab-front .marca:focus-visible .tip{opacity:1}
+.lab-front .tip rect{fill:var(--panel);stroke:var(--borde);stroke-width:1}
+.lab-front .tip .t1{font-size:10px;font-weight:600;fill:var(--texto)}
+.lab-front .tip .t2{font-size:9.5px;fill:var(--texto-3)}
+.lab-front .cruz{pointer-events:none}
+.lab-front .cruz line{stroke:var(--texto-3);stroke-width:1;stroke-dasharray:3 3}
+.lab-front .cruz .et rect{fill:var(--panel);stroke:var(--borde);stroke-width:1}
+.lab-front .cruz .et text{font-size:9px;font-weight:600;fill:var(--texto)}
+.lab-front .cruz .zona{font-size:8.5px;font-weight:600;letter-spacing:.12em;
+  text-transform:uppercase}
+.lab-front .cruz .zona.no{fill:var(--alerta)}
+.lab-front .cruz .zona.tibio{fill:var(--texto-2)}
+.lab-front .cruz .zona.ok{fill:var(--acento)}
 .lab-front .ejes text{font-size:10px;fill:var(--texto-3)}
 .lab-front .ejes .ttl{font-size:8.5px;letter-spacing:.2em;fill:var(--texto-3)}
 .lab-flg{display:flex;flex-wrap:wrap;gap:13px;margin-top:10px;font-size:11px;color:var(--texto-3)}
@@ -269,6 +291,7 @@ footer a:hover{text-decoration:underline}
 .lab-flg u.ucal{background:repeating-linear-gradient(90deg,var(--alerta) 0 4px,transparent 4px 7px)}
 .lab-flg u.uact{width:9px;height:9px;border-radius:50%;background:var(--panel);
                 box-shadow:inset 0 0 0 1.6px var(--texto-3)}
+.lab-flg u.unube{width:9px;height:9px;border-radius:50%;background:var(--texto-3);opacity:.4}
 
 .lab-radar{width:100%;max-width:430px;height:auto;display:block;margin:6px auto 0;overflow:visible}
 .lab-radar .malla polygon,.lab-radar .malla line{fill:none;stroke:var(--borde);stroke-width:1}

@@ -1220,22 +1220,25 @@ function RendimientoTotal({ ev }) {
   );
 }
 
-/* DAT-21 · la frontera dibujada a mano, sin la nube de carteras al azar: con la
-   rama ineficiente y cada activo suelto se entiende de dónde sale la curva, y
-   además aparece la CAL —la recta desde la tasa libre por la cartera tangente—,
-   que es lo que convierte el gráfico en una decisión y no en una foto. */
+/* DAT-21 · la frontera, con la CAL, la rama ineficiente, cada activo suelto y
+   la nube de carteras posibles de fondo. El crosshair dice, para el punto que
+   estás mirando, si esa combinación de riesgo y retorno existe: a la izquierda
+   de la bala no hay cartera que la alcance, a la derecha hay otra que da lo
+   mismo con menos riesgo. */
 function FronteraEficiente({ d }) {
   const c = colores();
+  const [cursor, setCursor] = useState(null);
   const eff = d.frontera || [];
   const ine = d.frontera_ineficiente || [];
   const activos = d.activos || [];
   const rf = (d.rf || 0) * 100;
   const P = [
-    ["Tu cartera", d.actual, c.marcaActual, "act"],
-    ["Mínima varianza", d.min_varianza, c.series[2], "mvp"],
-    ["Máximo Sharpe", d.max_sharpe, c.marcaOptima, "tan"],
+    ["Tu cartera", d.actual, c.marcaActual, false],
+    ["Mínima varianza", d.min_varianza, c.series[2], false],
+    ["Máximo Sharpe", d.max_sharpe, c.marcaOptima, true],
   ];
 
+  const nube = d.nube || {};
   const xs = [...eff, ...ine].map((p) => p.vol)
     .concat(activos.map((a) => a.vol_pct), P.map(([, p]) => p.vol_pct));
   const ys = [...eff, ...ine].map((p) => p.ret)
@@ -1243,9 +1246,11 @@ function FronteraEficiente({ d }) {
   const xMax = Math.max(...xs) * 1.08;
   const yMin = Math.min(...ys, 0), yMax = Math.max(...ys) * 1.06;
 
-  const L = 58, R = 606, T = 20, B = 258;
+  const L = 58, R = 606, T = 20, B = 258, W = 620, H = 300;
   const x = (v) => L + (v / xMax) * (R - L);
   const y = (v) => B - ((v - yMin) / (yMax - yMin)) * (B - T);
+  const aVol = (px) => ((px - L) / (R - L)) * xMax;
+  const aRet = (py) => yMin + ((B - py) / (B - T)) * (yMax - yMin);
 
   // Marcas redondas: 10, 20, 25, 50… según el rango, para no escribir "17,3 %".
   const marcas = (mn, mx, n) => {
@@ -1260,10 +1265,52 @@ function FronteraEficiente({ d }) {
   const linea = (pts) => pts.map((p, i) => (i ? "L" : "M") +
     x(p.vol).toFixed(1) + "," + y(p.ret).toFixed(1)).join(" ");
 
-  // La CAL sale de la tasa libre y pasa por la tangente; se extiende hasta el borde.
+  // La bala entera, ordenada por retorno: con ella se responde, para cualquier
+  // retorno, cuál es la menor volatilidad que lo consigue.
+  const bala = [...ine, ...eff].sort((a, b) => a.ret - b.ret);
+  const volMinima = (ret) => {
+    if (!bala.length || ret < bala[0].ret || ret > bala[bala.length - 1].ret) return null;
+    const i = bala.findIndex((p) => p.ret >= ret);
+    if (i <= 0) return bala[0].vol;
+    const a = bala[i - 1], b = bala[i];
+    const t = b.ret === a.ret ? 0 : (ret - a.ret) / (b.ret - a.ret);
+    return a.vol + t * (b.vol - a.vol);
+  };
+
+  // 2.000 puntos en un solo path: un <circle> por cartera hace un DOM que se
+  // arrastra al mover el mouse, y a este tamaño un punto es un trazo de 0,7 px.
+  const puntos = (nube.vol || []).map((v, i) =>
+    `M${x(v).toFixed(1)},${y(nube.ret[i]).toFixed(1)}h.7`).join("");
+
   const tg = d.max_sharpe;
   const pend = tg.vol_pct > 0 ? (tg.ret_pct - rf) / tg.vol_pct : 0;
-  const calFin = Math.min(xMax, yMax > rf ? (yMax - rf) / (pend || 1) : xMax);
+  const calFin = Math.min(xMax, yMax > rf && pend > 0 ? (yMax - rf) / pend : xMax);
+
+  // Tooltip a la izquierda del punto cuando está sobre la mitad derecha, para
+  // que no se salga del gráfico.
+  const globo = (px, py, titulo, detalle) => {
+    const flip = px > (L + R) / 2;
+    const tx = flip ? px - 12 : px + 12;
+    return (
+      <g className="tip">
+        <rect x={flip ? tx - 104 : tx - 4} y={py - 34} width="108" height="30" rx="5" />
+        <text className="t1" x={tx} y={py - 22} textAnchor={flip ? "end" : "start"}>{titulo}</text>
+        <text className="t2" x={tx} y={py - 10} textAnchor={flip ? "end" : "start"}>{detalle}</text>
+      </g>);
+  };
+
+  const mover = (e) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    const px = ((e.clientX - r.left) / r.width) * W, py = ((e.clientY - r.top) / r.height) * H;
+    setCursor(px < L || px > R || py < T || py > B ? null : { px, py });
+  };
+
+  let veredicto = null;
+  if (cursor) {
+    const vm = volMinima(aRet(cursor.py)), v = aVol(cursor.px);
+    if (vm != null) veredicto = v < vm - 0.05 ? ["no", "inalcanzable"]
+      : v > vm + 0.2 ? ["tibio", "ineficiente"] : ["ok", "en la frontera"];
+  }
 
   return (
     <div className="panel">
@@ -1273,34 +1320,58 @@ function FronteraEficiente({ d }) {
         <span>Sharpe tangente <b>{num(tg.sharpe, 3)}</b></span>
         <span>tasa libre <b>{pct(rf, 2)}</b></span>
       </div>
-      <svg viewBox="0 0 620 300" className="lab-front">
+      <svg viewBox={`0 0 ${W} ${H}`} className="lab-front"
+           onPointerMove={mover} onPointerLeave={() => setCursor(null)}>
         <g className="malla">
           {mx.map((v) => <line key={"x" + v} x1={x(v)} y1={T} x2={x(v)} y2={B} />)}
           {my.map((v) => <line key={"y" + v} x1={L} y1={y(v)} x2={R} y2={y(v)} />)}
         </g>
+        {puntos && <path className="nube" d={puntos} />}
         {yMin < 0 && <line className="cero" x1={L} y1={y(0)} x2={R} y2={y(0)} />}
         <path className="cal" d={`M${x(0)},${y(rf)} L${x(calFin)},${y(rf + pend * calFin)}`} />
         {ine.length > 0 && <path className="ineficiente" d={linea(ine)} />}
         <path className="eficiente" d={linea(eff)} />
+
+        {cursor && (
+          <g className="cruz">
+            <line x1={cursor.px} y1={T} x2={cursor.px} y2={B} />
+            <line x1={L} y1={cursor.py} x2={R} y2={cursor.py} />
+            <g className="et">
+              <rect x={cursor.px - 24} y={B + 4} width="48" height="15" rx="3" />
+              <text x={cursor.px} y={B + 14.5} textAnchor="middle">σ {pct(aVol(cursor.px), 1)}</text>
+            </g>
+            <g className="et">
+              <rect x={L + 4} y={cursor.py - 7.5} width="48" height="15" rx="3" />
+              <text x={L + 8} y={cursor.py + 3.5} textAnchor="start">μ {pct(aRet(cursor.py), 1)}</text>
+            </g>
+            {veredicto && (
+              <text className={"zona " + veredicto[0]}
+                    x={cursor.px + (cursor.px > (L + R) / 2 ? -9 : 9)} y={cursor.py - 9}
+                    textAnchor={cursor.px > (L + R) / 2 ? "end" : "start"}>{veredicto[1]}</text>)}
+          </g>)}
+
         {[...activos].sort((a, b) => a.vol_pct - b.vol_pct).map((a, i, arr) => {
           const px = x(a.vol_pct), py = y(a.ret_pct);
           const pegado = i > 0 && Math.abs(px - x(arr[i - 1].vol_pct)) < 46
                                && Math.abs(py - y(arr[i - 1].ret_pct)) < 26;
           return (
-            <g className="activo" key={a.ticker}>
-              <circle cx={px} cy={py} r="4.5">
-                <title>{`${a.ticker}\nretorno ${pct(a.ret_pct, 1)} · volatilidad ${pct(a.vol_pct, 1)}`}</title>
-              </circle>
+            <g className="activo" key={a.ticker} tabIndex={0}>
+              <circle cx={px} cy={py} r="4.5" />
+              <circle className="hit" cx={px} cy={py} r="13" />
               <text x={px} y={py + (pegado ? 16 : -10)} textAnchor="middle">{a.ticker}</text>
+              {globo(px, py, a.ticker, `${pct(a.ret_pct, 1)} · σ ${pct(a.vol_pct, 1)}`)}
             </g>);
         })}
-        {P.map(([nombre, p, color, cls]) => (
-          <g className={"marca " + cls} key={nombre}>
-            <circle cx={x(p.vol_pct)} cy={y(p.ret_pct)} r="6.5" style={{ fill: color }}>
-              <title>{`${nombre}\nretorno ${pct(p.ret_pct, 1)} · volatilidad ${pct(p.vol_pct, 1)}`
-                      + `\nSharpe ${num(p.sharpe, 3)}`}</title>
-            </circle>
-          </g>))}
+        {P.map(([nombre, p, color, tangente]) => {
+          const px = x(p.vol_pct), py = y(p.ret_pct);
+          return (
+            <g className={"marca" + (tangente ? " tan" : "")} key={nombre} tabIndex={0}>
+              <circle cx={px} cy={py} r="6.5" style={{ fill: color }} />
+              <circle className="hit" cx={px} cy={py} r="14" />
+              {globo(px, py, nombre, `${pct(p.ret_pct, 1)} · σ ${pct(p.vol_pct, 1)}`
+                                     + ` · S ${num(p.sharpe, 2)}`)}
+            </g>);
+        })}
         <g className="ejes">
           {mx.map((v) => <text key={"tx" + v} x={x(v)} y={B + 18} textAnchor="middle">{pct(v, 0)}</text>)}
           {my.map((v) => <text key={"ty" + v} x={L - 8} y={y(v) + 3.5} textAnchor="end">{pct(v, 0)}</text>)}
@@ -1316,13 +1387,16 @@ function FronteraEficiente({ d }) {
         {P.map(([nombre, , color]) => (
           <span key={nombre}><u style={{ background: color, borderRadius: "50%" }} />{nombre}</span>))}
         <span><u className="uact" />activo suelto</span>
+        <span><u className="unube" />carteras posibles</span>
       </div>
       <div className="pie">
-        La curva llena es lo mejor alcanzable para cada nivel de riesgo; la punteada gris es
-        su rama de abajo, donde para el mismo riesgo hay otra cartera con más retorno —nadie
-        elegiría estar ahí, pero muestra dónde empieza lo que sí conviene—. La recta ámbar es
-        la <b>CAL</b>: mezclando la tasa libre con la cartera tangente se llega a cualquier
-        punto sobre ella, y todos son mejores que la curva a igual riesgo.
+        La curva llena es lo mejor alcanzable para cada nivel de riesgo, y la nube gris son
+        carteras armadas al azar con tus mismos activos: ninguna queda por encima de la curva.
+        La punteada gris es la rama de abajo, donde para el mismo riesgo existe otra cartera
+        con más retorno. La recta ámbar es la <b>CAL</b>: mezclando la tasa libre con la
+        cartera tangente se llega a cualquier punto sobre ella, y todos son mejores que la
+        curva a igual riesgo. Pasá el mouse por el gráfico para ver si un punto cualquiera
+        es alcanzable.
       </div>
     </div>
   );
