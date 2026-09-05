@@ -3394,43 +3394,47 @@ function ResultadoComparacion({ d, c }) {
   const p = d.periodo_comun;
   const concluyente = (d.pruebas_sharpe || []).every((x) => x.concluyente);
 
+  // El cuarto valor dice hacia dónde está lo bueno: +1 más alto gana, −1 más
+  // bajo gana. En peor caída y día malo los números son negativos, así que el
+  // mayor —el menos negativo— es el mejor.
   const FILAS = [
-    ["retorno_anual_pct", "Retorno anual", (v) => pct(v)],
-    ["volatilidad_anual_pct", "Volatilidad", (v) => pct(v)],
-    ["sharpe", "Sharpe", (v) => num(v, 3)],
-    ["sortino", "Sortino", (v) => num(v, 3)],
-    ["calmar", "Calmar", (v) => num(v, 3)],
-    ["max_drawdown_pct", "Peor caída", (v) => pct(v)],
-    ["var95_pct", "Día malo", (v) => pct(v)],
-    ["curtosis_exceso", "Curtosis", (v) => num(v, 2)],
+    ["retorno_anual_pct", "Retorno anual", (v) => pct(v), 1],
+    ["volatilidad_anual_pct", "Volatilidad", (v) => pct(v), -1],
+    ["sharpe", "Sharpe", (v) => num(v, 3), 1],
+    ["sortino", "Sortino", (v) => num(v, 3), 1],
+    ["calmar", "Calmar", (v) => num(v, 3), 1],
+    ["max_drawdown_pct", "Peor caída", (v) => pct(v), 1],
+    ["var95_pct", "Día malo", (v) => pct(v), 1],
+    ["curtosis_exceso", "Curtosis", (v) => num(v, 2), -1],
   ];
 
   const M = d.metricas || {};
-  // En el radar el eje se llama por la virtud —más lejos, mejor—; en la tabla,
-  // por la métrica cruda con su signo, que es como se la busca y se la cita.
+  // Dos lecturas del mismo dato. En la de arriba cada eje se llama por la
+  // virtud y los de riesgo van dados vuelta, así que el polígono más grande es
+  // la mejor cartera. En la de abajo van crudos: ahí el polígono más grande es
+  // la que más de todo tiene, riesgo incluido.
   const ejesRadar = [
     { et: "Retorno", col: "Retorno anual", mas: true, fmt: (v) => pct(v, 1), k: "retorno_anual_pct" },
     { et: "Sharpe", col: "Sharpe", mas: true, fmt: (v) => num(v, 3), k: "sharpe" },
-    { et: "Sortino", col: "Sortino", mas: true, fmt: (v) => num(v, 3), k: "sortino" },
     { et: "Estabilidad", col: "Volatilidad", mas: false, fmt: (v) => pct(v, 1) + " anual",
       k: "volatilidad_anual_pct" },
     { et: "Aguante", col: "Peor caída", mas: false, fmt: (v) => pct(v, 1),
       k: "max_drawdown_pct" },
     { et: "Día malo", col: "Día malo", mas: false, fmt: (v) => pct(v, 2), k: "var95_pct" },
   ];
+  const ejesCrudos = ejesRadar.map((e) => ({ ...e, et: e.col, mas: true }));
   // Peor caída y día malo llegan en negativo: sin el valor absoluto, "menos es
   // mejor" premiaría justo a la que más cae.
+  const valores = (n) => ejesRadar.map((e) => e.k.startsWith("max_") || e.k.startsWith("var")
+                                              ? Math.abs(M[n][e.k]) : M[n][e.k]);
   const seriesRadar = nombres.filter((n) => M[n]).map((n, i) => ({
-    nombre: n, color: c.series[i % c.series.length],
-    vals: ejesRadar.map((e) => e.k.startsWith("max_") || e.k.startsWith("var")
-                              ? Math.abs(M[n][e.k]) : M[n][e.k]),
-  }));
+    nombre: n, color: c.series[i % c.series.length], vals: valores(n) }));
 
   return (
     <>
       <VeredictoComparacion d={d} concluyente={concluyente} />
 
-      {LAB && seriesRadar.length > 1 && (
+      {LAB && seriesRadar.length > 1 && (<>
         <div className="panel">
           <h3>Quién gana en qué</h3>
           <div className="lab-radarfila">
@@ -3457,11 +3461,35 @@ function ResultadoComparacion({ d, c }) {
           <div className="pie">
             Cada eje va de la peor a la mejor de las carteras elegidas, no en escala absoluta:
             sirve para ver quién gana en qué, no cuánto vale cada número. Los tres ejes de
-            riesgo van dados vuelta —estabilidad es poca volatilidad, aguante es poca caída—,
-            así que en los seis vale lo mismo: más lejos del centro es mejor. La tabla los
-            muestra como se los cita, con su signo.
+            riesgo van dados vuelta —estabilidad es poca volatilidad, aguante es poca caída,
+            día malo es poca pérdida—, así que en los cinco vale lo mismo:
+            <b> más lejos del centro es mejor</b>. La tabla los muestra como se los cita,
+            con su signo.
           </div>
-        </div>)}
+        </div>
+
+        <div className="panel">
+          <h3>Los mismos ejes, sin dar vuelta nada</h3>
+          <div className="lab-radarfila">
+            <div><Radar ejes={ejesCrudos} series={seriesRadar} alto={270} /></div>
+            <div className="pie" style={{ marginTop: 0 }}>
+              El de arriba y este dibujan los mismos números; lo único que cambia es hacia
+              dónde apunta cada eje de riesgo. Acá <b>más lejos del centro es más</b>: más
+              retorno, pero también más volatilidad, más caída y más pérdida en un día malo.
+              Sirve para ver la otra mitad de la historia — el polígono grande de arriba es
+              la mejor cartera, el polígono grande de acá es la que más se mueve.
+              {seriesRadar.length > 1 && (() => {
+                const may = seriesRadar.reduce((a, b) =>
+                  Math.abs(M[a.nombre].volatilidad_anual_pct) > Math.abs(M[b.nombre].volatilidad_anual_pct) ? a : b);
+                return <> En estas carteras, <b>{may.nombre}</b> es la que más estira este
+                  segundo radar: {pct(M[may.nombre].retorno_anual_pct, 1)} de retorno con{" "}
+                  {pct(M[may.nombre].volatilidad_anual_pct, 1)} de volatilidad y una caída
+                  máxima de {pct(M[may.nombre].max_drawdown_pct, 1)}.</>;
+              })()}
+            </div>
+          </div>
+        </div>
+      </>)}
 
       <div className="fila f2">
         <div className="panel">
@@ -3508,53 +3536,100 @@ function ResultadoComparacion({ d, c }) {
           <thead><tr><th>Métrica</th>{nombres.map((n) => (
             <th key={n} className="n">{n}{n === d.lider_por_criterios ? " ★" : ""}</th>))}</tr></thead>
           <tbody>
-            {FILAS.map(([k, et, f]) => (
-              <tr key={k}><td>{et}</td>
-                {nombres.map((n) => <td key={n} className="n">{f(d.metricas[n][k])}</td>)}
-              </tr>))}
+            {FILAS.map(([k, et, f, dir]) => {
+              const vals = nombres.map((n) => d.metricas[n][k]);
+              const mejor = dir > 0 ? Math.max(...vals) : Math.min(...vals);
+              return (
+                <tr key={k}><td>{et}</td>
+                  {nombres.map((n) => {
+                    const gana = d.metricas[n][k] === mejor;
+                    return (
+                      <td key={n} className={"n" + (gana ? " lab-gana" : "")}
+                          title={gana ? "mejor de las comparadas" : undefined}>
+                        {f(d.metricas[n][k])}</td>);
+                  })}
+                </tr>);
+            })}
             <tr><td>Criterios ganados</td>
-              {nombres.map((n) => <td key={n} className="n">
-                {d.criterios_ganados[n].puntos} / 8</td>)}</tr>
+              {(() => {
+                const tope = Math.max(...nombres.map((n) => d.criterios_ganados[n].puntos));
+                return nombres.map((n) => (
+                  <td key={n} className={"n" + (d.criterios_ganados[n].puntos === tope ? " lab-gana" : "")}>
+                    {d.criterios_ganados[n].puntos} / 8</td>));
+              })()}</tr>
           </tbody>
         </table></div>
       </div>
 
       <div className="fila f2">
         <div className="panel">
-          <h3>Con barra de error</h3>
+          <h3>Cuánto se puede confiar en cada Sharpe</h3>
           <div className="tabla-wrap"><table>
-            <thead><tr><th>Cartera</th><th className="n">Sharpe</th>
-                       <th className="n">Intervalo de confianza 95 %</th></tr></thead>
+            <thead><tr><th>Cartera</th><th className="n">Sharpe medido</th>
+                       <th className="n">Podría estar entre</th><th className="n">Ancho</th></tr></thead>
             <tbody>{nombres.map((n) => {
               const i = d.intervalos_confianza[n]?.sharpe || {};
+              const ancho = i.ic95_alto != null ? i.ic95_alto - i.ic95_bajo : null;
               return (<tr key={n}><td>{n}</td><td className="n">{num(i.observado, 3)}</td>
-                <td className="n">[{num(i.ic95_bajo, 2)} · {num(i.ic95_alto, 2)}]</td></tr>);
+                <td className="n">{num(i.ic95_bajo, 2)} a {num(i.ic95_alto, 2)}</td>
+                <td className="n">{ancho == null ? "—" : num(ancho, 2)}</td></tr>);
             })}</tbody>
           </table></div>
           <div className="pie">
-            Si los intervalos de dos carteras se superponen, los datos no alcanzan para
-            separarlas. Un Sharpe medido sobre pocos años es mucho menos preciso de lo que
-            sugiere su cifra.
+            El Sharpe que ves no es un dato exacto: es una <b>estimación</b> hecha con las
+            ruedas que hubo. Con otras ruedas —el mismo mercado, otro tramo— habría dado
+            distinto. La columna del medio es hasta dónde puede moverse ese número sin que
+            los datos lo desmientan, y se calcula remuestreando las ruedas reales mil veces.
+            {(() => {
+              const pares = [];
+              for (let a = 0; a < nombres.length; a++)
+                for (let b = a + 1; b < nombres.length; b++) {
+                  const A = d.intervalos_confianza[nombres[a]]?.sharpe;
+                  const B = d.intervalos_confianza[nombres[b]]?.sharpe;
+                  if (A?.ic95_alto == null || B?.ic95_alto == null) continue;
+                  if (A.ic95_bajo <= B.ic95_alto && B.ic95_bajo <= A.ic95_alto)
+                    pares.push(`${nombres[a]} y ${nombres[b]}`);
+                }
+              return pares.length
+                ? <> Acá se superponen los intervalos de <b>{pares.join(", ")}</b>: con esta
+                    historia no alcanza para decir cuál es mejor, por más que sus Sharpe
+                    difieran en el papel.</>
+                : <> Ningún par se superpone, así que el orden entre estas carteras se
+                    sostiene con los datos que hay.</>;
+            })()}
           </div>
         </div>
 
         <div className="panel">
-          <h3>¿O es que probaste muchas?</h3>
+          <h3>Descontando que comparaste varias</h3>
           <div className="tabla-wrap"><table>
             <thead><tr><th>Cartera</th><th className="n">Sharpe</th>
-                       <th className="n">Umbral de azar</th><th className="n">DSR</th></tr></thead>
+                       <th className="n">Le alcanzaba con</th>
+                       <th className="n">Probabilidad de ser real</th></tr></thead>
             <tbody>{nombres.map((n) => {
               const s = d.sharpe_deflactado[n] || {};
               return (<tr key={n}><td>{n}</td>
                 <td className="n">{num(s.sharpe_anual, 3)}</td>
                 <td className="n">{num(s.umbral_azar_anual, 3)}</td>
-                <td className={"n " + (s.dsr >= 0.95 ? "pos" : s.dsr < 0.8 ? "neg" : "")}>{num(s.dsr, 3)}</td>
+                <td className={"n " + (s.dsr >= 0.95 ? "pos" : s.dsr < 0.8 ? "neg" : "")}>
+                  {s.dsr == null ? "—" : pct(s.dsr * 100, 1)}</td>
               </tr>);
             })}</tbody>
           </table></div>
           <div className="pie">
-            Sharpe deflactado: probabilidad de que el resultado no sea suerte, considerando
-            cuántas variantes se compararon. Debajo de 0,80 conviene desconfiar.
+            Comparar varias carteras y quedarse con la mejor infla el resultado: entre más
+            candidatas, más chance de que una destaque <b>por casualidad</b>. La columna del
+            medio es el Sharpe que habría sacado la mejor de {d.sharpe_deflactado?.[nombres[0]]?.n_pruebas || nombres.length}{" "}
+            carteras hechas de puro ruido — todo lo que no supere ese umbral no prueba nada.
+            La última es el <b>Sharpe deflactado</b> (Bailey y López de Prado): la
+            probabilidad de que la habilidad sea real y no el premio a haber probado mucho.
+            Por debajo del 80 % conviene desconfiar.
+            {(() => {
+              const flojas = nombres.filter((n) => (d.sharpe_deflactado[n]?.dsr ?? 1) < 0.8);
+              return flojas.length
+                ? <> Acá no llega{flojas.length > 1 ? "n" : ""} <b>{flojas.join(", ")}</b>.</>
+                : null;
+            })()}
           </div>
         </div>
       </div>
