@@ -33,8 +33,10 @@ const pct = (n, dec = 2) => (n == null ? "—" : Number(n).toFixed(dec) + " %");
 const num = (n, dec = 2) => (n == null ? "—" : Number(n).toFixed(dec));
 const signo = (n) => (n == null ? "" : n > 0 ? "pos" : n < 0 ? "neg" : "");
 
-/* Componentes en evaluación: se ven sólo con ?lab=1 en la URL. */
+/* Componentes en evaluación: se ven sólo con ?lab=1 en la URL. El flag también
+   se marca en el <html>, para las variantes que se resuelven en CSS. */
 const LAB = new URLSearchParams(location.search).has("lab");
+if (LAB) document.documentElement.dataset.lab = "1";
 
 /* Lee la paleta del CSS para que los gráficos sigan el tema. */
 function colores() {
@@ -250,10 +252,11 @@ function Analisis({ cartera, recargar }) {
   return (
     <>
       {estado.estado !== "terminado" && (
-        <div className="aviso ojo">
-          Calculando: <b>{listos} de {Object.keys(M).length}</b> modelos listos.
-          Cada panel aparece apenas termina — no hace falta esperar a todos.
-        </div>
+        LAB ? <PasosModelos M={M} listos={listos} />
+        : <div className="aviso ojo">
+            Calculando: <b>{listos} de {Object.keys(M).length}</b> modelos listos.
+            Cada panel aparece apenas termina — no hace falta esperar a todos.
+          </div>
       )}
       <div className="tabs">
         {PESTANAS.filter(([k]) => k in M).map(([k, t]) => (
@@ -1165,17 +1168,17 @@ function KpiYtd({ ev }) {
   }, [abierto]);
   if (!ev || ev.error) return null;
 
-  const delta = ev.ytd_pct - ev.ytd_mes_anterior_pct;
+  const delta = ev.retorno_pct - ev.retorno_mes_anterior_pct;
   const serie = ev.indice || [];
   const mn = Math.min(...serie), mx = Math.max(...serie), rango = mx - mn || 1;
   const y = (v) => 30 - 4 - ((v - mn) / rango) * 22;
   const linea = serie.map((v, i) => (i ? "L" : "M") +
     ((i / (serie.length - 1)) * 300).toFixed(1) + "," + y(v).toFixed(1)).join(" ");
-  const color = ev.ytd_pct >= 0 ? c.positivo : c.negativo;
+  const color = ev.retorno_pct >= 0 ? c.positivo : c.negativo;
 
   return (
     <div className="panel" style={{ position: "relative" }}>
-      <h3>Rendimiento del año
+      <h3>Rendimiento desde el inicio
         <button className="btn" style={{ marginLeft: "auto", padding: "2px 9px" }}
                 onClick={(e) => { e.stopPropagation(); setAbierto((x) => !x); }}>⋯</button>
       </h3>
@@ -1187,11 +1190,21 @@ function KpiYtd({ ev }) {
             <div key={t} className="pie" style={{ margin: 0, padding: "7px 11px", cursor: "pointer" }}>{t}</div>))}
         </div>)}
       <div style={{ fontSize: 30, fontWeight: 700, marginTop: 6 }}
-           className={signo(ev.ytd_pct)}>{pct(ev.ytd_pct)}</div>
+           className={signo(ev.retorno_pct)}>{pct(ev.retorno_pct)}</div>
       <div className="pie" style={{ marginTop: 4 }}>
         <span className={signo(delta)}>{delta >= 0 ? "▲" : "▼"} {num(Math.abs(delta))} pts</span>
-        {" "}desde el cierre del mes pasado · desde el {ev.desde}
+        {" "}desde el cierre del mes pasado · arranca el {ev.desde}, con la primera compra
+        {ev.cerradas > 0 && ` · incluye ${ev.cerradas} posiciones ya cerradas`}
       </div>
+      <div className="pie" style={{ marginTop: 6 }}>
+        Resultado: <b className={signo(ev.resultado_usd)}>{usd(ev.resultado_usd)}</b> sobre{" "}
+        {usd(ev.puesto_neto_usd)} puestos de tu bolsillo
+        {ev.dividendos_usd > 0 && ` · ${usd(ev.dividendos_usd)} de dividendos cobrados`}
+      </div>
+      {ev.sin_serie?.length > 0 && (
+        <div className="pie" style={{ marginTop: 6 }}>
+          Sin serie de precios y fuera de la cuenta: <b>{ev.sin_serie.join(", ")}</b>.
+        </div>)}
       <svg viewBox="0 0 300 30" preserveAspectRatio="none"
            style={{ width: "100%", height: 34, marginTop: 10, display: "block" }}>
         <line x1="0" y1={y(100)} x2="300" y2={y(100)} stroke={c.borde} strokeWidth="1"
@@ -1199,8 +1212,43 @@ function KpiYtd({ ev }) {
         <path d={linea} fill="none" stroke={color} strokeWidth="1.8" strokeLinejoin="round" />
       </svg>
       <div className="pie">
-        Time-weighted: cada rueda se encadena descontando el aporte de ese día. Sin eso,
-        poner plata nueva parecería ganancia. La línea punteada es el arranque del año.
+        Time-weighted: cada rueda se encadena descontando lo que entró y salió ese día, así
+        que mide las decisiones, no el tamaño de la cartera. Cuando el porcentaje y el
+        resultado en dólares no coinciden, la diferencia es <b>cuándo</b> pusiste la plata:
+        los meses con poco invertido pesan igual que los de ahora.
+        {" "}La línea punteada es el arranque de la cartera.
+      </div>
+    </div>
+  );
+}
+
+/* PRG-07 · un nodo por modelo, encendido cuando ese modelo terminó. Con once
+   pasos no entran once etiquetas: el nombre va en el nodo, al pasar el mouse, y
+   abajo queda el que está corriendo, que es lo único que uno mira mientras espera. */
+function PasosModelos({ M, listos }) {
+  // Corren en paralelo, no en fila: si los nodos quedaran en su orden fijo, la
+  // línea de avance marcaría 6 y habría encendidos más allá. Ordenados por
+  // estado, lo lleno y lo vacío coinciden con la cuenta.
+  const orden = { listo: 0, error: 1, corriendo: 2 };
+  const claves = Object.keys(M).sort((a, b) =>
+    (orden[M[a].estado] ?? 3) - (orden[M[b].estado] ?? 3));
+  const corriendo = claves.filter((k) => M[k].estado === "corriendo").map((k) => M[k].nombre);
+  const fallados = claves.filter((k) => M[k].estado === "error").length;
+  return (
+    <div className="lab-pasos">
+      <div className="via">
+        <div className="hecho" style={{ width: (listos / claves.length) * 100 + "%" }} />
+        <div className="nodos">
+          {claves.map((k) => (
+            <span key={k} className={"n " + (M[k].estado === "listo" ? "on"
+              : M[k].estado === "error" ? "mal" : "")} title={`${M[k].nombre} · ${M[k].estado}`} />))}
+        </div>
+      </div>
+      <div className="pies">
+        <span><b>{listos}</b> de {claves.length} modelos listos
+          {fallados > 0 && ` · ${fallados} con error`}</span>
+        <span>{corriendo.length ? "Calculando " + corriendo.join(", ") + "…"
+                                : "Cada panel aparece apenas termina."}</span>
       </div>
     </div>
   );
@@ -1208,7 +1256,7 @@ function KpiYtd({ ev }) {
 
 /* DAT-03 · una fila por ticker, una columna por rueda. */
 function RuedasTicker({ ev }) {
-  const [abierto, setAbierto] = useState(false);
+  const [abierto, setAbierto] = useState(true);
   const c = colores();
   if (!ev || ev.error || !ev.ruedas?.tickers?.length) return null;
   const { fechas, tickers } = ev.ruedas;

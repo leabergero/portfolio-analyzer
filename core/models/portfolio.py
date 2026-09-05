@@ -305,57 +305,101 @@ def correlaciones(posiciones, ventana: int = 252) -> dict:
     }
 
 
-def evolucion(posiciones, n_ruedas: int = 30) -> dict:
-    """Cómo se movió la cartera en el tiempo: rendimiento del año y últimas ruedas.
+def evolucion(posiciones, trades=None, n_ruedas: int = 30) -> dict:
+    """Cómo se movió la cartera en el tiempo: rendimiento acumulado y últimas ruedas.
 
-    El rendimiento del año es **TWR**: encadena el retorno de cada rueda
-    descontando el aporte de ese día. Un aporte no es ganancia — sin descontarlo
-    la curva salta cada vez que entra plata, que es justo lo que no se quiere
-    medir. Es la diferencia entre "cuánto rindió" y "cuánto creció".
+    Reconstruye la cartera **como fue**, no como quedó: cada posición cerrada
+    pesa desde que se compró hasta que se vendió. Valuar solo lo que sigue
+    abierto contaría la historia al revés —una cartera que rotó entera parecería
+    haber tenido siempre lo de hoy— y en carteras con mucha rotación el número
+    que sale no se parece a nada.
 
-    Las ruedas son la variación diaria de cada ticker, ordenados por peso, para
-    ver de un vistazo qué se movió y cuándo.
+    El rendimiento va desde la primera compra y es **TWR**: encadena el retorno
+    de cada rueda descontando el movimiento de capital de ese día —lo que entró
+    a comprar, lo que salió al vender—. Un aporte no es ganancia; sin descontarlo
+    la curva salta cada vez que entra plata. Los dividendos no son un retiro:
+    quedan como caja adentro, que es donde suman al rendimiento.
     """
-    series = {}
-    for p in posiciones:
-        t = str(p["ticker"]).upper()
-        if t in series:
+    from core.data import sources as _src
+
+    # ── Un solo formato para lo abierto y lo cerrado ──────────────────────────
+    # (ticker, qty, desde, hasta|None, costo_usd, ingreso_usd|None)
+    tramos, dividendos, sin_serie = [], [], set()
+
+    precios_ref = precios_actuales(posiciones)
+    for l in valuar(posiciones, precios_ref)["posiciones"]:
+        if l["costo_usd"] is None or not l["buy_date"]:
             continue
-        s = sources.precios_usd(t, source=p.get("source") or None)
-        if not s.empty:
-            series[t] = s
+        tramos.append((l["ticker"], l["qty"], l["buy_date"], None, l["costo_usd"], None))
+
+    for t in (pnl_realizado(trades or [])["trades"]):
+        ticker = str(t["ticker"]).upper()
+        div = _src.divisor_nominal(
+            ticker, max(abs(t.get("buy_price") or 0), abs(t.get("sell_price") or 0)))
+        mc = t.get("mep_compra") or 1.0
+        mv = t.get("mep_venta") or 1.0
+        costo = (t["qty"] * (t.get("buy_price") or 0) / div + t.get("buy_comm", 0) / div) / mc
+        ingreso = (t["qty"] * (t.get("sell_price") or 0) / div - t.get("sell_comm", 0) / div) / mv
+        if t.get("tipo") == "dividendo":
+            # No se vendió nada: entró plata y se queda en la cartera.
+            dividendos.append((t["sell_date"], ingreso))
+            continue
+        tramos.append((ticker, t["qty"], t["buy_date"], t["sell_date"], costo, ingreso))
+
+    if not tramos:
+        return {"error": "Sin operaciones para reconstruir la historia."}
+
+    # ── Series de todo lo que la cartera tuvo alguna vez ──────────────────────
+    origen = {str(p["ticker"]).upper(): (p.get("source") or None) for p in posiciones}
+    series = {}
+    for ticker, *_ in tramos:
+        if ticker in series or ticker in sin_serie:
+            continue
+        s = _src.precios_usd(ticker, source=origen.get(ticker))
+        if s.empty:
+            sin_serie.add(ticker)
+        else:
+            series[ticker] = s
     if not series:
         return {"error": "Sin series de precios para esta cartera."}
 
+    # Lo que no se puede valuar sale entero —cantidad y plata—: dejar el flujo
+    # sin el activo inventa un retorno el día que se compra o se vende.
+    tramos = [x for x in tramos if x[0] not in sin_serie]
+
     px = pd.DataFrame(series).sort_index().ffill().dropna(how="all")
+    inicio = pd.Timestamp(min(x[2] for x in tramos))
+    previas = px.index[px.index < inicio]
+    px = px.loc[previas[-1]:] if len(previas) else px.loc[inicio:]
     if len(px) < 2:
-        return {"error": "Hacen falta al menos dos ruedas."}
+        return {"error": "Hacen falta al menos dos ruedas desde la primera compra."}
 
-    precios = {t: float(s.iloc[-1]) for t, s in series.items()}
-    lotes = valuar(posiciones, precios)["posiciones"]
-
-    # El año arranca en el último cierre de diciembre: sin ese punto de partida
-    # el primer día del año sería un retorno contra la nada.
-    ano = px.index[-1].year
-    previas = px.index[px.index < pd.Timestamp(f"{ano}-01-01")]
-    px = px.loc[previas[-1]:] if len(previas) else px
+    def rueda(fecha):
+        """La primera rueda desde una fecha; None si cae fuera de la ventana."""
+        futuras = px.index[px.index >= pd.Timestamp(fecha)]
+        return futuras[0] if len(futuras) else None
 
     cant = pd.DataFrame(0.0, index=px.index, columns=px.columns)
     flujo = pd.Series(0.0, index=px.index)
-    for l in lotes:
-        t = l["ticker"]
-        if t not in cant.columns or l["costo_usd"] is None or not l["buy_date"]:
-            continue
-        compra = pd.Timestamp(l["buy_date"])
-        cant.loc[cant.index >= compra, t] += l["qty"]
-        # Solo cuenta como aporte lo comprado dentro de la ventana: un lote de
-        # 2024 ya está en el capital inicial, no es plata que entró este año.
-        if compra >= px.index[0]:
-            futuras = px.index[px.index >= compra]
-            if len(futuras):
-                flujo.loc[futuras[0]] += l["costo_usd"]
+    caja = pd.Series(0.0, index=px.index)
+    for ticker, qty, desde, hasta, costo, ingreso in tramos:
+        d = pd.Timestamp(desde)
+        h = pd.Timestamp(hasta) if hasta else None
+        vivo = (cant.index >= d) & (cant.index < h if h is not None else True)
+        cant.loc[vivo, ticker] += qty
+        # Solo cuenta como movimiento lo que pasó dentro de la ventana: un lote
+        # anterior ya está en el capital inicial, no es plata que entró.
+        if d >= px.index[0] and (f := rueda(d)) is not None:
+            flujo.loc[f] += costo
+        if h is not None and (f := rueda(h)) is not None:
+            flujo.loc[f] -= ingreso
 
-    valor = (cant * px).sum(axis=1)
+    for fecha, monto in dividendos:
+        f = rueda(fecha)
+        if f is not None:
+            caja.loc[f:] += monto
+
+    valor = (cant * px).sum(axis=1) + caja
     anterior = valor.shift(1)
     r = ((valor - flujo) / anterior - 1).iloc[1:]
     r = r.replace([np.inf, -np.inf], 0.0).fillna(0.0)
@@ -368,12 +412,24 @@ def evolucion(posiciones, n_ruedas: int = 30) -> dict:
 
     ult = px.tail(n_ruedas + 1)
     var = ult.pct_change().iloc[1:] * 100.0
-    orden = sorted(px.columns, key=lambda t: -(cant[t].iloc[-1] * precios.get(t, 0)))
+    hoy = cant.iloc[-1]
+    abiertos = [t for t in px.columns if hoy[t] > 0]
+    orden = sorted(abiertos, key=lambda t: -(hoy[t] * float(px[t].iloc[-1])))
 
     return {
-        "ytd_pct": round(float(indice.iloc[-1]) - 100.0, 2),
-        "ytd_mes_anterior_pct": round(ref - 100.0, 2),
+        "retorno_pct": round(float(indice.iloc[-1]) - 100.0, 2),
+        "retorno_mes_anterior_pct": round(ref - 100.0, 2),
         "desde": str(px.index[0].date()),
+        "aportado_usd": round(float(flujo[flujo > 0].sum()), 2),
+        "retirado_usd": round(float(-flujo[flujo < 0].sum()), 2),
+        "dividendos_usd": round(float(caja.iloc[-1]), 2),
+        # El mismo resultado que suman los KPIs de arriba (abierto + realizado),
+        # puesto al lado del TWR: cuando los dos no cuentan la misma historia,
+        # la diferencia es el efecto de cuándo entró la plata, no un error.
+        "puesto_neto_usd": round(float(flujo.sum()), 2),
+        "resultado_usd": round(float(valor.iloc[-1] - flujo.sum()), 2),
+        "cerradas": sum(1 for x in tramos if x[3]),
+        "sin_serie": sorted(sin_serie),
         "indice": [round(float(v), 3) for v in indice],
         "valor_usd": [round(float(v), 2) for v in valor.iloc[1:]],
         "fechas": [str(f.date()) for f in indice.index],

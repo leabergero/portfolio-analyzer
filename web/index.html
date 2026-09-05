@@ -254,6 +254,30 @@ footer a:hover{text-decoration:underline}
 .lab-escala{display:flex;align-items:center;gap:7px;margin-top:14px;font-size:11px;color:var(--texto-3)}
 .lab-escala i{width:15px;height:12px;border-radius:2px}
 
+.lab-pasos{background:var(--panel);border:1px solid var(--borde);border-radius:10px;
+           padding:18px 20px 14px;margin-bottom:14px}
+.lab-pasos .via{height:2px;background:var(--panel-2);position:relative;margin:0 7px}
+.lab-pasos .hecho{position:absolute;left:0;top:0;height:100%;background:var(--acento);
+                  box-shadow:0 0 8px var(--acento);transition:width .4s}
+.lab-pasos .nodos{position:absolute;inset:0;display:flex;justify-content:space-between;
+                  align-items:center}
+.lab-pasos .n{width:11px;height:11px;border-radius:50%;background:var(--panel-2);
+              border:2px solid var(--borde);transition:.35s}
+.lab-pasos .n.on{background:var(--acento);border-color:var(--acento-2);
+                 box-shadow:0 0 10px var(--acento)}
+.lab-pasos .n.mal{background:var(--negativo);border-color:var(--negativo)}
+.lab-pasos .pies{display:flex;justify-content:space-between;gap:14px;margin-top:14px;
+                 font-size:12px;color:var(--texto-3)}
+.lab-pasos .pies b{color:var(--texto-2)}
+
+/* El cuarto spinner de FDB-05 acompaña a cada "Calculando…". */
+[data-lab] .cargando{display:flex;flex-direction:column;align-items:center;gap:15px}
+[data-lab] .cargando::before{content:"";width:24px;height:24px;background:var(--acento);
+  animation:morph 1.8s ease-in-out infinite;
+  box-shadow:0 0 14px -3px var(--acento)}
+@keyframes morph{0%,100%{border-radius:50%;transform:rotate(0)}
+                 50%{border-radius:12% 50% 12% 50%;transform:rotate(180deg)}}
+
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 </style>
 </head>

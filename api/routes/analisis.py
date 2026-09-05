@@ -71,9 +71,16 @@ def comp(nombre):
 
 @bp.get("/evolucion/<nombre>")
 def evolucion(nombre):
-    """Rendimiento del año (TWR) y variación diaria de las últimas ruedas."""
-    return _simple(nombre, portfolio.evolucion,
-                   request.args.get("ruedas", 30, type=int))
+    """Rendimiento acumulado (TWR) y variación diaria de las últimas ruedas.
+
+    Va con los trades cerrados además de las posiciones: la historia de la
+    cartera incluye lo que ya no está.
+    """
+    pos = _posiciones(nombre)
+    if not pos:
+        return _falta(nombre)
+    return jsonify(portfolio.evolucion(pos, store.cargar_realizado(nombre),
+                                       request.args.get("ruedas", 30, type=int)))
 
 
 @bp.get("/riesgo/<nombre>")
