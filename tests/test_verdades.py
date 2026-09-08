@@ -1535,6 +1535,74 @@ def test_sin_cabecera_el_modo_local_sigue_intacto():
 
 # ══════════════════════════════════════════════════════════════════════════
 
+def test_una_venta_simulada_no_deja_posiciones_negativas():
+    """Vender en simulación descuenta lotes FIFO; nunca crea cantidad negativa.
+
+    La forma obvia de simular una venta es un lote con cantidad negativa, y es
+    la equivocada: `value_weights` sumaría un valor negativo, el peso del papel
+    daría negativo y Markowitz —que asume posiciones largas— optimizaría sobre
+    una cartera que no puede existir. La venta se descuenta de los lotes que ya
+    están, del más viejo al más nuevo, igual que netea una venta real.
+
+    Y vender más de lo que tenés deja la posición en cero, no en negativo: es
+    una simulación, no un descubierto.
+    """
+    sim = require("api", "sim")
+
+    cartera = [{"ticker": "GGAL.BA", "qty": 100, "buy_date": "2024-01-10", "buy_price": 1.0},
+               {"ticker": "GGAL.BA", "qty": 50, "buy_date": "2025-06-01", "buy_price": 2.0},
+               {"ticker": "METR.BA", "qty": 300, "buy_date": "2023-05-05", "buy_price": 3.0}]
+
+    r = sim.aplicar(cartera, [("GGAL.BA", -120)])
+    ggal = [p for p in r if p["ticker"] == "GGAL.BA"]
+    assert len(ggal) == 1, "el lote más viejo se consume entero y se va de la lista"
+    assert casi(ggal[0]["qty"], 30), f"tenía 150, vendió 120, quedan 30 — quedaron {ggal[0]['qty']}"
+    assert ggal[0]["buy_date"] == "2025-06-01", "FIFO: el que sobrevive es el más nuevo"
+
+    entera = sim.aplicar(cartera, [("METR.BA", -1000)])
+    assert all(p["ticker"] != "METR.BA" for p in entera), \
+        "vender más de lo que hay saca la posición; no la deja en negativo"
+    assert all(float(p["qty"]) > 0 for p in entera), "ninguna cantidad negativa ni en cero"
+
+    assert cartera[0]["qty"] == 100, "la cartera original no se toca: la simulación es una copia"
+
+
+def test_una_compra_simulada_no_inventa_pnl():
+    """El lote simulado entra a precio de hoy: costo = valor, P&L = 0.
+
+    Si la compra entrara a cualquier otro precio, la simulación mostraría una
+    ganancia o una pérdida que nunca pasó, y el P&L de la cartera —el número que
+    el usuario mira primero— dejaría de ser el suyo. Lo que sí tiene que mover
+    es el peso de todo lo demás: para eso se simula.
+    """
+    import pandas as pd
+
+    sim = require("api", "sim")
+    portfolio, sources = require("core.models", "portfolio"), require("core.data", "sources")
+
+    fechas = pd.date_range("2026-01-01", periods=40, freq="D")
+    original = sources.precios_usd
+    sources.precios_usd = lambda t, **k: pd.Series(
+        [10.0] * 39 + [12.5], index=fechas)
+    try:
+        con_sim = sim.aplicar(
+            [{"ticker": "VIEJO", "qty": 10, "buy_price": 5.0, "buy_date": "2025-01-02",
+              "currency": "USD", "commissions": 0}],
+            [("NUEVO", 4)])
+        r = portfolio.valuar(con_sim)
+    finally:
+        sources.precios_usd = original
+
+    fila = next(f for f in r["posiciones"] if f["ticker"] == "NUEVO")
+    assert fila["sim"] is True, "la fila simulada va marcada: no es tenencia real"
+    assert casi(fila["buy_price_usd"], 12.5), "entra al último precio, no a cualquiera"
+    assert casi(fila["pnl_usd"], 0), f"la compra simulada no puede aportar P&L ({fila['pnl_usd']})"
+
+    viejo = next(f for f in r["posiciones"] if f["ticker"] == "VIEJO")
+    assert casi(viejo["pnl_usd"], 75), "el P&L de lo que ya tenías queda intacto"
+    assert casi(r["valor_total"], 175), "pero el valor total sí incluye lo simulado"
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

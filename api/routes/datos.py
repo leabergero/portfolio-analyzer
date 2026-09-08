@@ -2,6 +2,7 @@
 
 from flask import Blueprint, Response, jsonify, request
 
+from api import sim
 from core.broker import cocos, sesion, vault
 from core.data import cache, connectors, fmp, mep, noticias, sources
 from core.io import csv_native, store
@@ -88,14 +89,20 @@ def plantilla():
 
 @bp.post("/comparar")
 def comparar():
-    nombres = (request.json or {}).get("carteras", [])
-    if len(nombres) < 2:
-        return jsonify({"error": "Hacen falta al menos dos carteras."}), 400
-    carteras = {n: store.cargar(n) for n in nombres if store.cargar(n)}
+    cuerpo = request.json or {}
+    carteras = {n: store.cargar(n) for n in cuerpo.get("carteras", []) if store.cargar(n)}
+
+    # La cartera simulada no existe en ningún lado: se arma acá, en memoria.
+    # Es lo que evita tener que duplicar una cartera y editarla a mano sólo para
+    # compararse contra uno mismo con dos activos más.
+    base = cuerpo.get("sim_sobre")
+    specs = sim.desde_request()
+    if base and specs and store.cargar(base):
+        carteras[f"{base} + simulación"] = sim.aplicar(store.cargar(base), specs)
+
     if len(carteras) < 2:
-        return jsonify({"error": "Al menos dos de esas carteras no existen o están vacías."}), 400
-    return jsonify(comparacion.comparar(
-        carteras, (request.json or {}).get("benchmark", "SP500")))
+        return jsonify({"error": "Hacen falta al menos dos carteras con posiciones."}), 400
+    return jsonify(comparacion.comparar(carteras, cuerpo.get("benchmark", "SP500")))
 
 
 # ── Noticias ──────────────────────────────────────────────────────────────────

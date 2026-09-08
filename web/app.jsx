@@ -15,7 +15,11 @@
  *      llano, no en fórmulas.
  */
 
-const { useState, useEffect, useRef, useCallback } = React;
+const { useState, useEffect, useRef, useCallback, useMemo } = React;
+
+/* El laboratorio: lo nuevo se prueba contra datos reales, apagado, hasta que se
+   aprueba. Sin `?lab=1` en la URL la app es exactamente la de siempre. */
+const LAB = new URLSearchParams(location.search).has("lab");
 
 /* ═══════════════ utilidades ═══════════════ */
 
@@ -44,6 +48,25 @@ const elegirCartera = (carteras) => {
   return nombres.includes(fijada) ? fijada : nombres[0];
 };
 
+/* La simulación: qué estarías comprando o vendiendo, sin tocar la cartera. Vive
+   en este navegador y nada más — el servidor no guarda ninguna, viajan en el
+   header `X-Sim` de cada pedido y se aplican en memoria (ver `api/sim.py`).
+   Una por cartera: la simulación de una no tiene sentido sobre otra. */
+const simul = {
+  leer: (c) => { try { return JSON.parse(localStorage.getItem("pa.sim." + c) || "[]"); }
+                 catch { return []; } },
+  poner: (c, l) => { try { (l || []).length ? localStorage.setItem("pa.sim." + c, JSON.stringify(l))
+                                            : localStorage.removeItem("pa.sim." + c); }
+                     catch { /* sin memoria */ } },
+  cabecera: (l) => (l || []).map((x) => `${x.ticker}:${x.qty}`).join(","),
+};
+
+/* ponytail: un solo global, porque la simulación es una sola —la del usuario que
+   está mirando la pantalla— y la leen los treinta y pico de fetch repartidos por
+   los paneles. Pasarla por props hasta cada uno sería un refactor entero para el
+   mismo resultado. Si algún día hay dos vistas simultáneas, esto pasa a props. */
+let SIM_ACTIVA = "";
+
 const SOBRE = "pa.sesion";
 const sesion = {
   leer: () => { try { return localStorage.getItem(SOBRE); } catch { return null; } },
@@ -55,6 +78,7 @@ const api = async (ruta, opciones) => {
   const o = { ...(opciones || {}) };
   const guardado = sesion.leer();
   if (guardado) o.headers = { ...(o.headers || {}), "X-Sesion": guardado };
+  if (SIM_ACTIVA) o.headers = { ...(o.headers || {}), "X-Sim": SIM_ACTIVA };
 
   const r = await fetch(ruta, o);
 
@@ -350,11 +374,122 @@ const PESTANAS = [
 
 const BENCHMARKS = [["SP500", "S&P 500"], ["MERVAL", "Merval"], ["STOXX600", "STOXX 600"]];
 
-function Analisis({ cartera, recargar }) {
+/* ── Simulación ─────────────────────────────────────────────────────────────
+   "¿Y si compro esto?" sin armar una cartera paralela: los activos simulados se
+   suman a los que ya tenés y toda la pantalla —composición, riesgo, frontera,
+   Monte Carlo, Black-Litterman— se recalcula con ellos adentro.
+
+   Sólo hace falta el ticker y la cantidad: el precio es el de mercado, así que
+   la compra entra sin ganancia ni pérdida y lo único que mueve son los pesos,
+   que es la pregunta. Vender descuenta de lo que ya tenés, del lote más viejo
+   al más nuevo; no realiza resultado, porque no vendiste nada. */
+function Simulador({ cartera, sim, setSim, tenencias }) {
+  const [f, setF] = useState({ ticker: "", qty: "" });
+  const [check, setCheck] = useState(null);
+  const [msg, setMsg] = useState(null);
+  const [abierto, setAbierto] = useState(false);
+
+  const t = f.ticker.trim().toUpperCase();
+  const tiene = tenencias[t] || 0;
+
+  const validar = async () => {
+    if (!t) { setCheck(null); return; }
+    setCheck({ cargando: true });
+    setCheck(await api(`/api/validar/${encodeURIComponent(t)}`));
+  };
+
+  // Un renglón por ticker: comprar y vender el mismo papel es una cantidad neta,
+  // no dos órdenes contradictorias viajando juntas.
+  const sumar = (signo) => {
+    const pedida = dec(f.qty);
+    if (!t || !pedida || pedida <= 0) { setMsg("Falta el ticker o la cantidad."); return; }
+    if (signo < 0 && !tiene) { setMsg(`No tenés ${t} en la cartera: no hay nada que vender.`); return; }
+    // Vender más de lo que hay no es un descubierto, es un error de tipeo.
+    const q = signo < 0 ? -Math.min(pedida, tiene) : pedida;
+    const previo = sim.find((x) => x.ticker === t)?.qty || 0;
+    const total = Math.round((previo + q) * 1e6) / 1e6;
+    setSim([...sim.filter((x) => x.ticker !== t), ...(total ? [{ ticker: t, qty: total }] : [])]);
+    setF({ ticker: "", qty: "" }); setCheck(null);
+    setMsg(signo < 0 && pedida > tiene
+           ? `Tenías ${num(tiene, 0)} de ${t}: se vende eso y no más.` : null);
+  };
+
+  const quitar = (x) => setSim(sim.filter((s2) => s2.ticker !== x.ticker));
+
+  if (!abierto && !sim.length) return (
+    <button className="btn" style={{ marginBottom: 10 }} onClick={() => setAbierto(true)}>
+      Simular una compra o una venta</button>);
+
+  return (
+    <div className="panel lab-sim" style={{ marginBottom: 12 }}>
+      <h3>Simulación sobre {cartera}
+        <button className="btn" style={{ marginLeft: "auto", padding: "3px 10px", fontSize: 12 }}
+                onClick={() => { setAbierto(false); setMsg(null); }}>Cerrar</button>
+      </h3>
+
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end", marginTop: 10 }}>
+        <label style={{ fontSize: 11.5, color: "var(--texto-3)" }}>
+          Ticker<br />
+          <input value={f.ticker} placeholder="AAPL" style={{ width: 130, marginTop: 3 }}
+                 onChange={(e) => setF({ ...f, ticker: e.target.value })} onBlur={validar} />
+        </label>
+        <label style={{ fontSize: 11.5, color: "var(--texto-3)" }}>
+          Cantidad<br />
+          <input type="text" inputMode="decimal" value={f.qty} style={{ width: 110, marginTop: 3 }}
+                 onChange={(e) => setF({ ...f, qty: soloNum(e.target.value) })} />
+        </label>
+        <button className="btn primario" onClick={() => sumar(1)}>Comprar</button>
+        <button className="btn" onClick={() => sumar(-1)} disabled={!tiene}
+                title={tiene ? `Tenés ${num(tiene, 0)}` : "Sólo se puede vender lo que está en la cartera"}>
+          Vender{tiene ? ` (tenés ${num(tiene, 0)})` : ""}</button>
+      </div>
+
+      {check && !check.cargando && (
+        <div className={"aviso " + (check.valido && check.alcanza_para_analisis ? "ok"
+                                    : check.valido ? "ojo" : "mal")}>
+          {check.valido
+            ? <>Cotiza en <b>{check.moneda}</b>, último <b>{usd(check.ultimo_usd, 4)}</b>
+                {dec(f.qty) ? <> · {num(dec(f.qty), 0)} × {usd(check.ultimo_usd, 4)} = {" "}
+                  <b>{usd(dec(f.qty) * check.ultimo_usd)}</b></> : null}. {check.detalle}</>
+            : <>{check.detalle}</>}
+        </div>)}
+      {msg && <div className="aviso ojo">{msg}</div>}
+
+      {sim.length > 0 && (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginTop: 12 }}>
+          {sim.map((x) => (
+            <span key={x.ticker} className={"chip " + (x.qty > 0 ? "ok" : "mal")}
+                  style={{ minWidth: 0, gap: 8 }}>
+              <b className="mono">{x.ticker}</b> {x.qty > 0 ? "+" : "−"}{num(Math.abs(x.qty), 0)}
+              <button className="lab-x" title="Sacar de la simulación"
+                      onClick={() => quitar(x)}>×</button>
+            </span>))}
+          <button className="btn" style={{ marginLeft: "auto", padding: "3px 10px", fontSize: 12 }}
+                  onClick={() => setSim([])}>Volver a mi cartera</button>
+        </div>)}
+
+      <div className="pie">
+        {sim.length > 0
+          ? <>Todo lo que ves abajo es <b>{cartera} con la simulación puesta</b>, no tu cartera.
+              Nada de esto se guarda: se va cuando la sacás. La compra entra al precio de hoy,
+              así que no suma ni resta resultado — lo que cambia son los pesos, el riesgo y la
+              optimización. La venta descuenta los lotes más viejos primero y tampoco realiza
+              ganancia: no vendiste nada.</>
+          : <>Ticker y cantidad, nada más: el precio lo pone el mercado. Se recalcula la cartera
+              entera con el activo adentro, y en Comparación podés medir una contra otra sin
+              tener que duplicar la cartera.</>}
+      </div>
+    </div>
+  );
+}
+
+function Analisis({ cartera, recargar, sim, setSim }) {
   const [run, setRun] = useState(null);
   const [estado, setEstado] = useState(null);
   const [tab, setTab] = useState("posicion");
   const [bench, setBench] = useState("SP500");
+  // La simulación es parte de qué se está analizando: cambiarla es relanzar.
+  const simKey = simul.cabecera(sim);
 
   useEffect(() => {
     if (!cartera) return;
@@ -362,7 +497,7 @@ function Analisis({ cartera, recargar }) {
     api(`/api/analisis/${encodeURIComponent(cartera)}`,
         { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })
       .then((d) => d.run_id && setRun(d.run_id));
-  }, [cartera]);
+  }, [cartera, simKey]);
 
   useEffect(() => {
     if (!run || !cartera) return;
@@ -378,7 +513,11 @@ function Analisis({ cartera, recargar }) {
   }, [run, cartera]);
 
   if (!cartera) return <div className="vacio">Elegí una cartera arriba para analizarla.</div>;
-  if (!estado) return <div className="cargando">Lanzando los modelos…</div>;
+  const simulador = LAB && (
+    <Simulador cartera={cartera} sim={sim} setSim={setSim}
+               tenencias={(estado?.resultados?.posicion?.posiciones || []).reduce(
+                 (a, f) => ({ ...a, [f.ticker]: (a[f.ticker] || 0) + f.qty }), {})} />);
+  if (!estado) return <>{simulador}<div className="cargando">Lanzando los modelos…</div></>;
 
   const R = estado.resultados || {};
   const M = estado.modelos || {};
@@ -386,6 +525,7 @@ function Analisis({ cartera, recargar }) {
 
   return (
     <>
+      {simulador}
       {estado.estado !== "terminado" && (
         <PasosModelos M={M} listos={listos} />
       )}
@@ -411,7 +551,8 @@ function Analisis({ cartera, recargar }) {
             </select>
           </span>)}
       </div>
-      <Panel tab={tab} R={R} M={M} cartera={cartera} bench={bench} recargar={recargar} />
+      <Panel key={simKey} tab={tab} R={R} M={M} cartera={cartera} bench={bench}
+             recargar={recargar} />
     </>
   );
 }
@@ -587,7 +728,10 @@ function Posicion({ d, cartera, recargar, extras, bench }) {
           </tr></thead>
           <tbody>{filas.map((f, i) => (
             <tr key={i}>
-              <td className="mono">{f.ticker}{f.es_bono && <span className="chip" style={{marginLeft:6}}>bono</span>}</td>
+              <td className="mono">{f.ticker}
+                {f.es_bono && <span className="chip" style={{marginLeft:6}}>bono</span>}
+                {f.sim && <span className="chip ojo" style={{marginLeft:6}}
+                                title="Simulada: no está en tu cartera">sim</span>}</td>
               <td className="mono">{f.buy_date}</td>
               <td className="n">{num(f.qty, 0)}</td>
               <td className="n">{usd(f.buy_price_usd, 4)}</td>
@@ -3502,11 +3646,16 @@ function Stress({ d }) {
 
 /* ═══════════════ Modo 2 · Comparación ═══════════════ */
 
-function Comparacion({ carteras }) {
+function Comparacion({ carteras, cartera, sim }) {
   const [sel, setSel] = useState([]);
   const [d, setD] = useState(null);
   const [cargando, setCargando] = useState(false);
+  const [conSim, setConSim] = useState(false);
   const c = colores();
+  // Con una simulación puesta, la cartera simulada es un competidor más. No
+  // existe en ningún lado: la arma el servidor en memoria para esta comparación.
+  const simulada = LAB && cartera && sim?.length ? `${cartera} + simulación` : null;
+  const cuantas = sel.length + (conSim && simulada ? 1 : 0);
 
   const alternar = (n) => setSel((s) => s.includes(n) ? s.filter((x) => x !== n) : [...s, n]);
 
@@ -3514,7 +3663,8 @@ function Comparacion({ carteras }) {
     setCargando(true); setD(null);
     setD(await api("/api/comparar", { method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ carteras: sel }) }));
+      body: JSON.stringify({ carteras: sel,
+                             sim_sobre: conSim && simulada ? cartera : null }) }));
     setCargando(false);
   };
 
@@ -3527,7 +3677,11 @@ function Comparacion({ carteras }) {
             <button key={x.nombre} className={"btn" + (sel.includes(x.nombre) ? " primario" : "")}
                     onClick={() => alternar(x.nombre)}>{x.nombre}</button>
           ))}
-          <button className="lab-trazo" disabled={sel.length < 2 || cargando}
+          {simulada && (
+            <button className={"btn" + (conSim ? " primario" : "")}
+                    title="Tu cartera con los activos que estás simulando"
+                    onClick={() => setConSim((v) => !v)}>{simulada}</button>)}
+          <button className="lab-trazo" disabled={cuantas < 2 || cargando}
                   onClick={comparar} style={{ marginLeft: "auto" }}>
             <svg><rect x="1" y="1" width="98%" height="90%" rx="6" pathLength="100" /></svg>
             {cargando ? "Comparando…" : "Comparar"}
@@ -3541,6 +3695,8 @@ function Comparacion({ carteras }) {
       {!d && !cargando && <div className="vacio">
         Elegí al menos dos carteras. Se comparan sobre el período que ambas comparten,
         y se prueba si la diferencia es real o puede ser azar.
+        {simulada && <><br />Con la simulación puesta podés medir <b>{cartera}</b> contra{" "}
+          <b>{simulada}</b> sin duplicar nada.</>}
       </div>}
     </>
   );
@@ -4820,6 +4976,20 @@ function App() {
   // null = todavía no sabemos en qué modo corre el servidor ni quién sos.
   const [web, setWeb] = useState(null);
   const [yo, setYo] = useState(null);
+  const [sims, setSims] = useState({});
+
+  // La simulación es de la cartera que estás mirando: cambiar de cartera trae la
+  // suya, nunca la de la anterior.
+  const sim = useMemo(
+    () => (LAB && cartera ? sims[cartera] || simul.leer(cartera) : []), [cartera, sims]);
+  // Se fija acá, en el render, y no en un efecto: los efectos de los hijos corren
+  // ANTES que los del padre, así que Análisis lanzaría su POST con la cabecera de
+  // la cartera anterior y el primer análisis de cada cambio saldría mal.
+  SIM_ACTIVA = simul.cabecera(sim);
+  const cambiarSim = useCallback((l) => {
+    simul.poner(cartera, l);
+    setSims((s) => ({ ...s, [cartera]: l }));
+  }, [cartera]);
 
   const recargar = useCallback(async () => {
     const c = await api("/api/carteras");
@@ -4864,8 +5034,8 @@ function App() {
              carteras={carteras} cartera={cartera} setCartera={setCartera} yo={yo} />
       <div className="hoja">
         <Red key={modo}>
-        {modo === "analisis" && <Analisis cartera={cartera} />}
-        {modo === "comparacion" && <Comparacion carteras={carteras} />}
+        {modo === "analisis" && <Analisis cartera={cartera} sim={sim} setSim={cambiarSim} />}
+        {modo === "comparacion" && <Comparacion carteras={carteras} cartera={cartera} sim={sim} />}
         {modo === "carteras" && <Carteras carteras={carteras} recargar={recargar}
                                     cartera={cartera} setCartera={setCartera} />}
         {modo === "mercado" && <Mercado cartera={cartera} />}

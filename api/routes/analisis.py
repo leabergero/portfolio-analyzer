@@ -13,7 +13,7 @@ Dos formas de pedir lo mismo, según haga falta:
 
 from flask import Blueprint, jsonify, request
 
-from api import jobs
+from api import jobs, sim
 from core.io import store
 from core.models import (blacklitterman, bonds, capm, composicion, markowitz,
                          momentum, montecarlo, portfolio, regimenes, risk,
@@ -23,7 +23,12 @@ bp = Blueprint("analisis", __name__, url_prefix="/api")
 
 
 def _posiciones(nombre):
-    p = store.cargar(nombre)
+    """Las posiciones de la cartera, con la simulación puesta si la hay.
+
+    Único embudo: todos los modelos parten de acá, así que la simulación entra
+    a todos por igual sin tocar ninguno. Ver `api/sim.py`.
+    """
+    p = sim.aplicar(store.cargar(nombre))
     return p if p else None
 
 

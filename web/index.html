@@ -424,6 +424,14 @@ footer a:hover{text-decoration:underline}
 .lab-escala{display:flex;align-items:center;gap:7px;margin-top:14px;font-size:11px;color:var(--texto-3)}
 .lab-escala i{width:15px;height:12px;border-radius:2px}
 
+/* Simulación: la barra que prueba compras y ventas sobre la cartera sin
+   guardarlas. Va marcada al borde para que nadie la lea como cartera real. */
+.lab-sim{border-color:var(--alerta);box-shadow:inset 3px 0 0 var(--alerta)}
+.lab-sim .chip{min-width:0;gap:7px;padding-left:10px;padding-right:8px}
+.lab-x{border:0;background:transparent;color:inherit;font:inherit;font-size:15px;line-height:1;
+       cursor:pointer;opacity:.55;padding:0}
+.lab-x:hover{opacity:1}
+
 .lab-pasos{background:var(--panel);border:1px solid var(--borde);border-radius:10px;
            padding:18px 20px 14px;margin-bottom:14px}
 .lab-pasos .via{height:2px;background:var(--panel-2);position:relative;margin:0 7px}

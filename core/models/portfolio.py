@@ -132,6 +132,10 @@ def valuar(posiciones, precios=None) -> dict:
             "source": origen or "",
             "sin_precio": precio_hoy is None,
             "precio_estimado": estimado,
+            # El lote lo puso (o lo recortó) el simulador, no existe en la
+            # cartera. La pantalla lo pinta aparte para que nadie lo lea como
+            # tenencia real.
+            "sim": bool(p.get("sim")),
         }
         if valor is not None and costo is not None:
             fila["pnl_usd"] = round(valor - costo, 2)
