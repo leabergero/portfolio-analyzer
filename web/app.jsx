@@ -1418,7 +1418,7 @@ function ZonasRiesgo({ d }) {
 
 /* DAT-17 · treemap por sector: alto de banda = sector, ancho = ticker. Dice de
    una lo que la dona no: qué papel concreto trae cada sector. */
-function TreemapSectores({ detalle, campo = "sector" }) {
+function TreemapSectores({ detalle, campo = "sector", alto = 300 }) {
   const c = colores();
   const sectores = {};
   (detalle || []).forEach((x) => {
@@ -1433,7 +1433,7 @@ function TreemapSectores({ detalle, campo = "sector" }) {
   if (!orden.length) return <div className="cargando">Sin sectores clasificados.</div>;
 
   return (
-    <div className="lab-tree">
+    <div className="lab-tree" style={{ height: alto }}>
       {orden.map(([nombre, s], i) => (
         <div className="sec" key={nombre} style={{ flex: s.valor }}>
           <span className="rot" title={`${nombre} · ${usd(s.valor)}`}>
@@ -2141,6 +2141,14 @@ function Composicion({ d }) {
   });
   const cortes = [["por_tipo", "Por tipo de activo"], ["por_sector", "Por sector"],
                   ["por_industria", "Por industria"]];
+
+  // El alto no puede ser fijo: cada industria es una fila de 30 px como mínimo,
+  // y una cartera con doce se salía del panel y se escribía encima del pie.
+  // Manda el corte más largo —la industria— y los tres paneles lo siguen, así
+  // la fila queda pareja en vez de tres cuadros de alturas distintas.
+  const industrias = new Set((d.detalle || []).filter((x) => x.valor_usd)
+    .map((x) => x.industria || "Sin dato")).size;
+  const alto = Math.max(300, 34 * industrias);
   return (
     <>
       <div className="fila f3">
@@ -2152,13 +2160,13 @@ function Composicion({ d }) {
           if (k === "por_industria") return (
             <div className="panel" key={k}>
               <h3>{t}</h3>
-              <TreemapSectores detalle={d.detalle} campo="industria" />
+              <TreemapSectores detalle={d.detalle} campo="industria" alto={alto} />
             </div>);
           const g = dona(d[k] || [], t);
           return (
             <div className="panel" key={k}>
               <h3>{t}</h3>
-              <Grafico datos={g.datos} layout={g.layout} alto={300} />
+              <Grafico datos={g.datos} layout={g.layout} alto={alto} />
             </div>
           );
         })}
