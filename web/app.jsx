@@ -557,6 +557,13 @@ function Analisis({ cartera, recargar, sim, setSim }) {
                  : M[k]?.estado === "error" ? "error" : "corriendo")} />
           </button>
         ))}
+        {/* Con la simulación puesta, todas las pestañas muestran números que no
+            son los de tu cartera. El cartel que lo explica vive en Posición, así
+            que en el resto queda esta marca — y lleva ahí de un clic. */}
+        {LAB && sim.length > 0 && (
+          <button className="chip ojo lab-marca" onClick={() => setTab("posicion")}
+                  title="Estás viendo la cartera con activos simulados. Se edita en Posición.">
+            simulación · {sim.length}</button>)}
         {/* El índice solo cambia algo en dos pestañas: en Posición manda sobre
             beta, alpha y R², y en Optimización calibra la aversión al riesgo (δ)
             de Black-Litterman. En Riesgo, Monte Carlo y Regímenes lo único que
