@@ -36,9 +36,21 @@ _COLUMNAS = ["Open", "High", "Low", "Close", "Volume"]
 
 
 def conectar():
+    """Una conexión que espera su turno en vez de morirse.
+
+    Los modelos corren en paralelo y todos tiran de los mismos precios. Mientras
+    todos los tickers están cacheados no se nota, pero apenas aparece uno nuevo
+    —una compra recién cargada, un activo en simulación— seis hilos lo bajan a
+    la vez y escriben juntos: con los 5 s de espera de fábrica y el journal
+    clásico, `database is locked` tiraba abajo el panel entero con un 500.
+
+    WAL para que el que lee no espere al que escribe, y 30 s de paciencia para
+    el que escribe. La base sigue siendo regenerable: esto no cambia qué guarda.
+    """
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    con = sqlite3.connect(DB_PATH)
+    con = sqlite3.connect(DB_PATH, timeout=30)
     con.row_factory = sqlite3.Row
+    con.execute("PRAGMA journal_mode=WAL")
     return con
 
 
