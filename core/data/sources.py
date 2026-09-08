@@ -260,17 +260,39 @@ def _fci_usd(ticker: str) -> pd.Series:
     retornos descartan solos las series de menos de 30 ruedas, así que el fondo
     queda fuera del riesgo y de la optimización sin ningún caso especial.
 
-    Tampoco se cachea: es el precio de hoy, y mañana es otro.
+    **La última cuotaparte vista se guarda en la caché**, y es lo que se devuelve
+    cuando el broker no está disponible. Antes no se cacheaba —"es el precio de
+    hoy, y mañana es otro"— y el resultado era que sin sesión de Cocos el fondo
+    aparecía «sin precio» y quedaba fuera del total de la cartera: una tenencia
+    que existe, valuada en nada. Un valor de ayer es una aproximación; cero es
+    un error.
     """
     from core.broker import cocos
+    from core.data import cache
     from core.data import mep as mep_mod
 
     hoy = date.today()
     # Cocos informa la cuotaparte en pesos, también la de los fondos en dólares.
-    usd = mep_mod.a_usd(cocos.precio_fci(ticker) or 0, hoy)
+    ars = cocos.precio_fci(ticker)
+    fecha = hoy
+
+    if ars:
+        cache.guardar_precios(ticker, pd.DataFrame({"Close": [float(ars)]},
+                                                   index=[pd.Timestamp(hoy)]))
+    else:
+        # Sin broker: la última que se llegó a ver, con su fecha real.
+        df = cache.leer_precios(ticker, "1900-01-01", hoy.isoformat())
+        s = df["Close"].dropna() if "Close" in df.columns else pd.Series(dtype=float)
+        if s.empty:
+            return pd.Series(dtype=float)
+        ars, fecha = float(s.iloc[-1]), s.index[-1].date()
+
+    # Se convierte con el MEP de la fecha del precio, no con el de hoy: son los
+    # pesos de ese día.
+    usd = mep_mod.a_usd(ars, fecha)
     if not usd:
         return pd.Series(dtype=float)
-    return pd.Series([usd], index=[pd.Timestamp(hoy)])
+    return pd.Series([usd], index=[pd.Timestamp(fecha)])
 
 
 def precios_usd(ticker: str, desde: str = None, hasta: str = None,

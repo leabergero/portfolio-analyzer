@@ -17,26 +17,112 @@ Dos cosas que hay que tener presentes al leer este módulo:
      código del autenticador.
 """
 
+import contextvars
+import hashlib
+import threading
+import time
 from datetime import date
 
 import pandas as pd
 
-from core.broker import _cocos_patch, vault
+from core.broker import _cocos_patch, sesion, vault
 from core.data import mep
 
-_cliente = None
-_estado = {"conectado": False, "detalle": "sin conectar", "cuenta": None}
+# ── Uno por request, no uno por proceso ───────────────────────────────────────
+# El cliente del broker y su estado eran globales de módulo, y estuvo bien
+# mientras la app corría en la máquina de su dueño: un proceso, un usuario.
+# Servida en la web hay muchos usuarios a la vez en el mismo intérprete, y un
+# global le mostraría a uno la sesión de otro. ContextVar da una copia por
+# request sin tocar ninguna de las ~30 funciones que los usan.
+
+_LIMPIO = {"conectado": False, "detalle": "sin conectar", "cuenta": None}
+
+_ctx_cliente = contextvars.ContextVar("cocos_cliente", default=None)
+_ctx_estado = contextvars.ContextVar("cocos_estado", default=None)
+
+# Y en modo local, uno solo para todo el proceso. Es obligatorio, no una
+# comodidad: cada request de Flask corre en su propio contexto, así que un
+# ContextVar se vaciaría entre una request y la siguiente y la app de escritorio
+# tendría que reconectar el broker en cada clic. En la web eso no molesta porque
+# el cliente se arma de nuevo en cada request a partir del sobre, que es
+# justamente lo que hace que no queden tokens vivos entre medio.
+_local = {"cliente": None, "estado": dict(_LIMPIO)}
+
+
+def _c():
+    return _ctx_cliente.get() if sesion.modo_web() else _local["cliente"]
+
+
+def _poner(cliente) -> None:
+    if sesion.modo_web():
+        _ctx_cliente.set(cliente)
+    else:
+        _local["cliente"] = cliente
+
+
+def _est() -> dict:
+    if not sesion.modo_web():
+        return _local["estado"]
+    e = _ctx_estado.get()
+    if e is None:
+        e = dict(_LIMPIO)
+        _ctx_estado.set(e)
+    return e
 
 
 def estado() -> dict:
-    return dict(_estado)
+    return dict(_est())
+
+
+def sesion_muerta() -> bool:
+    """¿Alguna llamada de este request se comió un 401 del broker?
+
+    No es lo mismo que un error de Cocos: significa que el token ya no vale y
+    hay que volver a autenticarse. Ver `_cocos_patch._marcar`.
+    """
+    return _cocos_patch.hubo_401()
 
 
 def cliente():
-    return _cliente
+    return _c()
 
 
 # ── Conexión ──────────────────────────────────────────────────────────────────
+
+def _clase():
+    """La clase de pyCocos, ya parcheada.
+
+    pyCocos 0.2.12 apunta al login viejo con una clave caduca: se repara el
+    host, la anon key y los headers de versión antes de instanciar. Ver
+    core/broker/_cocos_patch.py.
+    """
+    from pycocos import Cocos
+    _cocos_patch.aplicar()
+    return Cocos
+
+
+def _jwt_actual() -> dict:
+    """Los JWT vivos del cliente. Es lo único que sale de este módulo hacia
+    afuera: nunca la contraseña, nunca la semilla."""
+    return {
+        "access_token": _c().access_token,
+        "refresh_token": _c().refresh_token,
+        "token_expiration": _c().token_expiration,
+        "account_number": getattr(_c(), "account_number", ""),
+    }
+
+
+# Los dos constructores de abajo parchean cosas globales —un método de clase y
+# `builtins.input`— mientras instancian. Eso no es seguro con hilos: servido a
+# varios usuarios, un hilo restauraba el método justo cuando otro todavía no
+# había construido su cliente, y el segundo terminaba haciendo el login de
+# verdad con las credenciales de relleno. Cocos contestaba "Invalid login
+# credentials" y desconectaba a alguien que acababa de conectarse. Pasó de
+# verdad el 2026-09-08.
+#
+# El lock cubre sólo la construcción, que no toca la red: son ~18 ms.
+_lock_construir = threading.Lock()
+
 
 def _restaurar(Cocos, kwargs: dict, sesion: dict):
     """Crea el cliente inyectando los JWT guardados, sin login ni 2FA.
@@ -46,12 +132,13 @@ def _restaurar(Cocos, kwargs: dict, sesion: dict):
     dejarlo anotado: si pycocos cambia el nombre de ese método, esto deja de
     funcionar y hay que volver al login completo (que igual sigue andando).
     """
-    original = Cocos._auth
-    Cocos._auth = lambda self: None
-    try:
-        c = Cocos(**kwargs)
-    finally:
-        Cocos._auth = original
+    with _lock_construir:
+        original = Cocos._auth
+        Cocos._auth = lambda self: None
+        try:
+            c = Cocos(**kwargs)
+        finally:
+            Cocos._auth = original
 
     c.access_token = sesion["access_token"]
     c.refresh_token = sesion["refresh_token"]
@@ -81,12 +168,13 @@ def _login(Cocos, kwargs: dict, codigo_2fa: str = ""):
         return Cocos(**kwargs)          # semilla → pyCocos genera el código solo
 
     import builtins
-    original = builtins.input
-    builtins.input = lambda *a, **k: codigo_2fa
-    try:
-        return Cocos(**kwargs)
-    finally:
-        builtins.input = original
+    with _lock_construir:
+        original = builtins.input
+        builtins.input = lambda *a, **k: codigo_2fa
+        try:
+            return Cocos(**kwargs)
+        finally:
+            builtins.input = original
 
 
 def conectar(api_key: str, forzar_login: bool = False, codigo_2fa: str = "") -> dict:
@@ -105,23 +193,17 @@ def conectar(api_key: str, forzar_login: bool = False, codigo_2fa: str = "") -> 
     tumbar la aplicación entera — el resto de la cartera se sigue valuando con
     la caché.
     """
-    global _cliente
 
     try:
-        from pycocos import Cocos
+        Cocos = _clase()
     except ImportError:
-        _estado.update(conectado=False, detalle="falta pycocos")
+        _est().update(conectado=False, detalle="falta pycocos")
         return estado()
-
-    # pyCocos 0.2.12 apunta al login viejo con una clave caduca: se repara el
-    # host, la anon key y los headers de versión antes de instanciar. Ver
-    # core/broker/_cocos_patch.py.
-    _cocos_patch.aplicar()
 
     try:
         credenciales = vault.abrir(api_key)
     except Exception as e:
-        _estado.update(conectado=False, detalle=f"vault: {e}")
+        _est().update(conectado=False, detalle=f"vault: {e}")
         return estado()
 
     kwargs = {"email": credenciales["email"], "password": credenciales["password"],
@@ -137,53 +219,194 @@ def conectar(api_key: str, forzar_login: bool = False, codigo_2fa: str = "") -> 
         sesion = vault.cargar_sesion(api_key)
         if sesion:
             try:
-                _cliente = _restaurar(Cocos, kwargs, sesion)
+                _poner(_restaurar(Cocos, kwargs, sesion))
                 # El access_token dura ~1 h; si venció, se renueva con el
                 # refresh_token (que vive mucho más) sin volver a pedir 2FA. Sin
                 # esto, reconectar tras una hora daba 401 "jwt expired" en cada
                 # llamada de datos aunque el login figurara conectado.
                 import time
                 if time.time() > sesion.get("token_expiration", 0) - 60:
-                    _cliente.connected = True
-                    _cliente._refresh_access_token()
+                    _c().connected = True
+                    _c()._refresh_access_token()
                     _guardar_sesion(api_key)
                     detalle = "sesión renovada"
                 else:
                     detalle = "sesión restaurada"
-                _estado.update(conectado=True, detalle=detalle,
-                               cuenta=getattr(_cliente, "account_number", None))
+                _est().update(conectado=True, detalle=detalle,
+                              cuenta=getattr(_c(), "account_number", None))
                 return estado()
             except Exception as e:
                 print(f"  [cocos] sesión rechazada ({e}); login completo")
                 vault.borrar_sesion()
 
     try:
-        _cliente = _login(Cocos, kwargs, codigo_2fa)   # acá se resuelve el 2FA
+        _poner(_login(Cocos, kwargs, codigo_2fa))   # acá se resuelve el 2FA
     except Exception as e:
-        _estado.update(conectado=False, detalle=f"login: {e}")
+        _est().update(conectado=False, detalle=f"login: {e}")
         return estado()
 
     _guardar_sesion(api_key)
-    _estado.update(conectado=True, detalle="login nuevo",
-                   cuenta=getattr(_cliente, "account_number", None))
+    _est().update(conectado=True, detalle="login nuevo",
+                  cuenta=getattr(_c(), "account_number", None))
     return estado()
 
 
 def _guardar_sesion(api_key: str):
     """Persiste los JWT vivos del cliente para reconectar sin 2FA."""
-    vault.guardar_sesion(api_key, {
-        "access_token": _cliente.access_token,
-        "refresh_token": _cliente.refresh_token,
-        "token_expiration": _cliente.token_expiration,
-        "account_number": getattr(_cliente, "account_number", ""),
-    })
+    vault.guardar_sesion(api_key, _jwt_actual())
 
 
 def desconectar():
-    global _cliente
-    _cliente = None
+    _poner(None)
     vault.borrar_sesion()
-    _estado.update(conectado=False, detalle="desconectado", cuenta=None)
+    _est().update(conectado=False, detalle="desconectado", cuenta=None)
+
+
+# ── Modo web: sin vault, sin disco ────────────────────────────────────────────
+# Las dos funciones de abajo son el camino multiusuario. No leen ni escriben
+# `data/vault/`: las credenciales llegan por parámetro, se usan para el login y
+# se van con el garbage collector. Lo único que persiste está en el navegador
+# del usuario, firmado por `core.broker.sesion`.
+#
+# El cliente y el estado son por request (ver `_ctx_cliente` arriba), así que
+# varios usuarios pueden estar conectados a la vez en el mismo proceso sin
+# verse entre ellos.
+
+def login(email: str, password: str, codigo_2fa: str = "") -> tuple:
+    """Login con credenciales que no se guardan en ningún lado.
+
+    El 2FA es obligatorio en este camino y tiene que ser el código de 6 dígitos,
+    no la semilla: guardar la semilla dejaría al servidor generando códigos solo
+    para siempre, y la caducidad diaria del sobre no valdría nada.
+
+    Devuelve (estado, jwt). El `jwt` va firmado al navegador; acá no queda.
+    """
+
+    if not (email and password):
+        return {**estado(), "detalle": "faltan credenciales"}, None
+    try:
+        Cocos = _clase()
+    except ImportError:
+        _est().update(conectado=False, detalle="falta pycocos")
+        return estado(), None
+
+    kwargs = {"email": email, "password": password, "api_key": _cocos_patch.ANON_KEY}
+    try:
+        _poner(_login(Cocos, kwargs, codigo_2fa))
+    except Exception as e:
+        _est().update(conectado=False, detalle=f"login: {e}")
+        return estado(), None
+
+    _est().update(conectado=True, detalle="login nuevo",
+                   cuenta=getattr(_c(), "account_number", None))
+    return estado(), _jwt_actual()
+
+
+def restaurar(jwt: dict) -> tuple:
+    """Reconstruye el cliente desde los JWT del sobre. Sin login, sin 2FA.
+
+    Se llama en cada request: son ~18 ms de construcción, y a cambio entre
+    request y request el proceso no tiene ningún token vivo en memoria.
+
+    Devuelve (estado, jwt_renovado). El segundo es None si no hubo renovación;
+    si no lo es, hay que reemitir el sobre y devolvérselo al navegador, **con el
+    login_ts del sobre viejo** o el 2FA diario deja de pedirse.
+    """
+    _cocos_patch.olvidar_401()      # la marca es de este request, no del anterior
+    try:
+        Cocos = _clase()
+    except ImportError:
+        _est().update(conectado=False, detalle="falta pycocos")
+        return estado(), None
+
+    # email y password no se usan: `_restaurar` neutraliza `_auth` y le inyecta
+    # los tokens. Van con valor de relleno sólo porque pyCocos los exige.
+    kwargs = {"email": "-", "password": "-", "api_key": _cocos_patch.ANON_KEY}
+    try:
+        _poner(_restaurar(Cocos, kwargs, jwt))
+    except Exception as e:
+        _poner(None)
+        _est().update(conectado=False, detalle=f"sesión rechazada: {e}", cuenta=None)
+        return estado(), None
+
+    renovado = None
+    if time.time() > jwt.get("token_expiration", 0) - 60:
+        try:
+            renovado = _renovar(jwt)
+        except Exception as e:
+            # El refresh falló, pero el access token puede seguir sirviendo: si
+            # todavía no venció, se sigue con él en vez de desconectar a alguien
+            # que estaba trabajando. Si tampoco sirve, la llamada al broker dará
+            # 401 y ahí sí se le pide reconectar.
+            if time.time() > jwt.get("token_expiration", 0):
+                _poner(None)
+                _est().update(conectado=False, detalle=f"no se pudo renovar: {e}",
+                              cuenta=None)
+                return estado(), None
+            print(f"  [cocos] refresh rechazado, sigo con el token vigente: {e}")
+
+    _est().update(conectado=True, detalle="sesión restaurada",
+                   cuenta=getattr(_c(), "account_number", None))
+    return estado(), renovado
+
+
+# ── Renovar una sola vez, no una por request ──────────────────────────────────
+# El refresh token de Cocos es de un solo uso: quien renueva lo consume y deja
+# inválidos a los demás. Como el navegador dispara varias requests a la vez con
+# el mismo sobre, sin esto la primera renovaba y las otras recibían
+# "invalid_grant" y desconectaban al usuario recién conectado. Pasó de verdad el
+# 2026-09-08.
+#
+# El que gana renueva; los que pierden esperan el lock y se llevan el mismo
+# resultado. La caja se vacía sola a los pocos segundos.
+#
+#     ponytail: guarda tokens en memoria durante _VIDA_RENOVACION segundos, que
+#     es lo único que este proceso retiene entre requests. Si algún día molesta,
+#     la alternativa es que el navegador serialice: pedir la renovación por un
+#     endpoint aparte y encolar el resto mientras tanto.
+
+_VIDA_RENOVACION = 20
+_lock_renovar = threading.Lock()
+_renovados = {}
+
+
+def _aplicar(jwt: dict) -> None:
+    """Mete unos JWT en el cliente vivo y arregla sus cabeceras."""
+    c = _c()
+    c.access_token = jwt["access_token"]
+    c.refresh_token = jwt["refresh_token"]
+    c.token_expiration = jwt["token_expiration"]
+    c.client.update_session_headers({
+        "apikey": "", "authorization": f"Bearer {c.access_token}",
+        "Content-Type": "application/json",
+        "x-account-id": getattr(c, "account_number", ""),
+    })
+
+
+def _renovar(jwt: dict) -> dict:
+    clave = hashlib.sha256(jwt["refresh_token"].encode()).hexdigest()[:16]
+    with _lock_renovar:
+        ahora = time.time()
+        for k, (_, t0) in list(_renovados.items()):
+            if ahora - t0 > _VIDA_RENOVACION:
+                _renovados.pop(k, None)
+
+        hecho = _renovados.get(clave)
+        if hecho:
+            _aplicar(hecho[0])          # perdió la carrera: usa lo que ya se sacó
+            return hecho[0]
+
+        _c().connected = True
+        _c()._refresh_access_token()
+        nuevo = _jwt_actual()
+        _renovados[clave] = (nuevo, ahora)
+        return nuevo
+
+
+def olvidar():
+    """Suelta el cliente al terminar el request. No toca el vault."""
+    _poner(None)
+    _est().update(conectado=False, detalle="sin conectar", cuenta=None)
 
 
 # ── Precios ───────────────────────────────────────────────────────────────────
@@ -206,13 +429,13 @@ def precio_snapshot(ticker: str):
     `close` va tarde a propósito: durante la rueda y al cierre suele venir vacío
     o en cero, y tomarlo primero devuelve un precio inexistente.
     """
-    if _cliente is None:
+    if _c() is None:
         return None
     from core.data.symbols import base_symbol
 
     base = base_symbol(ticker)
     try:
-        filas = _cliente.get_instrument_snapshot(base, _cliente.segments.DEFAULT)
+        filas = _c().get_instrument_snapshot(base, _c().segments.DEFAULT)
     except Exception:
         return None
     for fila in filas or []:
@@ -227,12 +450,12 @@ def precio_snapshot(ticker: str):
 
 def cotizaciones(tickers: list) -> pd.DataFrame:
     """Snapshot de varios instrumentos. Funciona con el mercado cerrado."""
-    if _cliente is None:
+    if _c() is None:
         return pd.DataFrame()
     filas = []
     for t in tickers:
         try:
-            snap = _cliente.get_instrument_snapshot(t, _cliente.segments.DEFAULT)
+            snap = _c().get_instrument_snapshot(t, _c().segments.DEFAULT)
             if snap:
                 filas.extend(snap)
         except Exception:
@@ -253,16 +476,16 @@ def historico(ticker: str, desde: str, hasta: str = None) -> pd.DataFrame:
     Devuelve vacío en vez de fallar: si el broker no responde, `sources` cae a
     lo que ya esté guardado.
     """
-    if _cliente is None:
+    if _c() is None:
         return pd.DataFrame()
     from core.data.symbols import base_symbol
 
     hasta = hasta or date.today().isoformat()
     base = base_symbol(ticker)
     try:
-        largo = _cliente.long_ticker(base, _cliente.settlements.T2,
-                                     _cliente.currencies.PESOS)
-        crudo = _cliente.get_daily_history(largo, desde)
+        largo = _c().long_ticker(base, _c().settlements.T2,
+                                     _c().currencies.PESOS)
+        crudo = _c().get_daily_history(largo, desde)
     except Exception as e:
         print(f"  [cocos] histórico de {ticker}: {e}")
         return pd.DataFrame()
@@ -291,20 +514,20 @@ def historico(ticker: str, desde: str, hasta: str = None) -> pd.DataFrame:
 # vienen; la interpretación (mapear a la cartera, valuar en USD) se hace arriba.
 
 def _llamar(nombre: str, *args):
-    if _cliente is None:
+    if _c() is None:
         return {"error": "sin conectar"}
     try:
-        return getattr(_cliente, nombre)(*args)
+        return getattr(_c(), nombre)(*args)
     except Exception as e:
         return {"error": f"{type(e).__name__}: {e}"}
 
 
 def _rendimiento(timeframe: str):
-    if _cliente is None:
+    if _c() is None:
         return {"error": "sin conectar"}
     try:
-        tf = getattr(_cliente.performance_timeframes, timeframe, timeframe)
-        return _cliente.portfolio_performance(tf, "", "")
+        tf = getattr(_c().performance_timeframes, timeframe, timeframe)
+        return _c().portfolio_performance(tf, "", "")
     except Exception as e:
         return {"error": f"{type(e).__name__}: {e}"}
 
@@ -372,10 +595,10 @@ def _categoria(m: dict) -> str:
 
 def _pagina_movimientos(limite: int, offset: int):
     """Una página cruda del endpoint nuevo `api/movements` (sin v1)."""
-    if _cliente is None:
+    if _c() is None:
         return {"error": "sin conectar"}
     try:
-        r = _cliente.client.session.get(
+        r = _c().client.session.get(
             "https://api.cocos.capital/api/movements",
             params={"limit": limite, "offset": offset}, timeout=25).json()
     except Exception as e:
@@ -559,7 +782,7 @@ def tenencias_fci():
             "currency": moneda, "asset_type": "FCI",
             "notes": p.get("instrument_short_name") or "",
         })
-    return {"lotes": lotes, "cuenta": _estado.get("cuenta")}
+    return {"lotes": lotes, "cuenta": _est().get("cuenta")}
 
 
 def fondos_disponibles():

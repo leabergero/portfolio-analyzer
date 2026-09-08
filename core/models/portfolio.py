@@ -105,6 +105,19 @@ def valuar(posiciones, precios=None) -> dict:
             compra_usd, comision_usd = compra, comision
 
         precio_hoy = precios.get(t)
+
+        # Un FCI sólo tiene precio si el fondo está HOY en la cuenta conectada:
+        # Cocos no publica cuotapartes de fondos que no tenés. Un fondo que
+        # rescataste, o el de otra cuenta de la familia, se quedaba sin precio y
+        # la tenencia entera desaparecía del total de la cartera. Antes de
+        # mostrar nada, se cae al PPC: es el último valor que Cocos dio por esa
+        # cuotaparte, y una tenencia valuada a su costo se lee mucho mejor que
+        # una tenencia valuada en cero. Queda marcada para que la pantalla lo
+        # diga y nadie la confunda con un precio de mercado.
+        estimado = False
+        if precio_hoy is None and origen == sources.SOURCE_FCI and compra_usd:
+            precio_hoy, estimado = compra_usd, True
+
         valor = qty * precio_hoy if precio_hoy else None
         costo = (qty * compra_usd + comision_usd) if compra_usd else None
 
@@ -118,6 +131,7 @@ def valuar(posiciones, precios=None) -> dict:
             "costo_usd": round(costo, 2) if costo else None,
             "source": origen or "",
             "sin_precio": precio_hoy is None,
+            "precio_estimado": estimado,
         }
         if valor is not None and costo is not None:
             fila["pnl_usd"] = round(valor - costo, 2)

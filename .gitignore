@@ -14,6 +14,10 @@ connectors.json
 .env
 # credenciales cifradas + la clave que las abre (config.json)
 data/vault/
+# secreto que firma los sobres de sesión del modo web
+data/secreto_sesion
+# carteras de los usuarios de la web, una carpeta por identidad de Google
+data/usuarios/
 # backups de carteras y realizado
 data/*.bak*
 

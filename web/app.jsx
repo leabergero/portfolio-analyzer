@@ -19,10 +19,71 @@ const { useState, useEffect, useRef, useCallback } = React;
 
 /* ═══════════════ utilidades ═══════════════ */
 
+/* El sobre firmado de la sesión web. Vive sólo en este navegador: es lo único
+   que prueba quién sos ante el servidor, que no guarda credenciales de nadie.
+   En modo local no existe y todo esto queda inerte. Los try/catch son porque
+   localStorage tira excepción en ventana privada o con las cookies bloqueadas,
+   y ahí la app tiene que seguir andando igual, pidiendo login cada vez. */
+/* Cuál es "tu" cartera: la que se abre sola al entrar. Vive en este navegador,
+   igual que el tema. Con una sola cartera no hay nada que elegir y es esa; con
+   varias, manda lo que el usuario haya fijado en Carteras, y si eso ya no
+   existe (la borró o la renombró) se cae a la primera en vez de dejar la
+   pantalla vacía preguntando. */
+const DEFECTO = "pa.cartera";
+const carteraDefecto = {
+  leer: () => { try { return localStorage.getItem(DEFECTO); } catch { return null; } },
+  poner: (n) => { try { n ? localStorage.setItem(DEFECTO, n) : localStorage.removeItem(DEFECTO); }
+                  catch { /* sin memoria */ } },
+};
+
+const elegirCartera = (carteras) => {
+  const nombres = (carteras || []).map((c) => c.nombre);
+  if (!nombres.length) return null;
+  if (nombres.length === 1) return nombres[0];
+  const fijada = carteraDefecto.leer();
+  return nombres.includes(fijada) ? fijada : nombres[0];
+};
+
+const SOBRE = "pa.sesion";
+const sesion = {
+  leer: () => { try { return localStorage.getItem(SOBRE); } catch { return null; } },
+  poner: (s) => { try { localStorage.setItem(SOBRE, s); } catch { /* sin memoria */ } },
+  tirar: () => { try { localStorage.removeItem(SOBRE); } catch { /* nada que hacer */ } },
+};
+
 const api = async (ruta, opciones) => {
-  const r = await fetch(ruta, opciones);
+  const o = { ...(opciones || {}) };
+  const guardado = sesion.leer();
+  if (guardado) o.headers = { ...(o.headers || {}), "X-Sesion": guardado };
+
+  const r = await fetch(ruta, o);
+
+  // Cocos renovó el token: el servidor devuelve un sobre nuevo y hay que
+  // quedárselo, o la próxima request va con el viejo y no entra.
+  const renovado = r.headers.get("X-Sesion");
+  if (renovado) sesion.poner(renovado);
+
+  // El servidor avisa que el sobre murió (venció, o Cocos lo rechazó). Se tira
+  // y se avisa a la pantalla, pero NO se sale de la app: el broker es opcional
+  // y las carteras se siguen viendo igual.
+  if (r.headers.get("X-Sesion-Fin")) {
+    sesion.tirar();
+    window.dispatchEvent(new CustomEvent("pa:reautenticar"));
+  }
+
   const d = await r.json().catch(() => ({ error: "Respuesta ilegible del servidor." }));
   if (!r.ok && !d.error) d.error = `Error ${r.status}`;
+
+  // Dos cosas distintas se pueden haber caído, y no se arreglan igual:
+  //   ingresar     → la sesión de la app. Volver a entrar con Google.
+  //   reautenticar → la de Cocos (24 h, o token revocado). Reconectar el broker,
+  //                  sin salir de la app: la cartera se sigue viendo.
+  if (r.status === 401 && d.ingresar) {
+    window.dispatchEvent(new CustomEvent("pa:ingresar"));
+  } else if (r.status === 401 && d.reautenticar) {
+    sesion.tirar();
+    window.dispatchEvent(new CustomEvent("pa:reautenticar", { detail: d.error }));
+  }
   return d;
 };
 
@@ -32,6 +93,19 @@ const usd = (n, dec = 2) =>
 const pct = (n, dec = 2) => (n == null ? "—" : Number(n).toFixed(dec) + " %");
 const num = (n, dec = 2) => (n == null ? "—" : Number(n).toFixed(dec));
 const signo = (n) => (n == null ? "" : n > 0 ? "pos" : n < 0 ? "neg" : "");
+
+/* Los campos de importes son type="text" y no type="number", y `dec()` es el
+   que interpreta lo que se tipeó. Con el locale en es-AR el navegador espera
+   coma decimal en un input numérico y **descarta el punto**: la tecla . del
+   teclado numérico no escribía nada y no había forma de cargar un decimal sin
+   soltar el numpad. Con texto entran las dos formas y acá se normaliza. */
+const dec = (v) => {
+  const n = parseFloat(String(v ?? "").trim().replace(",", "."));
+  return Number.isFinite(n) ? n : null;
+};
+/* Deja tipear sólo lo que puede ser un número, con cualquiera de los dos
+   separadores. Sin esto, un campo de texto acepta letras. */
+const soloNum = (v) => String(v).replace(/[^\d.,-]/g, "");
 
 /* Lee la paleta del CSS para que los gráficos sigan el tema. */
 function colores() {
@@ -164,7 +238,64 @@ const AYUDA = {
 
 /* ═══════════════ Barra superior ═══════════════ */
 
-function Barra({ modo, setModo, tema, setTema, carteras, cartera, setCartera }) {
+/* La identidad de Google arriba a la derecha: foto, nombre y, al tocarla, la
+   opción de salir. La foto viene en el id_token; si Google no la manda o el
+   archivo no carga, queda la inicial del nombre — nunca un hueco roto. */
+
+function Usuario({ yo }) {
+  const [abierto, setAbierto] = useState(false);
+  const [sinFoto, setSinFoto] = useState(false);
+  const caja = useRef(null);
+
+  useEffect(() => {
+    if (!abierto) return;
+    const afuera = (e) => { if (!caja.current?.contains(e.target)) setAbierto(false); };
+    const esc = (e) => { if (e.key === "Escape") setAbierto(false); };
+    document.addEventListener("mousedown", afuera);
+    document.addEventListener("keydown", esc);
+    return () => { document.removeEventListener("mousedown", afuera);
+                   document.removeEventListener("keydown", esc); };
+  }, [abierto]);
+
+  // Salir tira la cookie de la app Y el sobre de Cocos: son dos sesiones
+  // distintas, pero irse es irse de las dos.
+  const salir = async () => { await post("/api/salir"); sesion.tirar(); location.reload(); };
+  const inicial = (yo.nombre || yo.email || "?").trim()[0].toUpperCase();
+
+  return (
+    <div ref={caja} style={{ position: "relative" }}>
+      <button className="btn auto" onClick={() => setAbierto((v) => !v)}
+              title={yo.email} aria-haspopup="menu" aria-expanded={abierto}
+              style={{ display: "flex", alignItems: "center", gap: 7, paddingLeft: 4 }}>
+        {yo.foto && !sinFoto ? (
+          <img src={yo.foto} alt="" width="22" height="22" referrerPolicy="no-referrer"
+               onError={() => setSinFoto(true)}
+               style={{ borderRadius: "50%", display: "block" }} />
+        ) : (
+          <span style={{ width: 22, height: 22, borderRadius: "50%", display: "grid",
+                         placeItems: "center", background: "var(--acento)",
+                         color: "var(--panel)", fontSize: 11, fontWeight: 700 }}>
+            {inicial}</span>
+        )}
+        <span style={{ maxWidth: 130, overflow: "hidden", textOverflow: "ellipsis",
+                       whiteSpace: "nowrap" }}>
+          {yo.nombre || yo.email}</span>
+      </button>
+
+      {abierto && (
+        <div className="panel" role="menu"
+             style={{ position: "absolute", right: 0, top: "calc(100% + 6px)",
+                      minWidth: 210, padding: 10, zIndex: 50, marginBottom: 0 }}>
+          <div className="pie" style={{ margin: 0, wordBreak: "break-all" }}>{yo.email}</div>
+          <button className="btn peligro" role="menuitem" onClick={salir}
+                  style={{ width: "100%", marginTop: 8 }}>Salir</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Barra({ modo, setModo, tema, setTema, carteras, cartera, setCartera, yo }) {
   // El switch es binario y el tema tiene tres estados: "auto" se resuelve
   // mirando qué prefiere el sistema, y queda un enlace para volver a él.
   const sistemaOscuro = window.matchMedia?.("(prefers-color-scheme: dark)").matches;
@@ -187,6 +318,7 @@ function Barra({ modo, setModo, tema, setTema, carteras, cartera, setCartera }) 
         </select>
       )}
       <div className="der">
+        {yo?.email && <Usuario yo={yo} />}
         {tema !== "auto" && (
           <button className="btn auto" onClick={() => setTema("auto")}
                   title="Seguir el tema del sistema">auto</button>)}
@@ -325,8 +457,8 @@ function AltaRapida({ cartera, recargar }) {
     const t = f.ticker.trim().toUpperCase();
     if (!t || !f.buy_price || !f.qty) { setMsg({ mal: "Faltan ticker, precio o cantidad." }); return; }
     const actuales = await api(`/api/carteras/${encodeURIComponent(cartera)}`);
-    const nuevas = [...actuales, { ...f, ticker: t, buy_price: +f.buy_price,
-                                   qty: +f.qty, commissions: +f.commissions || 0 }];
+    const nuevas = [...actuales, { ...f, ticker: t, buy_price: dec(f.buy_price),
+                                   qty: dec(f.qty), commissions: dec(f.commissions) || 0 }];
     const r = await api(`/api/carteras/${encodeURIComponent(cartera)}`, {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ posiciones: nuevas }) });
@@ -348,13 +480,16 @@ function AltaRapida({ cartera, recargar }) {
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end", marginTop: 10 }}>
         {[["ticker", "Ticker", "text", 120, "GGAL.BA"],
           ["buy_date", "Fecha de compra", "text", 120, "2025-09-19"],
-          ["buy_price", "Precio pagado", "number", 110, ""],
-          ["qty", "Cantidad", "number", 100, ""],
-          ["commissions", "Comisiones", "number", 100, ""]].map(([k, et, tipo, w, ph]) => (
+          ["buy_price", "Precio pagado", "decimal", 110, ""],
+          ["qty", "Cantidad", "decimal", 100, ""],
+          ["commissions", "Comisiones", "decimal", 100, ""]].map(([k, et, tipo, w, ph]) => (
           <label key={k} style={{ fontSize: 11.5, color: "var(--texto-3)" }}>
             {et}<br />
-            <input type={tipo} value={f[k]} placeholder={ph} style={{ width: w, marginTop: 3 }}
-                   onChange={(e) => setF({ ...f, [k]: e.target.value })}
+            <input type={tipo === "decimal" ? "text" : tipo}
+                   inputMode={tipo === "decimal" ? "decimal" : undefined}
+                   value={f[k]} placeholder={ph} style={{ width: w, marginTop: 3 }}
+                   onChange={(e) => setF({ ...f, [k]:
+                     tipo === "decimal" ? soloNum(e.target.value) : e.target.value })}
                    onBlur={k === "ticker" ? validar : undefined} />
           </label>))}
         <label style={{ fontSize: 11.5, color: "var(--texto-3)" }}>
@@ -456,7 +591,14 @@ function Posicion({ d, cartera, recargar, extras, bench }) {
               <td className="mono">{f.buy_date}</td>
               <td className="n">{num(f.qty, 0)}</td>
               <td className="n">{usd(f.buy_price_usd, 4)}</td>
-              <td className="n">{f.precio_usd == null ? "—" : usd(f.precio_usd, 4)}</td>
+              <td className="n">{f.precio_usd == null ? "—" : (
+                <>{usd(f.precio_usd, 4)}{f.precio_estimado && (
+                  // Cocos no publica la cuotaparte de un fondo que no tenés hoy
+                  // en la cuenta conectada. Se muestra el PPC para que la
+                  // tenencia no valga cero, con el asterisco que lo aclara.
+                  <span title="Cocos no publica la cuotaparte de este fondo. Es el último valor conocido (tu precio promedio de compra), no un precio de mercado."
+                        style={{ color: "var(--alerta)", cursor: "help" }}> *</span>)}</>
+              )}</td>
               <td className="n">{usd(f.valor_usd)}</td>
               <td className={"n " + signo(f.pnl_usd)}>{usd(f.pnl_usd)}</td>
               <td className={"n " + signo(f.pnl_pct)}>{pct(f.pnl_pct, 1)}</td>
@@ -635,8 +777,8 @@ function AltaDividendo({ cartera, recargar }) {
           <th className="n">Resultado</th><th></th></tr></thead>
         <tbody>
           {filas.map((f, i) => {
-            const qty = parseFloat(f.qty) || 1;
-            const imp = parseFloat(f.importe) || 0;
+            const qty = dec(f.qty) || 1;
+            const imp = dec(f.importe) || 0;
             const total = f.por_accion ? qty * imp : imp;
             return (
               <tr key={i}>
@@ -649,8 +791,8 @@ function AltaDividendo({ cartera, recargar }) {
                            onChange={(e) => set(i, "ticker", e.target.value.toUpperCase())} /></td>
                 <td><input type="date" value={f.fecha} style={{ width: 140 }}
                            onChange={(e) => set(i, "fecha", e.target.value)} /></td>
-                <td><input type="number" step="0.0001" value={f.importe} style={{ width: 110 }}
-                           onChange={(e) => set(i, "importe", e.target.value)} /></td>
+                <td><input type="text" inputMode="decimal" value={f.importe} style={{ width: 110 }}
+                           onChange={(e) => set(i, "importe", soloNum(e.target.value))} /></td>
                 <td>
                   <select value={f.moneda || ""} style={{ width: 90 }}
                           onChange={(e) => set(i, "moneda", e.target.value)}>
@@ -666,9 +808,9 @@ function AltaDividendo({ cartera, recargar }) {
                     <option value="total">el total cobrado</option>
                   </select>
                 </td>
-                <td><input type="number" value={f.qty} style={{ width: 100 }}
+                <td><input type="text" inputMode="decimal" value={f.qty} style={{ width: 100 }}
                            disabled={!f.por_accion} placeholder={f.por_accion ? "" : "—"}
-                           onChange={(e) => set(i, "qty", e.target.value)} /></td>
+                           onChange={(e) => set(i, "qty", soloNum(e.target.value))} /></td>
                 <td className="n mono">{total ? `${num(total, 2)} ${f.moneda || ""}` : "—"}</td>
                 <td><button className="btn" style={{ padding: "2px 9px", fontSize: 12 }}
                             onClick={() => quitar(i)}>✕</button></td>
@@ -684,8 +826,8 @@ function AltaDividendo({ cartera, recargar }) {
         {completas.length > 0 && (
           <span className="mono" style={{ marginLeft: "auto", fontSize: 13.5 }}>
             {num(completas.reduce((s, f) => s + (f.por_accion
-              ? (parseFloat(f.qty) || 1) * (parseFloat(f.importe) || 0)
-              : parseFloat(f.importe) || 0), 0), 2)} en total
+              ? (dec(f.qty) || 1) * (dec(f.importe) || 0)
+              : dec(f.importe) || 0), 0), 2)} en total
           </span>)}
       </div>
       {msg && <div className={"aviso " + (msg.mal ? "mal" : "ok")}>{msg.mal || msg.ok}</div>}
@@ -2165,7 +2307,8 @@ function RiesgoLimite({ cartera, d }) {
     return () => { vivo = false; };
   }, [pedido, cartera]);
 
-  const calcular = () => setPedido(objetivo);
+  // dec(): `pedido` viaja en la URL y el servidor espera un número con punto.
+  const calcular = () => { const v = dec(objetivo); if (v) setPedido(v); };
 
   const ordenes = (r?.ordenes || []).filter((o) => o.accion !== "MANTENER");
 
@@ -2175,12 +2318,12 @@ function RiesgoLimite({ cartera, d }) {
         <h3>¿Qué tendría que comprar y vender para no pasar de cierto riesgo?</h3>
         <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginTop: 10 }}>
           <span>No quiero perder más de</span>
-          <input type="number" step="0.05" min="0.05" value={objetivo}
-                 onChange={(e) => setObjetivo(e.target.value)} style={{ width: 90 }}
+          <input type="text" inputMode="decimal" value={objetivo}
+                 onChange={(e) => setObjetivo(soloNum(e.target.value))} style={{ width: 90 }}
                  onKeyDown={(e) => e.key === "Enter" && calcular()} />
           <span>% en un día malo.</span>
           <button className="btn primario" onClick={calcular}
-                  disabled={cargando || objetivo === pedido}>
+                  disabled={cargando || dec(objetivo) === pedido || !dec(objetivo)}>
             {cargando ? "Optimizando…" : "Recalcular"}</button>
           <span className="pie" style={{ marginTop: 0 }}>
             Hoy: {pct(d.var95_pct)} ({usd(d.var95_usd)}) · abajo está resuelto
@@ -3088,10 +3231,10 @@ function EditorView({ activo, onGuardar, onCerrar }) {
   const [alto, setAlto] = useState((activo.actual * 1.2).toFixed(2));
   const [meses, setMeses] = useState(3);
 
-  const medio = (parseFloat(bajo) + parseFloat(alto)) / 2;
+  const medio = (dec(bajo) + dec(alto)) / 2;
   const bruto = activo.actual ? medio / activo.actual - 1 : 0;
   const anualizado = modo === "B2" ? Math.pow(1 + bruto, 12 / Math.max(1, meses)) - 1 : bruto;
-  const anchoPct = medio > 0 ? (parseFloat(alto) - parseFloat(bajo)) / medio * 100 : 100;
+  const anchoPct = medio > 0 ? (dec(alto) - dec(bajo)) / medio * 100 : 100;
   const confianza = Math.round(Math.max(10, Math.min(90, 90 - anchoPct)));
 
   return (
@@ -3107,17 +3250,17 @@ function EditorView({ activo, onGuardar, onCerrar }) {
       </div>
       <div style={{ display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap" }}>
         <label style={{ fontSize: 11.5, color: "var(--texto-3)" }}>Precio piso<br />
-          <input type="number" step="0.01" value={bajo} style={{ width: 110, marginTop: 3 }}
-                 onChange={(e) => setBajo(e.target.value)} /></label>
+          <input type="text" inputMode="decimal" value={bajo} style={{ width: 110, marginTop: 3 }}
+                 onChange={(e) => setBajo(soloNum(e.target.value))} /></label>
         <label style={{ fontSize: 11.5, color: "var(--texto-3)" }}>Precio techo<br />
-          <input type="number" step="0.01" value={alto} style={{ width: 110, marginTop: 3 }}
-                 onChange={(e) => setAlto(e.target.value)} /></label>
+          <input type="text" inputMode="decimal" value={alto} style={{ width: 110, marginTop: 3 }}
+                 onChange={(e) => setAlto(soloNum(e.target.value))} /></label>
         {modo === "B2" && (
           <label style={{ fontSize: 11.5, color: "var(--texto-3)" }}>Meses hasta que se resuelve<br />
             <input type="number" min="1" max="60" value={meses} style={{ width: 110, marginTop: 3 }}
                    onChange={(e) => setMeses(+e.target.value)} /></label>)}
         <button className="btn primario"
-                onClick={() => onGuardar(activo.ticker, { modo, bajo: +bajo, alto: +alto, meses })}>
+                onClick={() => onGuardar(activo.ticker, { modo, bajo: dec(bajo), alto: dec(alto), meses })}>
           Aplicar</button>
       </div>
       <div className="aviso ok">
@@ -3687,8 +3830,9 @@ function ResultadoComparacion({ d, c }) {
 
 /* ═══════════════ Carteras y Conectores ═══════════════ */
 
-function Carteras({ carteras, recargar }) {
+function Carteras({ carteras, recargar, cartera, setCartera }) {
   const [sel, setSel] = useState(null);
+  const [defecto, setDefecto] = useState(() => carteraDefecto.leer() || "");
   const [filas, setFilas] = useState([]);
   const [msg, setMsg] = useState(null);
   const [destino, setDestino] = useState("");
@@ -3718,6 +3862,12 @@ function Carteras({ carteras, recargar }) {
   const editar = (i, campo, v) =>
     setFilas((f) => f.map((x, j) => (j === i ? { ...x, [campo]: v } : x)));
 
+  const fijarDefecto = (n) => {
+    setDefecto(n);
+    carteraDefecto.poner(n);
+    if (n) setCartera(n);           // se aplica ya, sin recargar la página
+  };
+
   return (
     <>
       <div className="panel" style={{ marginBottom: 14 }}>
@@ -3735,6 +3885,21 @@ function Carteras({ carteras, recargar }) {
             Descargar plantilla CSV
           </a>
         </div>
+        {carteras.length > 1 && (
+          <div style={{ display: "flex", gap: 8, alignItems: "center",
+                        flexWrap: "wrap", marginTop: 12 }}>
+            <span className="pie" style={{ margin: 0 }}>Cartera por defecto</span>
+            <select value={defecto} onChange={(e) => fijarDefecto(e.target.value)}>
+              <option value="">— la primera —</option>
+              {carteras.map((x) => (
+                <option key={x.nombre} value={x.nombre}>{x.nombre}</option>))}
+            </select>
+            <span className="pie" style={{ margin: 0 }}>
+              Es la que se abre sola al entrar. Con una sola cartera no hace falta:
+              esa es. Queda guardada en este navegador.
+            </span>
+          </div>
+        )}
       </div>
 
       <div className="panel" style={{ marginBottom: 14 }}>
@@ -3785,8 +3950,8 @@ function Carteras({ carteras, recargar }) {
                   <td key={k}><input type="text" value={f[k] || ""} style={{ width: w }}
                         onChange={(e) => editar(i, k, e.target.value)} /></td>))}
                 {["buy_price", "qty", "commissions"].map((k) => (
-                  <td key={k} className="n"><input type="number" value={f[k] ?? 0} style={{ width: 96 }}
-                        onChange={(e) => editar(i, k, +e.target.value)} /></td>))}
+                  <td key={k} className="n"><input type="text" inputMode="decimal" value={f[k] ?? 0} style={{ width: 96 }}
+                        onChange={(e) => editar(i, k, soloNum(e.target.value))} /></td>))}
                 <td><input type="text" value={f.source || ""} placeholder="cocos" style={{ width: 70 }}
                       onChange={(e) => editar(i, "source", e.target.value)} /></td>
                 <td><input type="text" value={f.currency || ""} placeholder="auto" style={{ width: 60 }}
@@ -3834,10 +3999,24 @@ function Ficha({ f }) {
   );
 }
 
-function Fmp({ f, recargar }) {
+function Fmp({ f, brk, recargar }) {
   const [key, setKey] = useState("");
   const [msg, setMsg] = useState(null);
   const [yendo, setYendo] = useState(false);
+
+  // En la web la clave de FMP la ponemos nosotros y es la misma para todos: el
+  // usuario no tiene nada que cargar ni que saber. Sólo ve que está andando.
+  if (brk?.modo === "web") return (
+    <div className="panel">
+      <Ficha f={f} />
+      <div className="pie">
+        La clave la provee la aplicación: no tenés que sacar ninguna ni configurar
+        nada. {f.conectado
+          ? "Está activa y los precios objetivo de analistas se muestran solos."
+          : "Ahora mismo no responde; los objetivos salen de yfinance mientras tanto."}
+      </div>
+    </div>
+  );
 
   const guardar = async () => {
     setYendo(true); setMsg(null);
@@ -3901,6 +4080,28 @@ function Cocos({ f, brk, recargar }) {
     if (!confirm("¿Borrar las credenciales de Cocos guardadas?")) return;
     await post("/api/broker/borrar"); setMsg(null); recargar();
   };
+
+  // Modo web: no hay vault ni credenciales en el servidor, y conectar el broker
+  // es opcional. Lo único que existe es el sobre de este navegador.
+  if (brk?.modo === "web") return (
+    <div className="panel">
+      <Ficha f={f} />
+      {f.conectado ? (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <button className="btn peligro"
+                  onClick={() => { sesion.tirar(); location.reload(); }}>
+            Desconectar Cocos</button>
+          <span className="pie" style={{ margin: 0 }}>
+            {f.cuenta ? `Cuenta ${f.cuenta}.` : "Sesión activa."} Tu contraseña no
+            está guardada en ningún lado: la sesión vive en este navegador y vence
+            a las 24 horas.
+          </span>
+        </div>
+      ) : (
+        <EntrarCocos onEntrar={recargar} />
+      )}
+    </div>
+  );
 
   return (
     <div className="panel">
@@ -3972,6 +4173,10 @@ function Conectores() {
   };
   useEffect(() => { cargar(); }, []);
   if (!d) return <div className="cargando">Consultando fuentes…</div>;
+  // Un error del servidor llega como {error: ...} y no trae las listas. Sin esta
+  // guarda, el .find() de abajo tiraba TypeError y se caía la app entera.
+  if (d.error || !Array.isArray(d.con_credencial))
+    return <div className="aviso mal">{d.error || "No se pudieron leer las fuentes."}</div>;
   const fuente = (t) => d.con_credencial.find((f) => f.nombre.includes(t)) || {};
 
   return (
@@ -3982,7 +4187,7 @@ function Conectores() {
       </div>
       <div className="fila f2">
         <Cocos f={fuente("Cocos")} brk={brk} recargar={cargar} />
-        <Fmp f={fuente("Financial Modeling")} recargar={cargar} />
+        <Fmp f={fuente("Financial Modeling")} brk={brk} recargar={cargar} />
       </div>
       <div className="panel" style={{ marginBottom: 14 }}>
         <h3>Públicas · sin credencial</h3>
@@ -4482,20 +4687,166 @@ function Mercado({ cartera }) {
   );
 }
 
+/* ═══════════════ Ingreso (sólo modo web) ═══════════════ */
+
+/* Con Google no hay contraseña nuestra que guardar, y eso no es comodidad: los
+   usuarios de esta app tienen cuenta en Cocos y una parte reusaría ahí la clave
+   del broker. Una base de hashes nuestra sería, para esa gente, una copia de la
+   llave de su cuenta comitente.
+
+   Es un enlace, no un botón con JavaScript de Google: el navegador se va a
+   Google y vuelve, sin correr código de terceros en una página que maneja
+   sesiones de broker. */
+
+function Ingreso({ configurado }) {
+  return (
+    <div className="hoja" style={{ maxWidth: 380, marginTop: 60 }}>
+      <div className="panel">
+        <h3>Portfolio Analyzer</h3>
+        <div className="pie" style={{ marginTop: 2, marginBottom: 16 }}>
+          Armá tu cartera, seguila en dólares y compará estrategias.
+        </div>
+        {configurado ? (
+          <a className="btn primario" href="/api/entrar"
+             style={{ display: "block", textAlign: "center", textDecoration: "none" }}>
+            Entrar con Google</a>
+        ) : (
+          <div className="aviso mal">
+            El ingreso con Google todavía no está configurado en este servidor.
+          </div>
+        )}
+        <div className="pie" style={{ marginTop: 14 }}>
+          No guardamos ninguna contraseña. Si además tenés cuenta en Cocos, la
+          podés conectar después desde Conectores para sumar bonos, ONs y letras
+          — es opcional y la app funciona sin eso.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* El formulario de Cocos vive en el panel de conectores, no en la puerta: es un
+   accesorio de una cuenta que ya existe. Los autocomplete están puestos a
+   propósito para que el gestor de contraseñas del navegador ofrezca guardar y
+   rellenar — la bóveda de credenciales es la de él, en su máquina, no la
+   nuestra. Poner autoComplete="off" en la contraseña, que es el reflejo típico,
+   lograría lo contrario: sin gestor, el usuario elige una clave que pueda
+   tipear de memoria. El campo del 2FA lleva one-time-code: en el celular el
+   teclado sugiere el código, y le dice al gestor que ese valor no se guarda. */
+
+function EntrarCocos({ motivo, onEntrar }) {
+  const [c, setC] = useState({ email: "", password: "", codigo_2fa: "" });
+  const [msg, setMsg] = useState(motivo || null);
+  const [yendo, setYendo] = useState(false);
+  const campo = (k, v) => setC((x) => ({ ...x, [k]: v }));
+  const listo = c.email && c.password && c.codigo_2fa.trim().length === 6;
+
+  const enviar = async (e) => {
+    e.preventDefault();
+    if (!listo || yendo) return;
+    setYendo(true); setMsg(null);
+    const r = await post("/api/broker/web/login", c);
+    setYendo(false);
+    if (!r.ok) { setMsg(r.error || "No se pudo conectar."); return; }
+    sesion.poner(r.sobre);
+    setC({ email: "", password: "", codigo_2fa: "" });
+    onEntrar();
+  };
+
+  return (
+    <>
+      <form onSubmit={enviar} style={{ display: "grid", gap: 7 }}>
+        <input name="email" type="email" placeholder="Email de Cocos"
+               autoComplete="username" value={c.email}
+               onChange={(e) => campo("email", e.target.value)} />
+        <input name="password" type="password" placeholder="Contraseña"
+               autoComplete="current-password" value={c.password}
+               onChange={(e) => campo("password", e.target.value)} />
+        <input name="totp" type="text" inputMode="numeric" maxLength={6}
+               placeholder="Código de 6 dígitos" autoComplete="one-time-code"
+               value={c.codigo_2fa}
+               onChange={(e) => campo("codigo_2fa", e.target.value.replace(/\D/g, ""))} />
+        <button className="btn primario" type="submit" disabled={!listo || yendo}>
+          {yendo ? "Conectando…" : "Conectar Cocos"}</button>
+      </form>
+      {msg && <div className="aviso mal">{msg}</div>}
+      <div className="pie" style={{ marginTop: 10 }}>
+        Tu contraseña de Cocos <b>no se guarda</b>: se usa para el login y se
+        descarta. Queda una sesión en este navegador que vence a las 24 horas,
+        por eso el código de la app se pide una vez por día.
+      </div>
+    </>
+  );
+}
+
 /* ═══════════════ Raíz ═══════════════ */
+
+/* Cualquier excepción de un componente desmonta el árbol entero y deja la
+   pantalla en negro, sin pista de qué pasó. Pasó de verdad el 2026-09-08: un
+   401 devolvía {error} donde el panel de conectores esperaba una lista, y la
+   aplicación desaparecía. La red no arregla el bug, pero lo deja a la vista en
+   vez de borrar todo. Tiene que ser una clase: no hay equivalente con hooks. */
+
+class Red extends React.Component {
+  constructor(p) { super(p); this.state = { falla: null }; }
+  static getDerivedStateFromError(e) { return { falla: e }; }
+  componentDidCatch(e, info) { console.error("se cayó un panel:", e, info); }
+  render() {
+    if (!this.state.falla) return this.props.children;
+    return (
+      <div className="hoja" style={{ maxWidth: 520, marginTop: 40 }}>
+        <div className="panel">
+          <h3>Se cayó esta pantalla</h3>
+          <div className="pie" style={{ marginTop: 6 }}>
+            El resto de la aplicación sigue bien. El detalle está en la consola
+            del navegador.
+          </div>
+          <div className="aviso mal mono" style={{ fontSize: 12 }}>
+            {String(this.state.falla)}
+          </div>
+          <button className="btn primario" style={{ marginTop: 10 }}
+                  onClick={() => this.setState({ falla: null })}>Reintentar</button>
+        </div>
+      </div>
+    );
+  }
+}
 
 function App() {
   const [modo, setModo] = useState("analisis");
   const [tema, setTema] = useState(() => localStorage.getItem("tema") || "auto");
   const [carteras, setCarteras] = useState([]);
   const [cartera, setCartera] = useState(null);
+  // null = todavía no sabemos en qué modo corre el servidor ni quién sos.
+  const [web, setWeb] = useState(null);
+  const [yo, setYo] = useState(null);
 
   const recargar = useCallback(async () => {
     const c = await api("/api/carteras");
-    if (Array.isArray(c)) setCarteras(c);
+    if (!Array.isArray(c)) return;
+    setCarteras(c);
+    // Si la que está abierta ya no existe (o no hay ninguna abierta), se elige
+    // sola: nadie tiene que ir a buscarla en el desplegable para empezar.
+    setCartera((actual) =>
+      actual && c.some((x) => x.nombre === actual) ? actual : elegirCartera(c));
   }, []);
 
-  useEffect(() => { recargar(); }, [recargar]);
+  const preguntarQuien = useCallback(() => api("/api/yo").then(setYo), []);
+
+  useEffect(() => {
+    api("/api/modo").then((r) => {
+      const esWeb = r.modo === "web";
+      setWeb(esWeb);
+      if (esWeb) preguntarQuien(); else setYo({ dentro: true });
+    });
+    // Lo dispara api() cuando la sesión de la APP se cayó: hay que volver a
+    // entrar con Google. La de Cocos es otra cosa y se maneja en su panel.
+    const salio = () => setYo({ dentro: false, configurado: true });
+    window.addEventListener("pa:ingresar", salio);
+    return () => window.removeEventListener("pa:ingresar", salio);
+  }, [preguntarQuien]);
+
+  useEffect(() => { if (yo?.dentro) recargar(); }, [recargar, yo]);
 
   useEffect(() => {
     // "auto" = no marcar nada y dejar que mande prefers-color-scheme.
@@ -4504,17 +4855,23 @@ function App() {
     localStorage.setItem("tema", tema);
   }, [tema]);
 
+  if (web === null || yo === null) return <div className="cargando">Abriendo…</div>;
+  if (!yo.dentro) return <Ingreso configurado={yo.configurado} />;
+
   return (
     <>
       <Barra modo={modo} setModo={setModo} tema={tema} setTema={setTema}
-             carteras={carteras} cartera={cartera} setCartera={setCartera} />
+             carteras={carteras} cartera={cartera} setCartera={setCartera} yo={yo} />
       <div className="hoja">
+        <Red key={modo}>
         {modo === "analisis" && <Analisis cartera={cartera} />}
         {modo === "comparacion" && <Comparacion carteras={carteras} />}
-        {modo === "carteras" && <Carteras carteras={carteras} recargar={recargar} />}
+        {modo === "carteras" && <Carteras carteras={carteras} recargar={recargar}
+                                    cartera={cartera} setCartera={setCartera} />}
         {modo === "mercado" && <Mercado cartera={cartera} />}
         {modo === "conectores" && <Conectores />}
         {modo === "cocos" && <MiCocos />}
+        </Red>
       </div>
       <footer>
         <span>© Leandro R. Bergero · Msc Finance and Banking BSM-UPF ·{" "}

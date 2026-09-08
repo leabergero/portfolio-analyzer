@@ -36,6 +36,29 @@ _API_HOST = "https://api.cocos.capital/"
 _HEADERS_VERSION = {"x-store-version": "", "x-update-id": "", "x-platform": "web"}
 
 
+# Un 401 de Cocos significa que la sesión murió del lado del broker: token
+# revocado, o el usuario cerró sesión desde el celular. Es distinto de "Cocos
+# está caído", y el front necesita distinguirlos para saber si toca pedir
+# contraseña y 2FA otra vez. Se marca acá, en el hook de respuesta de requests,
+# porque es el único lugar por donde pasan TODAS las llamadas: las de pyCocos y
+# las crudas de `session.get` que hace core/broker/cocos.py.
+_ultimo = {"401": False}
+
+
+def _marcar(resp, *_, **__):
+    if resp.status_code == 401:
+        _ultimo["401"] = True
+    return resp
+
+
+def hubo_401() -> bool:
+    return _ultimo["401"]
+
+
+def olvidar_401() -> None:
+    _ultimo["401"] = False
+
+
 def aplicar() -> None:
     from pycocos.components import client as _c
 
@@ -55,6 +78,7 @@ def aplicar() -> None:
         # en todo endpoint de cuenta. Con un dict case-insensitive colapsan en uno.
         self.session.headers = CaseInsensitiveDict(self.session.headers)
         self.session.headers.update(_HEADERS_VERSION)
+        self.session.hooks["response"].append(_marcar)
 
     def _api_url(self, path: str) -> str:
         base = _AUTH_HOST if path.startswith("auth/") else _API_HOST
@@ -74,6 +98,16 @@ if __name__ == "__main__":
     assert r._api_url("api/v1/markets/types") == _API_HOST + "api/v1/markets/types"
     for h in _HEADERS_VERSION:
         assert h in r.session.headers, h
+
+    class _Resp:
+        status_code = 401
+    olvidar_401()
+    assert not hubo_401()
+    for hook in r.session.hooks["response"]:
+        hook(_Resp())
+    assert hubo_401(), "un 401 del broker tiene que quedar marcado"
+    olvidar_401()
+    assert not hubo_401()
     n = _c.RestClient.__init__
     aplicar()
     assert _c.RestClient.__init__ is n, "doble parche"

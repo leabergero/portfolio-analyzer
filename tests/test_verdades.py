@@ -49,6 +49,87 @@ def casi(a, b, tol=1e-9):
     return abs(float(a) - float(b)) <= tol
 
 
+class datos_aparte:
+    """Manda las escrituras de `store` a un directorio temporal.
+
+    Sin esto, un test que guarda carteras escribe —y limpia— en `data/`, que es
+    donde están las carteras reales. Pasó el 2026-09-08: la limpieza de un test
+    borró `data/usuarios/` con la cartera que un usuario acababa de importar.
+    Ningún test puede tocar el directorio de datos de verdad.
+    """
+
+    def __enter__(self):
+        import tempfile
+        from pathlib import Path as _P
+        store = require("core.io", "store")
+        self.store = store
+        self.previo = store._DATA
+        self.tmp = tempfile.mkdtemp(prefix="pa-test-")
+        store._DATA = _P(self.tmp)
+        return _P(self.tmp)
+
+    def __exit__(self, *_):
+        import shutil
+        self.store._DATA = self.previo
+        self.store.como(None)
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+
+class cache_aparte:
+    """Manda la caché de precios a una base temporal. Misma razón que
+    `datos_aparte`: un test no puede escribir en la caché de verdad."""
+
+    def __enter__(self):
+        import tempfile
+        from pathlib import Path as _P
+        cache = require("core.data", "cache")
+        self.cache = cache
+        self.previo = cache.DB_PATH
+        self.tmp = tempfile.mkdtemp(prefix="pa-cache-")
+        cache.DB_PATH = _P(self.tmp) / "test.db"
+        cache.init()
+        return cache
+
+    def __exit__(self, *_):
+        import shutil
+        self.cache.DB_PATH = self.previo
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+
+def cliente_web(flask_app):
+    """Test client con la sesión de la app ya puesta.
+
+    Desde que el ingreso es con Google, la sesión de la app es la puerta: sin
+    ella ningún endpoint responde, tenga o no sobre de Cocos.
+    """
+    usuarios = require("core", "usuarios")
+    c = flask_app.test_client()
+    c.set_cookie(usuarios.COOKIE,
+                 usuarios.emitir({"sub": "1234567890", "email": "x@y.z",
+                                  "nombre": "Prueba", "foto": ""}))
+    return c
+
+
+class modo_web:
+    """Pone el proceso en modo multiusuario mientras dure el bloque.
+
+    Sin esto los tests del sobre corren en modo local, donde la cabecera se
+    ignora a propósito — y pasarían en verde sin probar nada.
+    """
+
+    def __enter__(self):
+        import os
+        self.previo = os.environ.get("PA_MODO")
+        os.environ["PA_MODO"] = "web"
+
+    def __exit__(self, *_):
+        import os
+        if self.previo is None:
+            os.environ.pop("PA_MODO", None)
+        else:
+            os.environ["PA_MODO"] = self.previo
+
+
 # ══════════════════════════════════════════════════════════════════════════
 #  MONEDA — el bug más caro de todos
 # ══════════════════════════════════════════════════════════════════════════
@@ -854,6 +935,603 @@ def test_un_precio_suelto_valua_pero_no_entra_en_los_modelos():
 
     assert ret_df.empty and "DELLD.BA" not in precios, \
         "Un solo punto no puede entrar en la matriz de retornos."
+
+def test_un_fci_que_cocos_no_cotiza_vale_su_ppc_y_no_desaparece():
+    """Un fondo sin cuotaparte publicada se valúa al PPC, no en cero.
+
+    Cocos sólo publica la cuotaparte de los fondos que tenés HOY en la cuenta
+    conectada. Un fondo rescatado, o el de otra cuenta de la familia, no tiene
+    precio nunca — y la tenencia entera desaparecía del total de la cartera.
+    Real: LEANDRO tenía COCOSPPA («Cocos Pesos Plus - Mami») mientras la cuenta
+    conectada tenía COCORMA, y esa posición valía cero desde siempre.
+
+    Se cae al PPC y queda marcada `precio_estimado`, para que la pantalla lo
+    aclare y nadie lo lea como precio de mercado.
+    """
+    portfolio, sources = require("core.models", "portfolio"), require("core.data", "sources")
+
+    original = sources.precios_usd
+    sources.precios_usd = lambda t, **k: __import__("pandas").Series(dtype=float)
+    try:
+        r = portfolio.valuar([{"ticker": "COCOXX", "qty": 1000, "buy_price": 1.5,
+                                 "buy_date": "2026-08-31", "currency": "ARS",
+                                 "source": sources.SOURCE_FCI, "commissions": 0}])
+    finally:
+        sources.precios_usd = original
+
+    f = r["posiciones"][0]
+    assert not f["sin_precio"], "el fondo no puede quedar sin precio y fuera del total"
+    assert f["precio_estimado"] is True, "tiene que quedar marcado como estimado"
+    assert f["valor_usd"] and f["valor_usd"] > 0, "y valer algo, no cero"
+    assert r["sin_precio"] == [], "no puede figurar en la lista de sin precio"
+
+
+def test_un_fci_sin_broker_vale_lo_ultimo_visto_y_no_cero():
+    """Caído Cocos, el fondo sigue valuado con la última cuotaparte conocida.
+
+    Antes no se cacheaba, con el argumento de que "es el precio de hoy y mañana
+    es otro". El efecto era peor que un precio viejo: sin sesión de Cocos el FCI
+    salía «sin precio» y quedaba **fuera del total de la cartera**, o sea una
+    tenencia real valuada en nada. Un valor de ayer es una aproximación; cero es
+    un error.
+    """
+    import pandas as pd
+    from datetime import date
+
+    sources = require("core.data", "sources")
+    cocos = require("core.broker", "cocos")
+
+    original = cocos.precio_fci
+    with cache_aparte():
+        try:
+            cocos.precio_fci = lambda t: 1234.56        # broker vivo
+            con = sources.precios_usd("FCITEST", source=sources.SOURCE_FCI)
+            assert len(con) == 1 and float(con.iloc[-1]) > 0, \
+                "con broker tiene que haber precio"
+
+            cocos.precio_fci = lambda t: None           # broker caído
+            sin = sources.precios_usd("FCITEST", source=sources.SOURCE_FCI)
+        finally:
+            cocos.precio_fci = original
+
+    assert len(sin) == 1, "sin broker el fondo NO puede quedarse sin precio"
+    assert casi(float(sin.iloc[-1]), float(con.iloc[-1])), \
+        "tiene que ser exactamente la última cuotaparte que se vio"
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  SESIÓN WEB — la contraseña de otro no vive en nuestro disco
+# ══════════════════════════════════════════════════════════════════════════
+
+def test_sobre_reemitido_no_reinicia_el_reloj_del_2fa():
+    """Renovar el access token NO puede correr la fecha de vencimiento.
+
+    Bug de diseño, cazado antes de escribirlo: el access token de Cocos dura una
+    hora y se renueva solo con el refresh token, y cada renovación obliga a
+    reemitir el sobre. Si el sobre nuevo llevara timestamp nuevo, el usuario que
+    entra todos los días nunca volvería a tipear el 2FA: la caducidad de 24 h
+    sería decorativa y la sesión, eterna. El reloj cuelga de `login_ts`, que se
+    arrastra intacto de sobre en sobre.
+    """
+    import time
+    sesion = require("core.broker", "sesion")
+
+    hace_23h = time.time() - 23 * 3600
+    original = sesion.emitir({"access_token": "viejo"}, login_ts=hace_23h)
+
+    # una hora después, Cocos renovó el token y reemitimos
+    reemitido = sesion.emitir({"access_token": "nuevo"},
+                              login_ts=sesion.leer(original)["login_ts"])
+    abierto = sesion.leer(reemitido)
+
+    assert abierto["access_token"] == "nuevo", "el sobre nuevo lleva el token nuevo"
+    assert casi(abierto["login_ts"], hace_23h, tol=1), \
+        "login_ts tiene que sobrevivir la reemisión, o el 2FA diario no llega nunca"
+    assert sesion.vence_en(abierto) <= 3600, \
+        "a 23 h del login le puede quedar 1 h como mucho, no 24 de nuevo"
+
+
+def test_sobre_vencido_no_abre():
+    """Pasadas las 24 h el sobre no sirve: vuelve a pedirse el 2FA.
+
+    Es la única cosa que obliga al segundo factor a aparecer. Sin esto, un JWT
+    robado del navegador vale hasta que Cocos lo caduque, que son días.
+    """
+    import time
+    sesion = require("core.broker", "sesion")
+
+    viejo = sesion.emitir({"access_token": "x"}, login_ts=time.time() - 25 * 3600)
+    try:
+        sesion.leer(viejo)
+        assert False, "un sobre de hace 25 h no puede abrir"
+    except sesion.SesionInvalida:
+        pass
+    assert sesion.vence_en(sesion.leer(viejo, max_age=99 * 3600)) == 0
+
+
+def test_sobre_manipulado_no_abre():
+    """Editar el sobre lo rompe: nadie se fabrica una sesión de otro."""
+    sesion = require("core.broker", "sesion")
+
+    sobre = sesion.emitir({"access_token": "mio", "account_number": "18320"})
+    for mutado in (sobre + "x", sobre[:-1], sobre.replace("a", "b", 1)):
+        try:
+            sesion.leer(mutado)
+            assert False, "un sobre manoseado no puede abrir"
+        except sesion.SesionInvalida:
+            pass
+
+
+def test_rotar_el_secreto_tumba_las_sesiones():
+    """Cambiar el secreto invalida todo lo vivo: es el botón de pánico.
+
+    Si alguna vez sospechás que se filtraron sobres, esto es lo que los apaga
+    sin tener que tocar nada del lado de Cocos.
+    """
+    import os
+    sesion = require("core.broker", "sesion")
+
+    previo = os.environ.get("PA_SECRETO_SESION")
+    try:
+        os.environ["PA_SECRETO_SESION"] = "secreto-de-hoy"
+        sobre = sesion.emitir({"access_token": "x"})
+        assert sesion.leer(sobre)["access_token"] == "x"
+
+        os.environ["PA_SECRETO_SESION"] = "secreto-rotado"
+        try:
+            sesion.leer(sobre)
+            assert False, "tras rotar el secreto no puede abrir ningún sobre viejo"
+        except sesion.SesionInvalida:
+            pass
+    finally:
+        if previo is None:
+            os.environ.pop("PA_SECRETO_SESION", None)
+        else:
+            os.environ["PA_SECRETO_SESION"] = previo
+
+
+def test_el_sobre_no_lleva_la_contrasena():
+    """Lo que viaja al navegador son JWT, nunca las credenciales.
+
+    El sobre está firmado, no cifrado: cualquiera que lo tenga lo lee. Que ahí
+    adentro no haya contraseña ni semilla TOTP es lo que hace que eso no
+    importe. Este test es el que se rompe si alguien, por comodidad, mete las
+    credenciales en el sobre para "reconectar solo".
+    """
+    import base64
+    sesion = require("core.broker", "sesion")
+
+    sobre = sesion.emitir({"access_token": "a", "refresh_token": "b",
+                           "account_number": "18320"})
+    crudo = sobre.split(".")[0]
+    claro = base64.urlsafe_b64decode(crudo + "=" * (-len(crudo) % 4)).decode()
+
+    for prohibido in ("password", "contrasena", "totp_secret", "email"):
+        assert prohibido not in claro.lower(), \
+            f"el sobre lleva {prohibido!r} adentro y viaja en claro al navegador"
+
+
+def test_la_renovacion_devuelve_el_sobre_por_la_cabecera():
+    """Renovado el token, el sobre nuevo vuelve al navegador con el reloj VIEJO.
+
+    Es el mismo peligro que `test_sobre_reemitido_no_reinicia_el_reloj_del_2fa`,
+    pero un piso más arriba: ahí se prueba la función, acá el cableado HTTP de
+    `api/app.py`, que es quien decide qué login_ts usar al reemitir. Si alguien
+    "simplifica" ese emitir() sacándole el login_ts, la función sigue estando
+    bien y la sesión se vuelve eterna igual.
+    """
+    import time
+    sesion = require("core.broker", "sesion")
+    broker = require("core.broker", "cocos")
+    flask_app = require("api", "app").app
+
+    hace_23h = time.time() - 23 * 3600
+    sobre = sesion.emitir({"access_token": "viejo", "refresh_token": "r",
+                           "token_expiration": 0, "account_number": "18320"},
+                          login_ts=hace_23h)
+
+    original = broker.restaurar
+    broker.restaurar = lambda jwt: (
+        {"conectado": True, "detalle": "sesión restaurada", "cuenta": "18320"},
+        {**jwt, "access_token": "nuevo"})
+    try:
+        with modo_web():
+            r = cliente_web(flask_app).get("/api/broker/estado",
+                                           headers={"X-Sesion": sobre})
+    finally:
+        broker.restaurar = original
+
+    assert r.status_code == 200, f"la sesión válida tiene que pasar ({r.status_code})"
+    devuelto = r.headers.get("X-Sesion")
+    assert devuelto, "el sobre renovado tiene que volver por la cabecera"
+
+    abierto = sesion.leer(devuelto)
+    assert abierto["access_token"] == "nuevo", "tiene que traer el token renovado"
+    assert casi(abierto["login_ts"], hace_23h, tol=2), \
+        "el sobre que vuelve arrastra el login_ts viejo, o el 2FA nunca se pide"
+
+
+def test_restaurar_en_paralelo_no_dispara_el_login_de_verdad():
+    """Dos hilos restaurando a la vez no pueden terminar logueándose.
+
+    `_restaurar` neutraliza `Cocos._auth` —un atributo de CLASE— para que el
+    constructor no autentique, y lo restaura al salir. Con requests en paralelo
+    un hilo lo restauraba mientras otro todavía no había construido su cliente,
+    y ese segundo corría el `_auth` de verdad con las credenciales de relleno
+    ("-"). Cocos contestaba "Invalid login credentials" y desconectaba a alguien
+    que acababa de conectarse. Pasó de verdad el 2026-09-08, en la primera
+    prueba del modo web con una cuenta real.
+    """
+    import threading
+    import time as _t
+    broker = require("core.broker", "cocos")
+
+    autenticados = []
+
+    class FalsoCliente:
+        def __init__(self, **kw):
+            # La ventana de la carrera es el tiempo que tarda el constructor. En
+            # el caso real la abre cloudscraper (~18 ms); sin esta espera el test
+            # pasa aunque el lock no esté y no prueba nada. Medido: 1 de 12 hilos
+            # se autentica sin lock, 0 con lock.
+            _t.sleep(0.02)
+            self._auth()                     # como hace pyCocos en su constructor
+            self.client = type("C", (), {"update_session_headers": lambda s, h: None})()
+            self.access_token = self.refresh_token = ""
+            self.token_expiration = 0
+            self.account_number = ""
+
+        def _auth(self):
+            autenticados.append(1)           # esto NO puede pasar nunca
+
+    ses = {"access_token": "a", "refresh_token": "b",
+           "token_expiration": 9e9, "account_number": "1"}
+    fallas = []
+
+    def restaurar():
+        try:
+            broker._restaurar(FalsoCliente, {}, ses)
+        except Exception as e:
+            fallas.append(e)
+
+    hilos = [threading.Thread(target=restaurar) for _ in range(12)]
+    for h in hilos: h.start()
+    for h in hilos: h.join()
+
+    assert not fallas, f"restaurar en paralelo falló: {fallas[0]}"
+    assert not autenticados, \
+        f"{len(autenticados)} hilos hicieron el login de verdad: el parche de _auth se pisó"
+    assert FalsoCliente._auth is not None, "el método tiene que quedar restaurado"
+
+
+def test_la_pagina_no_carga_scripts_de_terceros():
+    """Ningún <script> de esta app puede venir de otro dominio.
+
+    React y Plotly se servían desde cdnjs. Un script de terceros corre con
+    acceso total a la página: lee el localStorage —donde vive el sobre de
+    sesión de Cocos— y ve la contraseña que se tipea en el formulario del
+    broker. Un CDN comprometido entregaba las sesiones de todos los usuarios.
+    Están en `web/vendor/` por eso; este test se rompe si alguien vuelve a
+    poner una URL de afuera por comodidad.
+    """
+    import re
+    from pathlib import Path as _P
+
+    html = (_P(__file__).resolve().parent.parent / "web" / "index.html").read_text()
+    externos = [s for s in re.findall(r'<script[^>]*src="([^"]+)"', html)
+                if s.startswith("http") or s.startswith("//")]
+    assert not externos, f"scripts de terceros en index.html: {externos}"
+
+    for f in ("react.production.min.js", "react-dom.production.min.js", "plotly.min.js"):
+        ruta = _P(__file__).resolve().parent.parent / "web" / "vendor" / f
+        assert ruta.exists() and ruta.stat().st_size > 1000, \
+            f"falta {f} en web/vendor/: la página quedaría sin dibujar nada"
+
+
+def test_la_csp_deja_pasar_el_avatar_y_no_deja_pasar_scripts_sueltos():
+    """La política de contenido: permisiva con la foto, estricta con el código.
+
+    Dos cosas distintas y las dos importan. `img-src` tiene que habilitar
+    googleusercontent o la foto de perfil sale como un círculo vacío y nadie
+    entiende por qué. Y `script-src` no puede tener 'unsafe-inline': esta página
+    maneja sesiones de broker, y un script inyectado lee el sobre de Cocos del
+    localStorage.
+    """
+    flask_app = require("api", "app").app
+    r = flask_app.test_client().get("/api/modo")
+    csp = r.headers.get("Content-Security-Policy", "")
+
+    assert csp, "toda respuesta tiene que llevar CSP"
+    img = [d for d in csp.split(";") if d.strip().startswith("img-src")][0]
+    assert "googleusercontent.com" in img, \
+        "sin esto la foto de perfil de Google queda bloqueada"
+
+    script = [d for d in csp.split(";") if d.strip().startswith("script-src")][0]
+    assert "unsafe-inline" not in script and "unsafe-eval" not in script, \
+        "un script inline puede leer el sobre de Cocos del localStorage"
+    assert script.strip() == "script-src 'self'", \
+        f"nadie más que este servidor puede poner código en la página: {script!r}"
+    assert "frame-ancestors 'none'" in csp, "nadie puede meter esto en un iframe"
+    assert r.headers.get("X-Content-Type-Options") == "nosniff"
+
+
+def test_sin_ingresar_no_se_llega_a_ningun_dato():
+    """La sesión de la app es la puerta. Sin ella no hay datos de nadie.
+
+    Es lo único que separa la cartera de un usuario de la de otro cuando la app
+    se sirve a cualquiera que se registre.
+    """
+    flask_app = require("api", "app").app
+    with modo_web():
+        r = flask_app.test_client().get("/api/carteras")
+
+    assert r.status_code == 401, f"sin ingresar no se pasa ({r.status_code})"
+    assert r.get_json().get("ingresar") is True, \
+        "el front tiene que saber que toca entrar con Google, no reconectar Cocos"
+
+
+def test_un_sobre_de_cocos_vencido_no_bloquea_la_app():
+    """Se cae el broker, no la aplicación.
+
+    Antes, un sobre vencido devolvía 401 en TODO endpoint, así que a alguien se
+    le vencía la sesión de Cocos —que es opcional— y dejaba de poder mirar sus
+    propias carteras. Ahora el sobre se descarta, el servidor lo avisa por la
+    cabecera para que el navegador lo tire, y el request sigue.
+    """
+    import time
+    sesion = require("core.broker", "sesion")
+    flask_app = require("api", "app").app
+
+    viejo = sesion.emitir({"access_token": "x"}, login_ts=time.time() - 25 * 3600)
+    with modo_web():
+        r = cliente_web(flask_app).get("/api/carteras", headers={"X-Sesion": viejo})
+
+    assert r.status_code == 200, \
+        f"un sobre de Cocos vencido no puede tapar las carteras ({r.status_code})"
+    assert r.headers.get("X-Sesion-Fin") == "1", \
+        "el navegador tiene que enterarse de que ese sobre ya no vale"
+
+
+def test_cocos_es_opcional_no_una_puerta():
+    """Quien no conectó el broker usa la app igual.
+
+    Cocos suma bonos, ONs, letras y las posiciones reales. Sin eso la aplicación
+    funciona: cartera a mano o por CSV y precios de yfinance. Si la falta de
+    sobre cortara el request, la app quedaría inservible para quien todavía no
+    conectó el broker, que es la mayoría al registrarse.
+    """
+    flask_app = require("api", "app").app
+    with modo_web():
+        r = cliente_web(flask_app).get("/api/carteras")     # sin X-Sesion
+
+    assert r.status_code == 200, \
+        f"sin Cocos la app tiene que andar igual, no cortar con {r.status_code}"
+
+
+def test_en_la_web_nadie_toca_el_vault_ni_la_clave_compartida():
+    """Los endpoints de la app de escritorio no existen para un usuario web.
+
+    El front no los muestra, pero un POST a mano llega igual. Del otro lado hay
+    dos cosas que no son de quien entra: el vault del dueño de la máquina —que
+    `/api/broker/borrar` elimina— y la API key de FMP, que la ponemos nosotros y
+    la comparten todos. Sin este corte, cualquiera con sesión se la cambiaba a
+    todo el mundo.
+    """
+    flask_app = require("api", "app").app
+
+    for ruta in ("/api/broker/vault", "/api/broker/borrar", "/api/broker/conectar",
+                 "/api/broker/desconectar", "/api/conectores/fmp"):
+        with modo_web():
+            r = cliente_web(flask_app).post(ruta, json={})
+        assert r.status_code == 403, \
+            f"{ruta} tiene que estar cerrado en la web, devolvió {r.status_code}"
+
+
+def test_la_suite_no_escribe_en_los_datos_de_verdad():
+    """Correr los tests no puede cambiar nada de `data/`.
+
+    El 2026-09-08 la limpieza de un test hizo `rmtree(data/usuarios)` y borró la
+    cartera que un usuario acababa de importar. Este test compara el contenido
+    del directorio antes y después de guardar en uno temporal: si alguien vuelve
+    a escribir en `data/`, se rompe acá.
+    """
+    store = require("core.io", "store")
+    real = store._DATA
+    antes = sorted(p.name for p in real.iterdir()) if real.exists() else []
+
+    with datos_aparte():
+        store.como("fulano")
+        store.guardar("Prueba", [{"ticker": "AAPL", "qty": 1, "buy_price": 1,
+                                  "buy_date": "2026-01-02", "currency": "USD"}])
+        assert store.nombres() == ["Prueba"], "tiene que haber escrito en el temporal"
+
+    despues = sorted(p.name for p in real.iterdir()) if real.exists() else []
+    assert antes == despues, \
+        f"la suite tocó data/: apareció o desapareció {set(antes) ^ set(despues)}"
+
+
+def test_cada_usuario_ve_solo_sus_carteras():
+    """Dos usuarios distintos, dos carpetas distintas. Nunca la misma.
+
+    `store` guardaba en `data/portfolios.json`, uno solo para todo. Servida a
+    varios usuarios eso le mostraría a cualquiera la cartera del anterior.
+    """
+    store = require("core.io", "store")
+
+    with datos_aparte():
+        store.como("1111")
+        a = store._carteras()
+        store.como("2222")
+        b = store._carteras()
+        store.como(None)
+        local = store._carteras()
+
+    assert a != b, "dos usuarios no pueden compartir archivo de carteras"
+    assert "1111" in str(a) and "2222" in str(b)
+    assert local == store.CARTERAS, "sin usuario (app local) sigue siendo data/"
+
+
+def test_la_cuenta_de_cocos_de_uno_no_es_la_de_otro():
+    """El mapa comitente→cartera es de cada usuario, no de todos.
+
+    Vivía en `data/connectors.json`, compartido. Ahí había dos problemas: el
+    nombre de la cartera de alguien quedaba a la vista de cualquiera, y ese
+    archivo guarda además el client secret de Google — escribirlo desde una
+    acción del usuario, sin lock, es una forma de perderlo si dos importan FCI
+    a la vez. La app local sigue leyendo la asociación vieja para no perderla.
+    """
+    store = require("core.io", "store")
+
+    with datos_aparte():
+        store.como("aaa")
+        store.asociar_cuenta("999", "De A")
+        assert store.cartera_de_cuenta("999") == "De A"
+
+        store.como("bbb")
+        assert store.cartera_de_cuenta("999") is None, \
+            "la cuenta de un usuario no puede aparecerle a otro"
+
+
+def test_la_carpeta_del_usuario_no_se_arma_con_lo_que_venga():
+    """El identificador nombra un directorio: no puede traer barras ni puntos.
+
+    Viene de Google firmado por nosotros, así que hoy no hay por dónde meter
+    basura. Igual se valida: el día que la identidad venga de otro lado, este
+    test es lo que evita un `../` que se lleve puesta la carpeta de otro.
+    """
+    usuarios = require("core", "usuarios")
+
+    assert usuarios.carpeta({"sub": "1234567890"}) == "1234567890"
+    for veneno in ("../otro", "a/b", "..", "", "con espacio", "punto.punto"):
+        try:
+            usuarios.carpeta({"sub": veneno})
+            assert False, f"{veneno!r} no puede pasar como nombre de carpeta"
+        except usuarios.NoAutenticado:
+            pass
+
+
+def test_el_state_del_ingreso_lo_firmamos_nosotros():
+    """La vuelta de Google sólo vale si el `state` salió de acá.
+
+    Sin esa firma, cualquiera puede armar una URL de callback y hacer que el
+    navegador de la víctima quede logueado con una cuenta ajena (CSRF de login).
+    """
+    usuarios = require("core", "usuarios")
+
+    url = usuarios.url_de_ingreso("http://localhost/api/entrar/google", "/carteras")
+    state = url.split("state=")[1].split("&")[0]
+    assert usuarios.leer_estado(state) == "/carteras", "el destino tiene que volver intacto"
+
+    for falso in (state + "x", "inventado", ""):
+        try:
+            usuarios.leer_estado(falso)
+            assert False, "un state que no firmamos no puede pasar"
+        except usuarios.NoAutenticado:
+            pass
+
+
+def test_el_401_del_broker_tambien_pide_reautenticar():
+    """Token revocado del lado de Cocos = 401 con `reautenticar`, no un 200 raro.
+
+    Estos endpoints devuelven lo crudo del broker o {"error": ...} adentro de un
+    200, que es la convención vieja del archivo. Con un token que Cocos rechaza
+    —revocado, o el usuario cerró sesión desde el celular— eso deja al front
+    mostrando "ApiException: ... 401" sin saber que tiene que pedir contraseña y
+    2FA otra vez. Verificado en vivo el 2026-09-08: devolvía 200.
+    """
+    sesion = require("core.broker", "sesion")
+    broker = require("core.broker", "cocos")
+    flask_app = require("api", "app").app
+
+    sobre = sesion.emitir({"access_token": "revocado", "refresh_token": "r",
+                           "token_expiration": 9e9, "account_number": "1"})
+    restaurar, muerta = broker.restaurar, broker.sesion_muerta
+    broker.restaurar = lambda jwt: ({"conectado": True, "detalle": "ok",
+                                     "cuenta": "1"}, None)
+    broker.sesion_muerta = lambda: True          # como si Cocos hubiera dado 401
+    try:
+        with modo_web():
+            r = cliente_web(flask_app).get("/api/broker/estado",
+                                           headers={"X-Sesion": sobre})
+    finally:
+        broker.restaurar, broker.sesion_muerta = restaurar, muerta
+
+    assert r.status_code == 401, \
+        f"un 401 del broker tiene que llegar como 401, no como {r.status_code}"
+    assert r.get_json().get("reautenticar") is True, \
+        "sin esta señal el front muestra un error genérico y no vuelve a pedir 2FA"
+
+
+def test_la_marca_de_401_no_sobrevive_al_request():
+    """La marca se limpia al restaurar: un 401 de hace rato no tumba al siguiente.
+
+    Si quedara pegada, el primer 401 de un usuario dejaría todos sus requests
+    posteriores devolviendo "reautenticar" aunque la sesión ya se haya arreglado.
+    """
+    patch = require("core.broker", "_cocos_patch")
+
+    class Resp:
+        status_code = 401
+
+    patch.olvidar_401()
+    patch._marcar(Resp())
+    assert patch.hubo_401(), "el hook tiene que marcar el 401"
+    patch.olvidar_401()
+    assert not patch.hubo_401(), "y restaurar() tiene que limpiar la marca"
+
+
+def test_sesion_vencida_pide_reautenticar():
+    """Un sobre viejo corta con 401 y una señal explícita, no con un 500 raro.
+
+    El front necesita distinguir "se venció, pedile la contraseña y el 2FA" de
+    "Cocos está caído". Sin `reautenticar`, la pantalla queda mostrando un error
+    genérico y el usuario no sabe que tiene que volver a entrar.
+    """
+    import time
+    sesion = require("core.broker", "sesion")
+    flask_app = require("api", "app").app
+
+    viejo = sesion.emitir({"access_token": "x"}, login_ts=time.time() - 25 * 3600)
+    with modo_web():
+        r = cliente_web(flask_app).get("/api/broker/estado", headers={"X-Sesion": viejo})
+
+    assert r.status_code == 401, f"un sobre vencido no puede pasar ({r.status_code})"
+    assert r.get_json().get("reautenticar") is True, \
+        "el front tiene que saber que toca pedir contraseña y 2FA de nuevo"
+
+
+def test_en_modo_local_el_sobre_se_ignora():
+    """Un sobre válido no puede tocar nada en la app de todos los días.
+
+    Los dos modos comparten el global `_cliente` de cocos.py: en modo local, una
+    request con sobre restauraba el cliente desde los JWT y al terminar lo
+    soltaba, dejando la sesión del vault colgada en "sin conectar". Pasó de
+    verdad probando esto el 2026-09-08. El flag PA_MODO es lo que los separa.
+    """
+    sesion = require("core.broker", "sesion")
+    flask_app = require("api", "app").app
+
+    sobre = sesion.emitir({"access_token": "x", "refresh_token": "y",
+                           "token_expiration": 0, "account_number": "1"})
+    r = flask_app.test_client().get("/api/broker/estado", headers={"X-Sesion": sobre})
+
+    assert r.status_code == 200, "en modo local la cabecera se ignora, no corta"
+    assert "X-Sesion" not in r.headers, "en modo local no se emite ningún sobre"
+
+
+def test_sin_cabecera_el_modo_local_sigue_intacto():
+    """Sin `X-Sesion` no se toca nada: la app en tu máquina sigue con el vault.
+
+    El modo web se agregó como camino paralelo. Si el before_request empezara a
+    exigir sobre, la app de todos los días dejaría de arrancar.
+    """
+    flask_app = require("api", "app").app
+    r = flask_app.test_client().get("/api/broker/estado")
+
+    assert r.status_code == 200, "sin cabecera tiene que responder normal"
+    assert "X-Sesion" not in r.headers, "sin sesión web no se emite ningún sobre"
+    assert "vault_cargado" in r.get_json(), "el modo local sigue reportando el vault"
+
 
 # ══════════════════════════════════════════════════════════════════════════
 

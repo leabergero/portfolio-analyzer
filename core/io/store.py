@@ -14,12 +14,48 @@ Borrar una cartera NO borra su P&L realizado. Es historia: que hayas cerrado
 todas las posiciones no significa que esas ganancias no hayan existido.
 """
 
+import contextvars
 import json
+import os
 from pathlib import Path
 
 _DATA = Path(__file__).resolve().parents[2] / "data"
 CARTERAS = _DATA / "portfolios.json"
 REALIZADO = _DATA / "realized.json"
+
+# ── De quién son las carteras que se están leyendo ────────────────────────────
+# En la app local no hay pregunta: son las del dueño de la máquina, y viven en
+# `data/`. Servida en la web hay muchos usuarios en el mismo proceso, y cada uno
+# tiene que ver sólo lo suyo — es la única información personal que queda en
+# nuestro disco, porque credenciales ya no guardamos ninguna.
+#
+# Es un ContextVar y no un global porque Flask atiende varias requests a la vez
+# en hilos distintos: un global se pisaría entre usuarios, que es exactamente la
+# forma de mostrarle a alguien la cartera de otro.
+
+_usuario = contextvars.ContextVar("usuario", default=None)
+
+
+def como(carpeta):
+    """Fija de quién son los datos por el resto de este request. None = local."""
+    _usuario.set(carpeta)
+
+
+def quien():
+    return _usuario.get()
+
+
+def _dir() -> Path:
+    carpeta = _usuario.get()
+    return _DATA if carpeta is None else _DATA / "usuarios" / str(carpeta)
+
+
+def _carteras() -> Path:
+    return CARTERAS if _usuario.get() is None else _dir() / "portfolios.json"
+
+
+def _realizado() -> Path:
+    return REALIZADO if _usuario.get() is None else _dir() / "realized.json"
 
 _CAMPOS = ("ticker", "buy_date", "buy_price", "qty",
            "commissions", "source", "currency", "asset_type", "notes")
@@ -40,6 +76,15 @@ def _escribir(ruta: Path, datos: dict) -> None:
     tmp = ruta.with_suffix(ruta.suffix + ".tmp")
     tmp.write_text(json.dumps(datos, indent=2, ensure_ascii=False), encoding="utf-8")
     tmp.replace(ruta)      # atómico: un corte a mitad de escritura no deja el archivo a medias
+    if quien() is not None:
+        # Servida en la web, la cartera de alguien es lo único personal que queda
+        # en disco: no tiene por qué leerla ningún otro proceso de la máquina.
+        # El vault usa los mismos permisos por la misma razón.
+        try:
+            os.chmod(ruta, 0o600)
+            os.chmod(ruta.parent, 0o700)
+        except OSError:
+            pass
 
 
 def _normalizar(posicion: dict) -> dict:
@@ -62,32 +107,32 @@ def _normalizar(posicion: dict) -> dict:
 # ── Carteras ──────────────────────────────────────────────────────────────────
 
 def nombres() -> list:
-    return sorted(_leer(CARTERAS).keys())
+    return sorted(_leer(_carteras()).keys())
 
 
 def cargar(nombre: str) -> list:
-    return [_normalizar(p) for p in _leer(CARTERAS).get(nombre, [])]
+    return [_normalizar(p) for p in _leer(_carteras()).get(nombre, [])]
 
 
 def cargar_todas() -> dict:
-    return {n: [_normalizar(p) for p in ps] for n, ps in _leer(CARTERAS).items()}
+    return {n: [_normalizar(p) for p in ps] for n, ps in _leer(_carteras()).items()}
 
 
 def guardar(nombre: str, posiciones: list) -> int:
-    datos = _leer(CARTERAS)
+    datos = _leer(_carteras())
     limpias = [_normalizar(p) for p in posiciones if str(p.get("ticker", "")).strip()]
     datos[nombre] = limpias
-    _escribir(CARTERAS, datos)
+    _escribir(_carteras(), datos)
     return len(limpias)
 
 
 def borrar(nombre: str) -> bool:
     """Borra la cartera. El P&L realizado queda: es historia, no estado."""
-    datos = _leer(CARTERAS)
+    datos = _leer(_carteras())
     if nombre not in datos:
         return False
     del datos[nombre]
-    _escribir(CARTERAS, datos)
+    _escribir(_carteras(), datos)
     return True
 
 
@@ -159,7 +204,7 @@ def _normalizar_trade(t: dict) -> dict:
 
 
 def cargar_realizado(nombre: str) -> list:
-    return [_normalizar_trade(t) for t in _leer(REALIZADO).get(nombre, [])]
+    return [_normalizar_trade(t) for t in _leer(_realizado()).get(nombre, [])]
 
 
 def agregar_realizado(nombre: str, trades: list, lote: str = None) -> dict:
@@ -174,7 +219,7 @@ def agregar_realizado(nombre: str, trades: list, lote: str = None) -> dict:
     el mismo archivo pisa lo suyo y solo lo suyo. Los dividendos cargados a mano
     no llevan lote y no los borra ninguna reimportación.
     """
-    datos = _leer(REALIZADO)
+    datos = _leer(_realizado())
     existentes = [_normalizar_trade(t) for t in datos.get(nombre, [])]
     trades = [_normalizar_trade(t) for t in trades]
     reemplazados = 0
@@ -197,19 +242,49 @@ def agregar_realizado(nombre: str, trades: list, lote: str = None) -> dict:
         agregados += 1
 
     datos[nombre] = existentes
-    _escribir(REALIZADO, datos)
+    _escribir(_realizado(), datos)
     return {"agregados": agregados, "reemplazados": reemplazados,
             "total": len(existentes)}
 
 
 def quitar_realizado(nombre: str, filtro: dict) -> int:
     """Saca los registros que coinciden con todos los campos de `filtro`."""
-    datos = _leer(REALIZADO)
+    datos = _leer(_realizado())
     existentes = datos.get(nombre, [])
     if not filtro:
         return 0
     quedan = [t for t in existentes
               if not all(str(t.get(k, "")) == str(v) for k, v in filtro.items())]
     datos[nombre] = quedan
-    _escribir(REALIZADO, datos)
+    _escribir(_realizado(), datos)
     return len(existentes) - len(quedan)
+
+
+# ── Qué cartera es cada comitente ─────────────────────────────────────────────
+# Vivía en `data/connectors.json`, y ahí no puede seguir por dos razones. Es el
+# nombre de la cartera de alguien, así que es suyo y no de todos. Y ese archivo
+# guarda además el client secret de Google: escribirlo desde una acción del
+# usuario, con leer-modificar-escribir y sin lock, es una forma de perderlo si
+# dos importan a la vez.
+
+def _mapa_cocos() -> Path:
+    return _dir() / "cocos.json"
+
+
+def cartera_de_cuenta(cuenta: str):
+    """Nombre de la cartera asociada a ese comitente, o None."""
+    if not cuenta:
+        return None
+    propio = _leer(_mapa_cocos()).get(str(cuenta))
+    if propio or quien() is not None:
+        return propio
+    # App local: la asociación vieja sigue en connectors.json. Se lee de ahí una
+    # última vez para no perderla; la próxima importación ya la escribe acá.
+    from core.data import connectors
+    return connectors.cartera_de_cuenta(cuenta)
+
+
+def asociar_cuenta(cuenta: str, cartera: str) -> None:
+    mapa = _leer(_mapa_cocos())
+    mapa[str(cuenta)] = cartera
+    _escribir(_mapa_cocos(), mapa)

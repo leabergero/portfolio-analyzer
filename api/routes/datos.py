@@ -2,7 +2,7 @@
 
 from flask import Blueprint, Response, jsonify, request
 
-from core.broker import cocos, vault
+from core.broker import cocos, sesion, vault
 from core.data import cache, connectors, fmp, mep, noticias, sources
 from core.io import csv_native, store
 from core.models import comparacion
@@ -175,7 +175,9 @@ def guardar_fmp():
 
 @bp.get("/broker/estado")
 def broker_estado():
-    return jsonify({**cocos.estado(), "vault_cargado": vault.existe()})
+    return jsonify({**cocos.estado(),
+                    "modo": "web" if sesion.modo_web() else "local",
+                    "vault_cargado": False if sesion.modo_web() else vault.existe()})
 
 
 def _parte_2fa(valor: str):
@@ -222,6 +224,77 @@ def broker_conectar():
     c = request.json or {}
     _, codigo = _parte_2fa(c.get("codigo_2fa", ""))
     return jsonify(cocos.conectar(api_key, c.get("forzar_login", False), codigo_2fa=codigo))
+
+
+# ── Modo web: login sin vault ─────────────────────────────────────────────────
+
+_INTENTOS = {}
+_MAX_INTENTOS, _VENTANA = 5, 15 * 60
+
+
+def _frenado(clave: str) -> int:
+    """Segundos que faltan para poder reintentar, o 0.
+
+    Este endpoint es un proxy al login de Cocos: sin freno sirve para probar
+    contraseñas ajenas, o peor, para bloquearle la cuenta a un usuario a fuerza
+    de intentos fallidos. El freno es por email, que es lo que Cocos bloquea.
+
+        ponytail: contador en memoria, se borra al reiniciar y no se comparte
+        entre procesos. Alcanza con un contenedor por usuario; en el despliegue
+        el límite de verdad va en el proxy (nginx limit_req), que ve todas las
+        IPs y sobrevive a los reinicios.
+    """
+    import time
+    intentos = [t for t in _INTENTOS.get(clave, []) if time.time() - t < _VENTANA]
+    _INTENTOS[clave] = intentos
+    if len(intentos) < _MAX_INTENTOS:
+        return 0
+    return int(_VENTANA - (time.time() - intentos[0]))
+
+
+def _anotar_fallo(clave: str):
+    import time
+    _INTENTOS.setdefault(clave, []).append(time.time())
+
+
+@bp.post("/broker/web/login")
+def broker_web_login():
+    """Login con credenciales que no se guardan: ni en disco, ni cifradas.
+
+    El usuario tipea email, contraseña y el código de 6 dígitos. Se hace el
+    login contra Cocos, se le devuelve al navegador un sobre firmado con los
+    JWT adentro, y las credenciales se van con el garbage collector.
+
+    La semilla TOTP se rechaza a propósito: guardarla dejaría al servidor
+    generando códigos solo para siempre, y la caducidad diaria del sobre —lo
+    único que obliga al segundo factor a aparecer— no valdría nada.
+    """
+    if not sesion.modo_web():
+        return jsonify({"error": "Este servidor corre en modo local: "
+                                 "la conexión va por el vault."}), 400
+
+    c = request.json or {}
+    email = (c.get("email") or "").strip()
+    semilla, codigo = _parte_2fa(c.get("codigo_2fa", ""))
+
+    if semilla:
+        return jsonify({"error": "Acá va el código de 6 dígitos de la app, "
+                                 "no la semilla: la semilla no se guarda."}), 400
+    if not codigo:
+        return jsonify({"error": "Falta el código 2FA de 6 dígitos."}), 400
+
+    if espera := _frenado(email):
+        return jsonify({"error": f"Demasiados intentos. Probá en {espera // 60 + 1} min.",
+                        "espera": espera}), 429
+
+    estado, jwt = cocos.login(email, c.get("password") or "", codigo)
+    if not estado["conectado"]:
+        _anotar_fallo(email)
+        return jsonify({"error": estado["detalle"]}), 401
+
+    _INTENTOS.pop(email, None)
+    return jsonify({"ok": True, "sobre": sesion.emitir(jwt),
+                    "vence_en": sesion.DIA, **estado})
 
 
 @bp.post("/broker/desconectar")
@@ -281,7 +354,7 @@ def cocos_fci_tenencias():
     t = cocos.tenencias_fci()
     if t.get("error"):
         return jsonify(t)
-    return jsonify({**t, "cartera": connectors.cartera_de_cuenta(t.get("cuenta")),
+    return jsonify({**t, "cartera": store.cartera_de_cuenta(t.get("cuenta")),
                     "carteras": store.nombres()})
 
 
@@ -301,14 +374,14 @@ def cocos_fci_importar():
     # todo, la cartera tiene que quedar sin el fondo. Rechazarlo acá dejaba una
     # tenencia fantasma que ya no existe en el broker.
 
-    previa = connectors.cartera_de_cuenta(t.get("cuenta"))
+    previa = store.cartera_de_cuenta(t.get("cuenta"))
     if previa and previa != cartera:
         return jsonify({"error": f"Esta cuenta ya está asociada a «{previa}». "
                                  "Desasociala antes de importarla en otra."}), 409
 
     r = store.reemplazar_source(cartera, sources.SOURCE_FCI, t["lotes"])
     if t.get("cuenta"):
-        connectors.asociar_cuenta(t["cuenta"], cartera)
+        store.asociar_cuenta(t["cuenta"], cartera)
     return jsonify({"ok": True, "cartera": cartera, "cuenta_nueva": not previa,
                     "tickers": [l["ticker"] for l in t["lotes"]], **r})
 
