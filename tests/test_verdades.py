@@ -1639,6 +1639,49 @@ def test_el_usuario_nuevo_estrena_con_la_cartera_modelo_y_si_la_borra_no_vuelve(
         assert store.nombres() == ["La mía"]
 
 
+def test_la_serie_del_mep_se_sincroniza_sola_una_vez_por_dia():
+    """La serie se pide sola: no alcanza con sincronizar al arrancar.
+
+    Servida con gunicorn, `main()` no se ejecuta NUNCA, así que el servidor de
+    producción quedó con cero ruedas de MEP y la pestaña del dólar vacía —el
+    2026-09-08, en el deploy—. Y aunque arranque bien, un proceso que vive
+    semanas seguiría valuando con el dólar del día que arrancó: el error no se
+    ve, sólo da mal.
+
+    Una vez por día y no en cada lectura: `serie()` se llama muchas veces por
+    request. Y si las fuentes fallan, el día no se marca, así que se reintenta
+    en la próxima lectura en vez de esperar a mañana.
+    """
+    import pandas as pd
+
+    mep = require("core.data", "mep")
+    llamadas = []
+    original_sinc, original_leer = mep.sincronizar, mep.cache.leer_mep
+    serie_falsa = pd.Series([1000.0], index=[pd.Timestamp("2026-09-01")])
+    vacia = pd.Series(dtype=float)
+    devolver = [serie_falsa]
+
+    mep.sincronizar = lambda *a, **k: llamadas.append(1)
+    mep.cache.leer_mep = lambda *a, **k: devolver[0]
+    try:
+        mep._memoria.update({"serie": None, "dia": None})
+        mep.serie(); mep.serie(); mep.serie()
+        assert len(llamadas) == 1, f"una sola sincronización por día, no {len(llamadas)}"
+
+        mep._memoria["dia"] = "2020-01-01"        # como si hubiera cambiado el día
+        mep.serie()
+        assert len(llamadas) == 2, "al cambiar el día tiene que volver a sincronizar"
+
+        # Fuentes caídas: no se marca el día, así que se reintenta.
+        devolver[0] = vacia
+        mep._memoria.update({"serie": None, "dia": None})
+        mep.serie(); mep.serie()
+        assert len(llamadas) == 4, "sin datos hay que reintentar, no esperar a mañana"
+    finally:
+        mep.sincronizar, mep.cache.leer_mep = original_sinc, original_leer
+        mep._memoria.update({"serie": None, "dia": None})
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

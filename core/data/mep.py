@@ -41,7 +41,7 @@ _URL_ARGDATOS = "https://api.argentinadatos.com/v1/cotizaciones/dolares/bolsa"
 _URL_DOLARAPI = "https://dolarapi.com/v1/dolares/bolsa"
 _HEADERS = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
 
-_memoria = {"serie": None, "fuente": None}
+_memoria = {"serie": None, "fuente": None, "dia": None}
 
 
 # ── Descarga ──────────────────────────────────────────────────────────────────
@@ -140,11 +140,27 @@ def sincronizar(forzar: bool = False) -> dict:
 # ── Lectura ───────────────────────────────────────────────────────────────────
 
 def serie() -> pd.Series:
-    """La serie completa, cacheada en memoria (se lee muchas veces por request)."""
-    if _memoria["serie"] is None:
+    """La serie completa, cacheada en memoria (se lee muchas veces por request).
+
+    Se sincroniza sola una vez por día. El disparador no puede ser el arranque y
+    nada más: servida con gunicorn, `main()` no se ejecuta nunca —el server de
+    producción tenía **cero ruedas** de MEP y la pestaña quedaba vacía—, y un
+    proceso que vive semanas se quedaría valuando con el dólar del día que
+    arrancó, que es un error silencioso y caro.
+
+    Es barato: `sincronizar()` compara la última fecha guardada y si ya está al
+    día vuelve sin tocar la red. El día sólo se marca cuando la lectura trajo
+    algo, así que si las fuentes están caídas se reintenta en la próxima lectura
+    en vez de esperar a mañana.
+    """
+    hoy = date.today().isoformat()
+    if _memoria["serie"] is None or _memoria["dia"] != hoy:
+        sincronizar()
         # También al leer: la caché guarda lo que las fuentes publicaron el día
         # que se sincronizó, y ya tiene adentro picos que el filtro viejo dejó pasar.
         _memoria["serie"] = _filtrar_outliers(cache.leer_mep())
+        if not _memoria["serie"].empty:
+            _memoria["dia"] = hoy
     return _memoria["serie"]
 
 
