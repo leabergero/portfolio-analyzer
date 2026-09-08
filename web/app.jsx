@@ -1473,14 +1473,15 @@ function BulletPesos({ filas, nota }) {
                 background: mueve ? (compra ? c.positivo : c.negativo) : c.texto3 }} />
               <span className="obj" style={{ left: (f.objetivo / tope) * 100 + "%" }} />
             </div>
+            <span className="objpct">{pct(f.objetivo, 1)}</span>
             <span className={"monto " + (mueve ? signo(f.monto) : "")}>
               {mueve ? (compra ? "comprar " : "vender ") + usd(Math.abs(f.monto)) : "—"}
             </span>
           </div>);
       })}
       <div className="pie">
-        Barra = peso de hoy, línea blanca = peso objetivo. Verde si hay que comprar,
-        rojo si hay que vender. {nota}
+        Barra = peso de hoy, línea blanca = peso objetivo, y al lado su número. Verde si hay
+        que comprar, rojo si hay que vender. {nota}
       </div>
     </>
   );
@@ -2709,18 +2710,6 @@ function Markowitz({ d, cartera, bench, extras }) {
             <BulletPesos nota="El objetivo es la cartera óptima del modelo elegido arriba."
               filas={acciones.map((a) => ({ nombre: a.ticker, hoy: a.peso_actual_pct,
                                             objetivo: a.peso_objetivo_pct, monto: a.delta_usd }))} />)}
-          <div className="tabla-wrap"><table>
-            <thead><tr><th>Ticker</th><th className="n">Hoy</th><th className="n">Objetivo</th>
-                       <th className="n">Diferencia</th><th className="c">Acción</th></tr></thead>
-            <tbody>{(acciones || []).map((a) => (
-              <tr key={a.ticker}>
-                <td className="mono">{a.ticker}</td>
-                <td className="n">{pct(a.peso_actual_pct, 1)}</td>
-                <td className="n">{pct(a.peso_objetivo_pct, 1)}</td>
-                <td className={"n " + signo(a.delta_usd)}>{usd(a.delta_usd)}</td>
-                <td><span className={"chip " + (a.accion === "COMPRAR" ? "ok" : a.accion === "VENDER" ? "mal" : "")}>{a.accion}</span></td>
-              </tr>))}</tbody>
-          </table></div>
         </div>
 
         <div className="panel">

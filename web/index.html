@@ -416,12 +416,14 @@ footer a:hover{text-decoration:underline}
 .lab-valor .cap{fill:none;stroke:var(--texto-3);stroke-width:1.2;stroke-dasharray:4 3;
                 opacity:.75;vector-effect:non-scaling-stroke}
 
-.lab-bullet{display:grid;grid-template-columns:88px 1fr 136px;gap:14px;align-items:center;
+.lab-bullet{display:grid;grid-template-columns:88px 1fr 62px 136px;gap:14px;align-items:center;
             padding:9px 0}
 .lab-bullet + .lab-bullet{border-top:1px solid var(--borde-suave)}
 .lab-bullet .via{position:relative;height:18px;border-radius:4px;background:var(--panel-2)}
 .lab-bullet .hoy{position:absolute;top:4.5px;height:9px;border-radius:3px;left:0}
 .lab-bullet .obj{position:absolute;top:-1px;bottom:-1px;width:2px;background:var(--texto)}
+.lab-bullet .objpct{text-align:right;font-size:12.5px;color:var(--texto-3);
+                    font-variant-numeric:tabular-nums;white-space:nowrap}
 .lab-bullet .monto{text-align:right;font-size:12.5px;font-variant-numeric:tabular-nums;white-space:nowrap}
 
 .lab-ruedas{display:grid;grid-template-columns:78px 1fr 66px;gap:4px 10px;align-items:center}
