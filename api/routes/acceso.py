@@ -3,6 +3,7 @@
 from flask import Blueprint, current_app, jsonify, redirect, request
 
 from core import usuarios
+from core.io import store
 
 bp = Blueprint("acceso", __name__, url_prefix="/api")
 
@@ -39,6 +40,13 @@ def entrar_google():
     except usuarios.NoAutenticado as e:
         current_app.logger.warning("ingreso rechazado: %s", e)
         return redirect("/?ingreso=fallo")
+
+    # Estrena con una cartera de ejemplo: sin posiciones no hay riesgo ni
+    # frontera ni Monte Carlo que mirar, y el que entra por primera vez no ve
+    # qué hace la app hasta después de cargar diez lotes a mano. Se siembra una
+    # sola vez y se puede borrar; borrada, no vuelve.
+    store.como(usuarios.carpeta(usuario))
+    store.sembrar()
 
     r = redirect(destino)
     r.set_cookie(usuarios.COOKIE, usuarios.emitir(usuario),

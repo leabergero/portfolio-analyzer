@@ -170,11 +170,18 @@ por ticker), movimientos clasificados con filtro, y cuentas bancarias.
 
 ## Datos de ejemplo
 
-El repo trae una cartera de muestra en
+La primera vez la app se carga sola: quien entra sin ninguna cartera estrena con
+**«Modelo»** ([`examples/modelo.csv`](examples/modelo.csv) — 12 posiciones
+abiertas, 11 cerradas y 9 dividendos), porque una app de carteras vacía no se
+puede recorrer: sin posiciones no hay riesgo, ni frontera, ni Monte Carlo que
+mirar. Se siembra al arrancar en local y al ingresar por primera vez en la web.
+**Se puede borrar y no vuelve**: la condición es que el archivo de carteras no
+exista, y borrarla lo escribe.
+
+Hay además una cartera más larga en
 [`examples/cartera_ejemplo.csv`](examples/cartera_ejemplo.csv) — 8 posiciones
-abiertas, 71 operaciones cerradas y 33 dividendos — para poder recorrer la app
-sin cargar nada a mano. Al clonar no hay carteras (los datos propios quedan fuera
-de git), así que este archivo es el punto de partida.
+abiertas, 71 operaciones cerradas y 33 dividendos — para ver la app con más
+historia encima.
 
 Para cargarla: pestaña **Carteras → Importar → Formato propio**, y elegí el CSV.
 La columna `record` dice qué es cada fila (vacío = posición abierta, `cerrada`,

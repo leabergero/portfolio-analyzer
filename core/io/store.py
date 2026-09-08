@@ -15,11 +15,13 @@ todas las posiciones no significa que esas ganancias no hayan existido.
 """
 
 import contextvars
+import io
 import json
 import os
 from pathlib import Path
 
 _DATA = Path(__file__).resolve().parents[2] / "data"
+MODELO = Path(__file__).resolve().parents[2] / "examples" / "modelo.csv"
 CARTERAS = _DATA / "portfolios.json"
 REALIZADO = _DATA / "realized.json"
 
@@ -138,6 +140,33 @@ def borrar(nombre: str) -> bool:
 
 def duplicar(origen: str, destino: str) -> int:
     return guardar(destino, cargar(origen))
+
+
+def sembrar(nombre: str = "Modelo") -> bool:
+    """Le deja al usuario nuevo una cartera de ejemplo. Devuelve si la sembró.
+
+    Una app de carteras vacía no se puede recorrer: sin posiciones no hay
+    riesgo, ni frontera, ni Monte Carlo que mirar, y el que entra por primera
+    vez no ve qué hace la herramienta hasta después de cargar diez lotes a mano.
+
+    Se siembra **una sola vez**, y la condición es que el archivo de carteras no
+    exista todavía. Borrarla lo escribe —aunque quede vacío—, así que la cartera
+    modelo no reaparece en el próximo ingreso: si la borraste, la borraste.
+    """
+    if _carteras().exists() or not MODELO.exists():
+        return False
+
+    from core.io import csv_native
+
+    texto = MODELO.read_text(encoding="utf-8-sig")
+    posiciones = csv_native.read_positions(io.StringIO(texto))
+    if not posiciones:
+        return False
+    guardar(nombre, posiciones)
+    realizadas = csv_native.read_realizado(io.StringIO(texto))
+    if realizadas:
+        agregar_realizado(nombre, realizadas, "modelo")
+    return True
 
 
 def agregar(nombre: str, nuevas: list) -> dict:

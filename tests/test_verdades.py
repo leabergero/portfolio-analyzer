@@ -1603,6 +1603,42 @@ def test_una_compra_simulada_no_inventa_pnl():
     assert casi(r["valor_total"], 175), "pero el valor total sí incluye lo simulado"
 
 
+def test_el_usuario_nuevo_estrena_con_la_cartera_modelo_y_si_la_borra_no_vuelve():
+    """Quien entra por primera vez encuentra datos; quien la borró, no la ve más.
+
+    Una app de carteras vacía no se puede recorrer: sin posiciones no hay riesgo,
+    ni frontera, ni Monte Carlo, y el que entra no ve qué hace la herramienta
+    hasta después de cargar diez lotes a mano.
+
+    La otra mitad es la que importa: la condición de siembra es que el archivo de
+    carteras NO exista. Borrar la modelo escribe ese archivo aunque quede vacío,
+    así que no reaparece en el próximo ingreso. Sembrar "si no hay ninguna
+    cartera" —que es la condición obvia— haría exactamente eso: devolverle al
+    usuario, cada vez que entra, la cartera que ya decidió borrar.
+    """
+    store = require("core.io", "store")
+
+    with datos_aparte():
+        store.como("usuario-nuevo")
+        assert store.sembrar(), "un usuario sin nada tiene que estrenar con la modelo"
+        assert store.nombres() == ["Modelo"]
+        assert len(store.cargar("Modelo")) > 0, "la modelo sin posiciones no sirve de ejemplo"
+        assert len(store.cargar_realizado("Modelo")) > 0, "y trae historia: cerradas y dividendos"
+
+        assert not store.sembrar(), "no se siembra dos veces sobre el mismo usuario"
+
+        store.borrar("Modelo")
+        assert not store.sembrar(), "borrada es borrada: no vuelve en el próximo ingreso"
+        assert store.nombres() == []
+
+        # Y no pisa lo de nadie: quien ya tiene carteras no recibe la modelo.
+        store.como("usuario-con-cartera")
+        store.guardar("La mía", [{"ticker": "AAPL", "qty": 1, "buy_price": 100,
+                                  "buy_date": "2025-01-02"}])
+        assert not store.sembrar()
+        assert store.nombres() == ["La mía"]
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

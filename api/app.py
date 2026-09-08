@@ -229,6 +229,12 @@ def main():
 
     if not cocos.estado()["conectado"]:
         print("  Cocos: sin conectar (los bonos no van a tener precio; el resto sí).")
+    # Recién clonado no hay ninguna cartera y la app no se puede recorrer. La
+    # cartera modelo se siembra sólo si el archivo de carteras no existe: quien
+    # ya tiene las suyas no se entera de que esto existe.
+    if store.sembrar():
+        print("  Se cargó la cartera «Modelo» de ejemplo (examples/modelo.csv).")
+        print("  Borrala cuando cargues las tuyas: no vuelve a aparecer.")
     print()
 
     app.run(host="127.0.0.1", port=PUERTO, debug=True, use_reloader=False)
