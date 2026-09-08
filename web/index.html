@@ -208,8 +208,12 @@ td.fx{font-weight:600}
       font-weight:600;padding:3px 10px;border-radius:100px;border:1px solid currentColor}
 .chip.ok{color:var(--positivo)} .chip.mal{color:var(--negativo)} .chip.ojo{color:var(--alerta)}
 /* Toda celda cuyo contenido es un chip se centra sola: son 14 tablas y no hay
-   motivo para recordar la clase en cada una. */
+   motivo para recordar la clase en cada una. Cuando además del chip hay texto
+   —el ticker con su "bono", el índice con su "correcto"— la celda es del texto y
+   se alinea como las de al lado: centrarla la desplazaba y parecía tabulada.
+   CSS no distingue un nodo de texto suelto, así que eso lo dice la clase. */
 td:has(> .chip){text-align:center}
+td.textochip{text-align:left}
 th.c{text-align:center}
 
 footer{max-width:1400px;margin:26px auto 0;padding:18px 20px 40px;border-top:1px solid var(--borde);

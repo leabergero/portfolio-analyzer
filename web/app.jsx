@@ -419,9 +419,10 @@ function Simulador({ cartera, sim, setSim, tenencias }) {
     const previo = sim.find((x) => x.ticker === t)?.qty || 0;
     const total = Math.round((previo + q) * 1e6) / 1e6;
     setSim([...sim.filter((x) => x.ticker !== t), ...(total ? [{ ticker: t, qty: total }] : [])]);
-    setF({ ticker: "", qty: "" }); setCheck(null);
-    setMsg(signo < 0 && pedida > tiene
-           ? `Tenías ${num(tiene, 0)} de ${t}: se vende eso y no más.` : null);
+    setF({ ticker: "", qty: "" }); setCheck(null); setMsg(null);
+    // El recorte no se avisa con un mensaje: al cambiar la simulación se rehace
+    // la pantalla entera y el aviso se iría antes de que alguien lo lea. Lo dice
+    // el chip, que muestra la cantidad que realmente quedó aplicada.
   };
 
   const quitar = (x) => setSim(sim.filter((s2) => s2.ticker !== x.ticker));
@@ -487,7 +488,8 @@ function Simulador({ cartera, sim, setSim, tenencias }) {
               ganancia: no vendiste nada.</>
           : <>Ticker y cantidad, nada más: el precio lo pone el mercado. Se recalcula la cartera
               entera con el activo adentro, y en Comparación podés medir una contra otra sin
-              tener que duplicar la cartera.</>}
+              tener que duplicar la cartera. De un papel no se vende más de lo que tenés: el
+              chip dice la cantidad que quedó aplicada.</>}
       </div>
     </div>
   );
@@ -498,6 +500,20 @@ function Analisis({ cartera, recargar, sim, setSim }) {
   const [estado, setEstado] = useState(null);
   const [tab, setTab] = useState("posicion");
   const [bench, setBench] = useState("SP500");
+  // Mientras el usuario no elija índice manda el que mejor explica la cartera:
+  // lo dice el CAPM cuando termina de medir los tres. Si lo tocó se respeta —
+  // un selector que se mueve solo después de que lo movieron es un bug.
+  const [auto, setAuto] = useState(true);
+  const eligio = useRef(false);
+  useEffect(() => { eligio.current = false; setAuto(true); }, [cartera]);
+  useEffect(() => {
+    const oir = (e) => {
+      if (eligio.current || !e.detail) return;
+      setBench(e.detail); setAuto(true);
+    };
+    window.addEventListener("pa:indice", oir);
+    return () => window.removeEventListener("pa:indice", oir);
+  }, []);
   // La simulación es parte de qué se está analizando: cambiarla es relanzar.
   const simKey = simul.cabecera(sim);
 
@@ -523,11 +539,7 @@ function Analisis({ cartera, recargar, sim, setSim }) {
   }, [run, cartera]);
 
   if (!cartera) return <div className="vacio">Elegí una cartera arriba para analizarla.</div>;
-  const simulador = LAB && (
-    <Simulador cartera={cartera} sim={sim} setSim={setSim}
-               tenencias={(estado?.resultados?.posicion?.posiciones || []).reduce(
-                 (a, f) => ({ ...a, [f.ticker]: (a[f.ticker] || 0) + f.qty }), {})} />);
-  if (!estado) return <>{simulador}<div className="cargando">Lanzando los modelos…</div></>;
+  if (!estado) return <div className="cargando">Lanzando los modelos…</div>;
 
   const R = estado.resultados || {};
   const M = estado.modelos || {};
@@ -535,7 +547,6 @@ function Analisis({ cartera, recargar, sim, setSim }) {
 
   return (
     <>
-      {simulador}
       {estado.estado !== "terminado" && (
         <PasosModelos M={M} listos={listos} />
       )}
@@ -556,18 +567,22 @@ function Analisis({ cartera, recargar, sim, setSim }) {
           <span style={{ marginLeft: "auto", display: "flex", alignItems: "center",
                          gap: 7, paddingBottom: 6 }}>
             <span style={{ fontSize: 12, color: "var(--texto-3)" }}>Comparar contra</span>
-            <select value={bench} onChange={(e) => setBench(e.target.value)}>
+            <select value={bench}
+                    title={auto ? "Elegido solo: es el índice que mejor explica esta "
+                                  + "cartera, el de R² más alto de los tres." : undefined}
+                    onChange={(e) => { eligio.current = true; setAuto(false);
+                                       setBench(e.target.value); }}>
               {BENCHMARKS.map(([k, t]) => <option key={k} value={k}>{t}</option>)}
             </select>
           </span>)}
       </div>
       <Panel key={simKey} tab={tab} R={R} M={M} cartera={cartera} bench={bench}
-             recargar={recargar} />
+             recargar={recargar} sim={sim} setSim={setSim} />
     </>
   );
 }
 
-function Panel({ tab, R, M, cartera, bench, recargar }) {
+function Panel({ tab, R, M, cartera, bench, recargar, sim, setSim }) {
   const d = R[tab];
   if (M[tab]?.estado === "corriendo" || M[tab]?.estado === "en cola")
     return <div className="cargando">Calculando {M[tab]?.nombre}…</div>;
@@ -576,7 +591,7 @@ function Panel({ tab, R, M, cartera, bench, recargar }) {
 
   const vistas = {
     posicion: <Posicion d={{ ...d, cartera_nombre: cartera }} cartera={cartera}
-                        recargar={recargar} bench={bench}
+                        recargar={recargar} bench={bench} sim={sim} setSim={setSim}
                         extras={{ composicion: R.composicion, riesgo: R.riesgo,
                                   momentum: R.momentum, capm: R.capm }} />,
     riesgo: <Riesgo d={d} cartera={cartera} extras={{ stress: R.stress }} />,
@@ -671,7 +686,7 @@ function AltaRapida({ cartera, recargar }) {
   );
 }
 
-function Posicion({ d, cartera, recargar, extras, bench }) {
+function Posicion({ d, cartera, recargar, extras, bench, sim, setSim }) {
   const filas = d.posiciones || [];
   const [corr, setCorr] = useState(null);
   const [real, setReal] = useState(null);
@@ -723,8 +738,6 @@ function Posicion({ d, cartera, recargar, extras, bench }) {
       )}
       {real?.n > 0 && <CalendarioRealizado real={real} />}
 
-      <AltaRapida cartera={cartera} recargar={recargar} />
-
       <div className="panel">
         <h3>Tenencias
           <a className="btn" style={{ marginLeft: "auto", textDecoration: "none", fontSize: 12.5 }}
@@ -738,7 +751,7 @@ function Posicion({ d, cartera, recargar, extras, bench }) {
           </tr></thead>
           <tbody>{filas.map((f, i) => (
             <tr key={i}>
-              <td className="mono">{f.ticker}
+              <td className="mono textochip">{f.ticker}
                 {f.es_bono && <span className="chip" style={{marginLeft:6}}>bono</span>}
                 {f.sim && <span className="chip ojo" style={{marginLeft:6}}
                                 title="Simulada: no está en tu cartera">sim</span>}</td>
@@ -765,6 +778,13 @@ function Posicion({ d, cartera, recargar, extras, bench }) {
           de cambio, no el rendimiento del activo.
         </div>
       </div>
+
+      {/* Cargar y simular van juntos y acá: debajo de lo que tenés —que es
+          contra lo que se agrega o se simula— y antes de lo que ya cerraste. */}
+      <AltaRapida cartera={cartera} recargar={recargar} />
+      {LAB && <Simulador cartera={cartera} sim={sim} setSim={setSim}
+                         tenencias={filas.reduce(
+                           (a, f) => ({ ...a, [f.ticker]: (a[f.ticker] || 0) + f.qty }), {})} />}
 
       {real && <PnlRealizado real={real} cartera={cartera} recargar={() => setN((x) => x + 1)} />}
 
@@ -3119,7 +3139,17 @@ function Capm({ d: inicial, cartera, bench }) {
     let vivo = true;
     setTodos(null);
     api(`/api/capm/${encodeURIComponent(cartera)}/benchmarks`)
-      .then((r) => vivo && setTodos(r));
+      .then((r) => {
+        if (!vivo) return;
+        setTodos(r);
+        // El índice correcto no sirve de nada si el resto de la pantalla se
+        // sigue midiendo contra otro. Se avisa por evento y no por props: el
+        // selector vive tres componentes más arriba, y es el mismo canal que la
+        // app ya usa para hablar de abajo hacia arriba.
+        if (r?.recomendado) {
+          window.dispatchEvent(new CustomEvent("pa:indice", { detail: r.recomendado }));
+        }
+      });
     return () => { vivo = false; };
   }, [cartera]);
   if (!d) return <div className="cargando">Comparando contra el índice…</div>;
@@ -3212,7 +3242,9 @@ function Capm({ d: inicial, cartera, bench }) {
                 <thead><tr><th>Índice</th><th className="n">R²</th><th className="n">Beta</th><th className="n">Alpha</th></tr></thead>
                 <tbody>{Object.entries(todos.benchmarks).sort((a,b)=>b[1].r2-a[1].r2).map(([k, v]) => (
                   <tr key={k}>
-                    <td>{v.nombre}{k === todos.recomendado && <span className="chip ok" style={{marginLeft:7}}>correcto</span>}</td>
+                    <td className="textochip">{v.nombre}
+                      {k === todos.recomendado &&
+                        <span className="chip ok" style={{ marginLeft: 7 }}>correcto</span>}</td>
                     <td className="n">{num(v.r2, 3)}</td><td className="n">{num(v.beta, 3)}</td>
                     <td className="n">{pct(v.alpha_anual_pct)}</td>
                   </tr>))}</tbody>
