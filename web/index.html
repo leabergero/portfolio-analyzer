@@ -369,6 +369,35 @@ footer a:hover{text-decoration:underline}
 .lab-trazo:disabled rect{animation:none;stroke-dasharray:100 0;opacity:.35}
 @keyframes lab-trace{to{stroke-dashoffset:-100}}
 
+/* BTN-01 · neón con brillo que barre. Abre la simulación: es la única acción de
+   la pantalla que propone algo que todavía no existe, y se distingue del resto
+   sin gritar. Del picker se conserva la forma —degradé, halo y barrido—; los
+   colores salen de la paleta de la app, igual que se hizo con BTN-02. */
+.lab-neon{padding:7px 18px;border:0;border-radius:6px;cursor:pointer;font:inherit;
+  font-size:13.5px;font-weight:600;color:var(--fondo);position:relative;overflow:hidden;
+  background:linear-gradient(180deg,var(--acento-2),var(--acento));
+  box-shadow:0 0 0 1px var(--acento),0 6px 18px -6px var(--acento);transition:.25s}
+.lab-neon:hover{transform:translateY(-2px);
+  box-shadow:0 0 0 1px var(--acento-2),0 10px 26px -6px var(--acento)}
+.lab-neon:active{transform:translateY(0)}
+.lab-neon::after{content:"";position:absolute;top:0;bottom:0;width:40%;left:-60%;
+  background:linear-gradient(90deg,transparent,#ffffff9c,transparent);
+  animation:lab-brillo 3s ease-in-out infinite}
+@keyframes lab-brillo{0%,60%{left:-60%}100%{left:120%}}
+
+/* BTN-05 · relleno que barre al pasar por encima. Las dos puertas del CSV,
+   importar y exportar, que son la misma operación en dos sentidos y ahora se
+   ven como tal. El z-index:0 del botón es lo que mantiene al relleno adentro. */
+.lab-barrido{position:relative;z-index:0;overflow:hidden;cursor:pointer;font:inherit;
+  font-size:13.5px;padding:6px 16px;border-radius:2px;text-decoration:none;
+  background:transparent;color:var(--acento);border:1px solid var(--acento);
+  transition:color .3s}
+.lab-barrido::before{content:"";position:absolute;inset:0;background:var(--acento);
+  transform:skewX(-20deg) translateX(-120%);z-index:-1;
+  transition:transform .35s cubic-bezier(.4,0,.2,1)}
+.lab-barrido:hover{color:var(--fondo)}
+.lab-barrido:hover::before{transform:skewX(-20deg) translateX(-10%)}
+
 .lab-radarfila{display:grid;grid-template-columns:minmax(280px,360px) 1fr;gap:22px;
                align-items:center}
 @media (max-width:820px){.lab-radarfila{grid-template-columns:1fr}}

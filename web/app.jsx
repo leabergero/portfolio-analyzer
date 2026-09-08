@@ -424,8 +424,8 @@ function Simulador({ cartera, sim, setSim, tenencias }) {
   const quitar = (x) => setSim(sim.filter((s2) => s2.ticker !== x.ticker));
 
   if (!abierto && !sim.length) return (
-    <button className="btn" style={{ marginBottom: 10 }} onClick={() => setAbierto(true)}>
-      Simular una compra o una venta</button>);
+    <button className="lab-neon" style={{ marginBottom: 10 }} onClick={() => setAbierto(true)}>
+      Simular operación</button>);
 
   return (
     <div className="panel lab-sim" style={{ marginBottom: 12 }}>
@@ -4286,7 +4286,7 @@ function Carteras({ carteras, recargar, cartera, setCartera }) {
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", marginTop: 8 }}>
           <input type="text" placeholder="cartera de destino" value={destino}
                  onChange={(e) => setDestino(e.target.value)} style={{ minWidth: 170 }} />
-          <label className="btn">Formato propio
+          <label className="lab-barrido">Formato propio
             <input type="file" accept=".csv" hidden
                    onChange={(e) => e.target.files[0] && subir(e.target.files[0], "importar")} />
           </label>
@@ -4311,7 +4311,7 @@ function Carteras({ carteras, recargar, cartera, setCartera }) {
             <button className="btn" onClick={() => setFilas((f) => [...f, {
               ticker: "", buy_date: "", buy_price: 0, qty: 0, commissions: 0,
               source: "", currency: "", asset_type: "", notes: "" }])}>+ Activo</button>
-            <a className="btn" style={{ textDecoration: "none" }}
+            <a className="lab-barrido"
                href={`/api/carteras/${encodeURIComponent(sel)}/exportar`}>Exportar CSV</a>
             <button className="btn peligro" style={{ marginLeft: "auto" }} onClick={async () => {
               if (!confirm(`¿Eliminar la cartera "${sel}"?`)) return;

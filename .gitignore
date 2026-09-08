@@ -5,6 +5,10 @@ __pycache__/
 
 # Datos regenerables — la caché de mercado se reconstruye sola
 data/*.db
+# En WAL, SQLite deja además estos dos al lado de la base. Son tan regenerables
+# como ella y cambian en cada consulta: versionarlos es ruido binario puro.
+data/*.db-wal
+data/*.db-shm
 data/*.json
 !data/.gitkeep
 
@@ -20,6 +24,8 @@ data/secreto_sesion
 data/usuarios/
 # backups de carteras y realizado
 data/*.bak*
+# y los que uno se guarda a mano en la raíz: son carteras, o sea datos de alguien
+backup*/
 
 # Frontend compilado (se genera desde web/app.jsx)
 web/app.js
