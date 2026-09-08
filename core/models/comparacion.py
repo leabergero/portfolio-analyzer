@@ -203,11 +203,15 @@ def intervalo_bootstrap(retornos, metrica="sharpe", rf_anual: float = 0.0,
 # ── Comparación de carteras ───────────────────────────────────────────────────
 
 def _series(carteras: dict):
-    """{nombre: retornos diarios} recortados al período que TODAS comparten."""
+    """{nombre: retornos diarios} recortados al período que TODAS comparten.
+
+    Devuelve también `detalle`: la matriz por activo y los pesos de cada cartera,
+    para lo que necesita mirar adentro y no sólo el agregado.
+    """
     from core.models.portfolio import matriz_retornos, value_weights
     import pandas as pd
 
-    series, propias = {}, {}
+    series, propias, detalle = {}, {}, {}
     for nombre, posiciones in carteras.items():
         ret_df, precios = matriz_retornos(posiciones)
         if ret_df.empty:
@@ -217,12 +221,117 @@ def _series(carteras: dict):
         s = pd.Series(ret_df[tickers].to_numpy() @ w, index=ret_df.index)
         series[nombre] = s
         propias[nombre] = len(s)
+        # La matriz activo por activo se guarda acá: la correlación de un papel
+        # contra el resto de su cartera se calcula con esto, y volver a pedirla
+        # después sería bajar todas las series de nuevo.
+        detalle[nombre] = (ret_df, w, tickers)
 
     if len(series) < 2:
-        return None, {}, {}
+        return None, {}, {}, {}
 
     alineadas = pd.concat(series, axis=1).dropna()
-    return alineadas, propias, {n: len(alineadas) for n in series}
+    return alineadas, propias, {n: len(alineadas) for n in series}, detalle
+
+
+def _montecarlo(alineadas, horizonte: int = 252, n_sims: int = 5000,
+                motor: str = "t") -> dict:
+    """El abanico de futuros de cada cartera, sobre el mismo período y semilla.
+
+    Reusa el sorteo de `montecarlo._sortear`, que ya trabaja sobre la serie de
+    retornos de la cartera: acá esa serie es la alineada, así que las tres
+    simulaciones parten del mismo tramo de mercado. En Análisis cada cartera se
+    simula sobre su propia historia, que es lo correcto ahí y lo incomparable acá.
+
+    Va en base 100 y no en dólares a propósito: las carteras tienen tamaños
+    distintos, y un abanico en plata compara cuánto tenés, no cómo se comporta.
+    """
+    from core.models.montecarlo import _sortear
+
+    paso = max(1, horizonte // 60)
+    cortes = sorted(set(list(range(0, horizonte, paso)) + [horizonte - 1]))
+
+    salida = {}
+    for n in alineadas.columns:
+        # Semilla igual para todas: lo que separe a los abanicos es la cartera,
+        # no la suerte del sorteo.
+        log = _sortear(motor, alineadas[n].to_numpy(), n_sims, horizonte,
+                       np.random.default_rng(_SEMILLA))
+        tray = 100.0 * np.exp(np.cumsum(log, axis=1))
+        recorte, fin = tray[:, cortes], tray[:, -1]
+        pctl = lambda q: [round(float(v), 2) for v in np.percentile(recorte, q, axis=0)]  # noqa: E731
+        salida[n] = {
+            "dias": [i + 1 for i in cortes],
+            "p5": pctl(5), "mediana": pctl(50), "p95": pctl(95),
+            "final": {
+                "p5": round(float(np.percentile(fin, 5)), 2),
+                "mediana": round(float(np.percentile(fin, 50)), 2),
+                "p95": round(float(np.percentile(fin, 95)), 2),
+                "peor_1_pct": round(float(np.percentile(fin, 1)), 2),
+                "prob_perdida_pct": round(100 * float((fin < 100).mean()), 1),
+            },
+        }
+    return {"horizonte": horizonte, "simulaciones": n_sims, "motor": motor,
+            "base": 100, "carteras": salida}
+
+
+def _media_pares(matriz, tickers) -> float:
+    pares = [float(matriz.loc[a, b])
+             for i, a in enumerate(tickers) for b in tickers[i + 1:]]
+    return round(float(np.mean(pares)), 3) if pares else 0.0
+
+
+def _correlacion(carteras: dict, detalle: dict, indice) -> dict:
+    """Cuánto se mueve junta cada cartera, y qué le hace adentro lo simulado.
+
+    Es la pregunta de siempre frente a un activo nuevo: ¿suma diversificación o
+    es más de lo mismo con otro nombre? Se contesta con dos números, los dos
+    sobre el período común. La correlación media entre pares —el resumen de si
+    la cartera se comporta como una sola cosa— antes y después de incorporarlo.
+    Y la correlación de cada activo simulado contra el resto de la cartera, que
+    es lo que decide: por debajo de 0,3 diversifica de verdad; por encima de 0,7
+    es el mismo riesgo comprado dos veces.
+    """
+    salida = {}
+    for nombre, (ret_df, w, tickers) in detalle.items():
+        df = ret_df.reindex(indice).dropna(how="all")
+        if len(tickers) < 2 or df.empty:
+            continue
+        simulados = {str(p.get("ticker") or "").upper()
+                     for p in carteras.get(nombre, []) if p.get("sim")}
+        info = {"media_pares": _media_pares(df[tickers].corr(), tickers),
+                "activos": len(tickers)}
+
+        base = [t for t in tickers if t not in simulados]
+        if simulados & set(tickers) and len(base) >= 2:
+            info["sin_simulados"] = _media_pares(df[base].corr(), base)
+            info["delta"] = round(info["media_pares"] - info["sin_simulados"], 3)
+
+            # El resto de la cartera como una sola serie, con sus pesos
+            # renormalizados: contra eso se mide el activo que se está sumando.
+            wb = np.array([w[tickers.index(t)] for t in base], dtype=float)
+            serie = df[base].to_numpy() @ (wb / wb.sum()) if wb.sum() > 0 else None
+            info["simulados"] = [
+                {"ticker": t,
+                 "peso_pct": round(100 * float(w[tickers.index(t)]), 2),
+                 "correlacion": round(float(np.corrcoef(df[t].to_numpy(), serie)[0, 1]), 3)}
+                for t in tickers if t in simulados] if serie is not None else []
+
+            for a in info["simulados"]:
+                a["efecto"] = ("diversifica" if a["correlacion"] < 0.3 else
+                               "acompaña" if a["correlacion"] < 0.7 else "repite")
+
+            d = info["delta"]
+            info["lectura"] = (
+                f"Lo simulado baja la correlación media de {info['sin_simulados']} "
+                f"a {info['media_pares']}: suma diversificación real."
+                if d <= -0.02 else
+                f"Lo simulado sube la correlación media de {info['sin_simulados']} "
+                f"a {info['media_pares']}: la cartera se mueve más como una sola cosa."
+                if d >= 0.02 else
+                f"Lo simulado casi no mueve la correlación media ({info['sin_simulados']} "
+                f"→ {info['media_pares']}): ni diversifica ni concentra.")
+        salida[nombre] = info
+    return salida
 
 
 CRITERIOS = [
@@ -244,7 +353,7 @@ def comparar(carteras: dict, benchmark: str = "SP500") -> dict:
     """
     from core.models.rates import risk_free_para
 
-    alineadas, propias, comunes = _series(carteras)
+    alineadas, propias, comunes, detalle = _series(carteras)
     if alineadas is None or alineadas.empty:
         return {"error": "Hacen falta al menos dos carteras con datos."}
 
@@ -263,6 +372,10 @@ def comparar(carteras: dict, benchmark: str = "SP500") -> dict:
             "calmar": round(risk.calmar(r), 3),
             "max_drawdown_pct": round(risk.max_drawdown(r) * 100, 2),
             "var95_pct": round(risk.var_historico(r, 0.05) * 100, 3),
+            # El día muy malo y lo que pasa cuando pasa: el VaR dice a partir de
+            # dónde empieza la cola, el CVaR cuánto se pierde adentro de ella.
+            "var99_pct": round(risk.var_historico(r, 0.01) * 100, 3),
+            "cvar95_pct": round(risk.cvar_historico(r, 0.05) * 100, 3),
             "curtosis_exceso": round(float(stats.kurtosis(r)), 3),
             "asimetria": round(float(stats.skew(r)), 3),
         }
@@ -336,6 +449,8 @@ def comparar(carteras: dict, benchmark: str = "SP500") -> dict:
                     "mercado, no estrategias.",
         },
         "rf": round(rf, 4), "rf_label": rf_label,
+        "montecarlo": _montecarlo(alineadas),
+        "correlacion": _correlacion(carteras, detalle, alineadas.index),
         "curva_valor": [
             {"fecha": str(f.date()),
              **{n: round(float(v), 2) for n, v in zip(nombres, fila)}}

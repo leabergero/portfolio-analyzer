@@ -118,6 +118,16 @@ const pct = (n, dec = 2) => (n == null ? "—" : Number(n).toFixed(dec) + " %");
 const num = (n, dec = 2) => (n == null ? "—" : Number(n).toFixed(dec));
 const signo = (n) => (n == null ? "" : n > 0 ? "pos" : n < 0 ? "neg" : "");
 
+/* El mismo color con transparencia. Las bandas de un abanico se pisan entre
+   ellas, y el `opacity` de la traza no toca el relleno: tiene que ir en el
+   color o la última cartera dibujada tapa a todas las anteriores. */
+const rgba = (hex, a) => {
+  const h = String(hex || "").replace("#", "").trim();
+  const n = parseInt(h.length === 3 ? h.split("").map((x) => x + x).join("") : h, 16);
+  return Number.isFinite(n) ? `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`
+                            : hex;
+};
+
 /* Los campos de importes son type="text" y no type="number", y `dec()` es el
    que interpreta lo que se tipeó. Con el locale en es-AR el navegador espera
    coma decimal en un input numérico y **descarta el punto**: la tecla . del
@@ -157,8 +167,8 @@ function Grafico({ datos, layout, alto = 280 }) {
       paper_bgcolor: "transparent", plot_bgcolor: "transparent",
       font: { family: '"Public Sans",sans-serif', size: 11, color: c.texto2 },
       margin: { t: 10, r: 12, b: 38, l: 54 },
-      xaxis: { gridcolor: c.borde, linecolor: c.borde, zerolinecolor: c.borde, automargin: true },
-      yaxis: { gridcolor: c.borde, linecolor: c.borde, zerolinecolor: c.borde, automargin: true },
+      xaxis: { showgrid: false, linecolor: c.borde, zerolinecolor: c.borde, automargin: true },
+      yaxis: { showgrid: false, linecolor: c.borde, zerolinecolor: c.borde, automargin: true },
       legend: { bgcolor: "transparent", font: { size: 11 }, orientation: "h", y: -0.22 },
       hoverlabel: { bgcolor: c.panel, bordercolor: c.borde,
                     font: { color: c.texto, family: '"Public Sans",sans-serif' } },
@@ -3117,7 +3127,10 @@ function Capm({ d: inicial, cartera, bench }) {
   const gana = d.retorno_cartera_pct > d.retorno_benchmark_pct;
   const defensiva = d.beta < 0.8, agresiva = d.beta > 1.2;
   const datos = [
-    { type: "scattergl", mode: "markers", name: "ruedas",
+    // SVG y no `scattergl`: el WebGL no está disponible en todos los equipos ni
+    // en todos los navegadores, y donde falta el panel entero queda en "WebGL not
+    // supported". Son ~1.200 puntos, que el SVG dibuja sin despeinarse.
+    { type: "scatter", mode: "markers", name: "ruedas",
       x: (d.nube || []).map((p) => p.b), y: (d.nube || []).map((p) => p.p),
       marker: { size: 4, color: c.texto3, opacity: 0.45 },
       hovertemplate: "índice %{x:.2f} % · cartera %{y:.2f} %<extra></extra>" },
@@ -3756,6 +3769,162 @@ function VeredictoComparacion({ d, concluyente }) {
   );
 }
 
+/* ── Comparación · lo que se probó en el laboratorio ────────────────────────
+   Los tres paneles contestan preguntas que la tabla de métricas no contesta:
+   hacia dónde puede ir cada cartera, cuánto se pierde en los días feos, y si lo
+   que estás por comprar diversifica o es más de lo mismo. */
+
+function MonteCarloComparado({ mc, nombres, c }) {
+  const carteras = nombres.filter((n) => mc?.carteras?.[n]);
+  if (carteras.length < 2) return null;
+
+  // Primero todas las bandas y después todas las medianas: Plotly dibuja en
+  // orden, y una banda posterior taparía la línea de la cartera anterior.
+  const bandas = [], lineas = [];
+  carteras.forEach((n, i) => {
+    const s = mc.carteras[n], col = c.series[i % c.series.length];
+    bandas.push({ type: "scatter", mode: "lines", x: s.dias, y: s.p95, line: { width: 0 },
+                  showlegend: false, hoverinfo: "skip" });
+    bandas.push({ type: "scatter", mode: "lines", x: s.dias, y: s.p5, line: { width: 0 },
+                  fill: "tonexty", fillcolor: rgba(col, 0.16),
+                  showlegend: false, hoverinfo: "skip" });
+    lineas.push({ type: "scatter", mode: "lines", name: n, x: s.dias, y: s.mediana,
+                  line: { color: col, width: 2.2 },
+                  hovertemplate: `${n} · rueda %{x} · %{y:.1f}<extra></extra>` });
+  });
+  const datos = [...bandas, ...lineas];
+
+  return (
+    <div className="panel">
+      <h3>Adónde puede ir cada una · {mc.horizonte} ruedas</h3>
+      <Grafico alto={340} datos={datos}
+        layout={{ yaxis: { title: "base 100" }, xaxis: { title: "ruedas" } }} />
+      <div className="tabla-wrap"><table>
+        <thead><tr><th>Cartera</th>
+          <th className="n">Mal año (p5)</th><th className="n">Mediana</th>
+          <th className="n">Buen año (p95)</th><th className="n">Peor 1 %</th>
+          <th className="n">Termina perdiendo</th></tr></thead>
+        <tbody>{carteras.map((n, i) => {
+          const f = mc.carteras[n].final;
+          return (
+            <tr key={n}>
+              <td><span style={{ display: "inline-block", width: 9, height: 9, borderRadius: 2,
+                                 background: c.series[i % c.series.length], marginRight: 7 }} />{n}</td>
+              <td className={"n " + (f.p5 < 100 ? "neg" : "pos")}>{num(f.p5, 1)}</td>
+              <td className={"n " + (f.mediana < 100 ? "neg" : "pos")}>{num(f.mediana, 1)}</td>
+              <td className="n pos">{num(f.p95, 1)}</td>
+              <td className="n neg">{num(f.peor_1_pct, 1)}</td>
+              <td className="n">{pct(f.prob_perdida_pct, 1)}</td>
+            </tr>);
+        })}</tbody>
+      </table></div>
+      <div className="pie">
+        {mc.simulaciones.toLocaleString("es-AR")} trayectorias por cartera, motor {mc.motor}
+        {" "}(colas gordas), <b>la misma semilla y el mismo período para todas</b>: lo que
+        separa a los abanicos es la cartera, no la suerte del sorteo. Va en base 100 y no en
+        dólares porque las carteras tienen tamaños distintos — en plata compararías cuánto
+        tenés, no cómo se comporta lo que tenés. La banda es el 90 % central: uno de cada
+        veinte años termina por encima, y uno de cada veinte por debajo.
+      </div>
+    </div>
+  );
+}
+
+function RiesgoComparado({ M, nombres, c }) {
+  const carteras = nombres.filter((n) => M[n]);
+  if (carteras.length < 2) return null;
+  const barra = (campo, nombre, color) => ({
+    type: "bar", orientation: "h", name: nombre,
+    y: carteras, x: carteras.map((n) => M[n][campo]),
+    marker: { color }, hovertemplate: "%{y} · %{x:.2f} %<extra>" + nombre + "</extra>",
+  });
+
+  return (
+    <div className="panel">
+      <h3>Los días feos, lado a lado</h3>
+      <Grafico alto={60 + 62 * carteras.length}
+        datos={[barra("var95_pct", "Día malo · 1 de cada 20", c.alerta),
+                barra("var99_pct", "Día muy malo · 1 de cada 100", c.negativo),
+                barra("cvar95_pct", "Promedio de los días malos", c.texto3)]}
+        layout={{ barmode: "group", margin: { l: 150, r: 12, t: 6, b: 58 },
+                  xaxis: { ticksuffix: " %" },
+                  // `legend` no se mezcla campo a campo con la base: si va sólo
+                  // la `y`, se pierde el `orientation` y se va al costado.
+                  legend: { orientation: "h", y: -0.32, bgcolor: "transparent",
+                            font: { size: 11 } } }} />
+      <div className="pie">
+        Todo en porcentaje de la cartera y sobre el período común, así que se comparan entre
+        sí aunque una tenga el doble de plata que la otra. <b>Día malo</b> es el 5 % peor:
+        de cada veinte ruedas, una cae al menos eso. <b>Día muy malo</b> es el 1 % peor.
+        Y el tercero es lo que se pierde <i>en promedio</i> dentro de esos días malos — el
+        VaR dice dónde empieza la cola, este dice qué hay adentro.
+      </div>
+    </div>
+  );
+}
+
+function CorrelacionComparada({ corr, nombres }) {
+  if (!corr) return null;
+  const conSim = nombres.filter((n) => corr[n]?.simulados?.length);
+  const filas = nombres.filter((n) => corr[n]);
+  if (!filas.length) return null;
+
+  return (
+    <div className="panel">
+      <h3>¿Lo que sumás diversifica, o es más de lo mismo?</h3>
+      <div className="tabla-wrap"><table>
+        <thead><tr><th>Cartera</th><th className="n">Activos</th>
+          <th className="n">Correlación media</th><th>Cómo se mueve</th></tr></thead>
+        <tbody>{filas.map((n) => {
+          const x = corr[n];
+          return (
+            <tr key={n}>
+              <td>{n}</td>
+              <td className="n">{x.activos}</td>
+              <td className="n">{num(x.media_pares, 3)}
+                {x.delta != null && (
+                  <span className={x.delta < 0 ? " pos" : x.delta > 0 ? " neg" : ""}>
+                    {" "}({x.delta > 0 ? "+" : ""}{num(x.delta, 3)})</span>)}</td>
+              <td><span className={"chip " + (x.media_pares < 0.3 ? "ok"
+                                              : x.media_pares < 0.6 ? "ojo" : "mal")}>
+                {x.media_pares < 0.3 ? "defensiva" : x.media_pares < 0.6 ? "mixta" : "agresiva"}
+              </span></td>
+            </tr>);
+        })}</tbody>
+      </table></div>
+
+      {conSim.map((n) => (
+        <div key={n} style={{ marginTop: 14 }}>
+          <div className="aviso ojo">{corr[n].lectura}</div>
+          <div className="tabla-wrap"><table>
+            <thead><tr><th>Activo simulado</th><th className="n">Peso</th>
+              <th className="n">Correlación con el resto</th><th>Qué aporta</th></tr></thead>
+            <tbody>{corr[n].simulados.map((a) => (
+              <tr key={a.ticker}>
+                <td className="mono">{a.ticker}</td>
+                <td className="n">{pct(a.peso_pct, 1)}</td>
+                <td className="n">{num(a.correlacion, 3)}</td>
+                <td><span className={"chip " + (a.efecto === "diversifica" ? "ok"
+                                                : a.efecto === "acompaña" ? "ojo" : "mal")}>
+                  {a.efecto === "diversifica" ? "diversifica"
+                   : a.efecto === "acompaña" ? "acompaña" : "repite riesgo"}</span></td>
+              </tr>))}</tbody>
+          </table></div>
+        </div>))}
+
+      <div className="pie">
+        La correlación media entre pares dice si la cartera se comporta como una sola cosa:
+        por debajo de 0,3 los activos se mueven bastante por su cuenta y la diversificación
+        es real; por encima de 0,6 en una caída no hay dónde refugiarse. La segunda tabla
+        mide cada activo simulado contra <b>el resto de la cartera</b>, que es lo que decide
+        si vale la pena: por debajo de 0,3 aporta algo distinto, por encima de 0,7 estás
+        comprando dos veces el mismo riesgo. Ojo con leer sólo el promedio — un papel que
+        diversifica puede casi no moverlo si la cartera ya estaba diversificada.
+      </div>
+    </div>
+  );
+}
+
 function ResultadoComparacion({ d, c }) {
   const nombres = d.carteras;
   const p = d.periodo_comun;
@@ -3871,6 +4040,12 @@ function ResultadoComparacion({ d, c }) {
           </div>
         </div>
       </div>
+
+      {LAB && <>
+        <MonteCarloComparado mc={d.montecarlo} nombres={nombres} c={c} />
+        <RiesgoComparado M={M} nombres={nombres} c={c} />
+        <CorrelacionComparada corr={d.correlacion} nombres={nombres} />
+      </>}
 
       <div className="panel">
         <h3>Tabla comparativa</h3>
