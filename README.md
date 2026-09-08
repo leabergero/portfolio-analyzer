@@ -26,8 +26,18 @@ Tenencias lote por lote, posiciones cerradas, y el resultado partido en dos: **l
 que dejó el papel** vs. **lo que se llevó el tipo de cambio**. Debajo, la
 composición de la cartera y los KPI de riesgo.
 
+Debajo de las tenencias se cargan posiciones nuevas y se **simulan** compras y
+ventas: ticker y cantidad, el precio lo pone el mercado. Los activos simulados se
+suman a los reales y toda la app —composición, riesgo, optimización, Monte
+Carlo— se recalcula con ellos adentro. No se guarda nada: la simulación vive en
+el navegador, viaja en la cabecera `X-Sim` de cada pedido y se aplica en memoria,
+así que no puede terminar dentro de tu cartera. Comprar entra al precio de hoy,
+de modo que no inventa resultado: lo que cambia son los pesos. Vender descuenta
+de los lotes más viejos, nunca más de lo que tenés, y tampoco realiza ganancia.
+
 **Modelos:** `portfolio` (valuación y P&L con MEP por fecha de operación),
-`composicion` (cortes por tipo / sector / industria sobre el valor actual en USD).
+`composicion` (cortes por tipo / sector / industria sobre el valor actual en USD),
+`api/sim` (la simulación, aplicada sobre las posiciones antes de los modelos).
 
 ![Posición](docs/img/analisis-posicion.png)
 
@@ -86,9 +96,19 @@ Una cartera contra un benchmark, o dos carteras entre sí, con el ganador
 justificado por criterios explícitos (retorno, riesgo, Sharpe), todo en USD. No
 sólo dice cuál ganó: **prueba si la diferencia es real o puede ser azar**.
 
+Con una simulación puesta aparece **«tu cartera + simulación»** como un
+competidor más, armada en memoria: se mide una contra otra sin duplicar carteras.
+Además de las métricas y el veredicto estadístico, tres lecturas lado a lado:
+el **Monte Carlo** de todas sobre el mismo período y la misma semilla (en base
+100, con lo que cae bajo la base en rojo), los **días feos** —VaR 95 y CVaR 95
+contra las zonas y el límite de política— y la **correlación**: si lo que sumás
+diversifica o es más de lo mismo, medido activo por activo contra el resto de la
+cartera.
+
 **Modelos:** `comparacion` — test de Jobson-Korkie con corrección de Memmel para
-la diferencia de Sharpe, intervalos de confianza del Sharpe, y Sharpe deflactado
-(DSR) para descontar el sesgo de haber probado muchas carteras.
+la diferencia de Sharpe, intervalos de confianza del Sharpe, Sharpe deflactado
+(DSR) para descontar el sesgo de haber probado muchas carteras, y el Monte Carlo
+comparado sobre las series ya alineadas.
 
 ![Comparación](docs/img/comparacion.png)
 

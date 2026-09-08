@@ -17,10 +17,6 @@
 
 const { useState, useEffect, useRef, useCallback, useMemo } = React;
 
-/* El laboratorio: lo nuevo se prueba contra datos reales, apagado, hasta que se
-   aprueba. Sin `?lab=1` en la URL la app es exactamente la de siempre. */
-const LAB = new URLSearchParams(location.search).has("lab");
-
 /* ═══════════════ utilidades ═══════════════ */
 
 /* El sobre firmado de la sesión web. Vive sólo en este navegador: es lo único
@@ -560,7 +556,7 @@ function Analisis({ cartera, recargar, sim, setSim }) {
         {/* Con la simulación puesta, todas las pestañas muestran números que no
             son los de tu cartera. El cartel que lo explica vive en Posición, así
             que en el resto queda esta marca — y lleva ahí de un clic. */}
-        {LAB && sim.length > 0 && (
+        {sim.length > 0 && (
           <button className="chip ojo lab-marca" onClick={() => setTab("posicion")}
                   title="Estás viendo la cartera con activos simulados. Se edita en Posición.">
             simulación · {sim.length}</button>)}
@@ -789,9 +785,9 @@ function Posicion({ d, cartera, recargar, extras, bench, sim, setSim }) {
       {/* Cargar y simular van juntos y acá: debajo de lo que tenés —que es
           contra lo que se agrega o se simula— y antes de lo que ya cerraste. */}
       <AltaRapida cartera={cartera} recargar={recargar} />
-      {LAB && <Simulador cartera={cartera} sim={sim} setSim={setSim}
-                         tenencias={filas.reduce(
-                           (a, f) => ({ ...a, [f.ticker]: (a[f.ticker] || 0) + f.qty }), {})} />}
+      <Simulador cartera={cartera} sim={sim} setSim={setSim}
+                 tenencias={filas.reduce(
+                   (a, f) => ({ ...a, [f.ticker]: (a[f.ticker] || 0) + f.qty }), {})} />
 
       {real && <PnlRealizado real={real} cartera={cartera} recargar={() => setN((x) => x + 1)} />}
 
@@ -3704,7 +3700,7 @@ function Comparacion({ carteras, cartera, sim }) {
   const c = colores();
   // Con una simulación puesta, la cartera simulada es un competidor más. No
   // existe en ningún lado: la arma el servidor en memoria para esta comparación.
-  const simulada = LAB && cartera && sim?.length ? `${cartera} + simulación` : null;
+  const simulada = cartera && sim?.length ? `${cartera} + simulación` : null;
   const cuantas = sel.length + (conSim && simulada ? 1 : 0);
 
   const alternar = (n) => setSel((s) => s.includes(n) ? s.filter((x) => x !== n) : [...s, n]);
@@ -3806,8 +3802,8 @@ function VeredictoComparacion({ d, concluyente }) {
   );
 }
 
-/* ── Comparación · lo que se probó en el laboratorio ────────────────────────
-   Los tres paneles contestan preguntas que la tabla de métricas no contesta:
+/* ── Comparación · las tres preguntas que la tabla de métricas no contesta ──
+   Los tres paneles:
    hacia dónde puede ir cada cartera, cuánto se pierde en los días feos, y si lo
    que estás por comprar diversifica o es más de lo mismo. */
 
@@ -4095,11 +4091,9 @@ function ResultadoComparacion({ d, c }) {
         </div>
       </div>
 
-      {LAB && <>
-        <MonteCarloComparado mc={d.montecarlo} nombres={nombres} c={c} />
-        <RiesgoComparado M={M} nombres={nombres} />
-        <CorrelacionComparada corr={d.correlacion} nombres={nombres} />
-      </>}
+      <MonteCarloComparado mc={d.montecarlo} nombres={nombres} c={c} />
+      <RiesgoComparado M={M} nombres={nombres} />
+      <CorrelacionComparada corr={d.correlacion} nombres={nombres} />
 
       <div className="panel">
         <h3>Tabla comparativa</h3>
@@ -5210,7 +5204,7 @@ function App() {
   // La simulación es de la cartera que estás mirando: cambiar de cartera trae la
   // suya, nunca la de la anterior.
   const sim = useMemo(
-    () => (LAB && cartera ? sims[cartera] || simul.leer(cartera) : []), [cartera, sims]);
+    () => (cartera ? sims[cartera] || simul.leer(cartera) : []), [cartera, sims]);
   // Se fija acá, en el render, y no en un efecto: los efectos de los hijos corren
   // ANTES que los del padre, así que Análisis lanzaría su POST con la cabecera de
   // la cartera anterior y el primer análisis de cada cambio saldría mal.
