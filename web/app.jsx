@@ -3781,14 +3781,24 @@ function MonteCarloComparado({ mc, nombres, c }) {
 
   // Primero todas las bandas y después todas las medianas: Plotly dibuja en
   // orden, y una banda posterior taparía la línea de la cartera anterior.
+  const base = mc.base || 100;
+  const sobre = (a) => a.map((v) => Math.max(v, base));
+  const bajo = (a) => a.map((v) => Math.min(v, base));
+  const muda = (y) => ({ type: "scatter", mode: "lines", x: [], y, line: { width: 0 },
+                         showlegend: false, hoverinfo: "skip" });
+
   const bandas = [], lineas = [];
   carteras.forEach((n, i) => {
     const s = mc.carteras[n], col = c.series[i % c.series.length];
-    bandas.push({ type: "scatter", mode: "lines", x: s.dias, y: s.p95, line: { width: 0 },
-                  showlegend: false, hoverinfo: "skip" });
-    bandas.push({ type: "scatter", mode: "lines", x: s.dias, y: s.p5, line: { width: 0 },
-                  fill: "tonexty", fillcolor: rgba(col, 0.16),
-                  showlegend: false, hoverinfo: "skip" });
+    const banda = (alto, bajo_, color) => {
+      bandas.push({ ...muda(alto), x: s.dias });
+      bandas.push({ ...muda(bajo_), x: s.dias, fill: "tonexty", fillcolor: color });
+    };
+    // La banda se parte en la base: arriba es el color de la cartera, abajo es
+    // rojo. Es plata perdida, y en toda la app lo que cae bajo el umbral se
+    // pinta rojo — que el abanico no lo hiciera lo volvía un dibujo bonito.
+    banda(sobre(s.p95), sobre(s.p5), rgba(col, 0.16));
+    banda(bajo(s.p95), bajo(s.p5), rgba(c.negativo, 0.17));
     lineas.push({ type: "scatter", mode: "lines", name: n, x: s.dias, y: s.mediana,
                   line: { color: col, width: 2.2 },
                   hovertemplate: `${n} · rueda %{x} · %{y:.1f}<extra></extra>` });
@@ -3799,7 +3809,9 @@ function MonteCarloComparado({ mc, nombres, c }) {
     <div className="panel">
       <h3>Adónde puede ir cada una · {mc.horizonte} ruedas</h3>
       <Grafico alto={340} datos={datos}
-        layout={{ yaxis: { title: "base 100" }, xaxis: { title: "ruedas" } }} />
+        layout={{ yaxis: { title: `base ${base}` }, xaxis: { title: "ruedas" },
+                  shapes: [{ type: "line", xref: "paper", x0: 0, x1: 1, y0: base, y1: base,
+                             line: { color: c.negativo, width: 1, dash: "dot" } }] }} />
       <div className="tabla-wrap"><table>
         <thead><tr><th>Cartera</th>
           <th className="n">Mal año (p5)</th><th className="n">Mediana</th>
@@ -3825,7 +3837,9 @@ function MonteCarloComparado({ mc, nombres, c }) {
         separa a los abanicos es la cartera, no la suerte del sorteo. Va en base 100 y no en
         dólares porque las carteras tienen tamaños distintos — en plata compararías cuánto
         tenés, no cómo se comporta lo que tenés. La banda es el 90 % central: uno de cada
-        veinte años termina por encima, y uno de cada veinte por debajo.
+        veinte años termina por encima, y uno de cada veinte por debajo. Lo que cae bajo la
+        base va en rojo: ahí abajo estás perdiendo plata, y cuánta banda queda de ese lado
+        es la comparación que importa.
       </div>
     </div>
   );
