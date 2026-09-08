@@ -1358,7 +1358,8 @@ function BarraRiesgo({ etiqueta, detalle, pct_, usd_, escala, nota }) {
       </div>
       <div className="val">
         <b className="neg">{pct(-v)}</b>
-        <s>{usd(usd_)} · usa el {Math.round((v / ZONAS.limite) * 100)} % del límite</s>
+        <s>{usd_ != null ? usd(usd_) + " · " : ""}usa el{" "}
+          {Math.round((v / ZONAS.limite) * 100)} % del límite</s>
         <span className={"chip " + tono} style={{ marginTop: 6, display: "inline-block" }}>{texto}</span>
         {nota && <s>{nota}</s>}
       </div>
@@ -3830,34 +3831,37 @@ function MonteCarloComparado({ mc, nombres, c }) {
   );
 }
 
-function RiesgoComparado({ M, nombres, c }) {
+function RiesgoComparado({ M, nombres }) {
   const carteras = nombres.filter((n) => M[n]);
   if (carteras.length < 2) return null;
-  const barra = (campo, nombre, color) => ({
-    type: "bar", orientation: "h", name: nombre,
-    y: carteras, x: carteras.map((n) => M[n][campo]),
-    marker: { color }, hovertemplate: "%{y} · %{x:.2f} %<extra>" + nombre + "</extra>",
-  });
+
+  // Es la misma barra de Riesgo, con las mismas zonas y el mismo límite de
+  // política: la comparación se lee en dónde queda la aguja de cada cartera.
+  // Una sola escala para todas —como entre VaR y CVaR en Análisis—, porque si
+  // cada barra se ajusta a lo suyo, dos agujas en el mismo lugar dejan de
+  // significar lo mismo y la comparación miente.
+  const escala = Math.max(ZONAS.escala, Math.ceil(1.15 * Math.max(
+    ...carteras.flatMap((n) => [Math.abs(M[n].var95_pct || 0),
+                                Math.abs(M[n].cvar95_pct || 0)]))));
 
   return (
     <div className="panel">
       <h3>Los días feos, lado a lado</h3>
-      <Grafico alto={60 + 62 * carteras.length}
-        datos={[barra("var95_pct", "Día malo · 1 de cada 20", c.alerta),
-                barra("var99_pct", "Día muy malo · 1 de cada 100", c.negativo),
-                barra("cvar95_pct", "Promedio de los días malos", c.texto3)]}
-        layout={{ barmode: "group", margin: { l: 150, r: 12, t: 6, b: 58 },
-                  xaxis: { ticksuffix: " %" },
-                  // `legend` no se mezcla campo a campo con la base: si va sólo
-                  // la `y`, se pierde el `orientation` y se va al costado.
-                  legend: { orientation: "h", y: -0.32, bgcolor: "transparent",
-                            font: { size: 11 } } }} />
+      {[["var95_pct", "Día malo", "VaR 95 % · 1 rueda de cada 20"],
+        ["cvar95_pct", "Día muy malo", "CVaR 95 % · el promedio de ese 5 % peor"]]
+        .map(([k, titulo, detalle]) => (
+          <div key={k}>
+            <Seccion titulo={`${titulo} · ${detalle}`} />
+            {carteras.map((n) => (
+              <BarraRiesgo key={n} etiqueta={n} escala={escala} pct_={M[n][k]} />))}
+          </div>))}
       <div className="pie">
-        Todo en porcentaje de la cartera y sobre el período común, así que se comparan entre
-        sí aunque una tenga el doble de plata que la otra. <b>Día malo</b> es el 5 % peor:
-        de cada veinte ruedas, una cae al menos eso. <b>Día muy malo</b> es el 1 % peor.
-        Y el tercero es lo que se pierde <i>en promedio</i> dentro de esos días malos — el
-        VaR dice dónde empieza la cola, este dice qué hay adentro.
+        Las mismas zonas y el mismo límite de {pct(ZONAS.limite, 1)} que en Riesgo: es una
+        política —cuánto estás dispuesto a perder en un día, decidido antes de que pase—,
+        no un cálculo. Acá va en porcentaje y no en dólares, así dos carteras de tamaños
+        distintos se comparan igual, y sobre el período común. El VaR dice el piso de ese
+        5 % de días; el CVaR, lo que se pierde en promedio cuando se cruza — siempre peor,
+        y es el número que importa cuando el día malo llega.
       </div>
     </div>
   );
@@ -4043,7 +4047,7 @@ function ResultadoComparacion({ d, c }) {
 
       {LAB && <>
         <MonteCarloComparado mc={d.montecarlo} nombres={nombres} c={c} />
-        <RiesgoComparado M={M} nombres={nombres} c={c} />
+        <RiesgoComparado M={M} nombres={nombres} />
         <CorrelacionComparada corr={d.correlacion} nombres={nombres} />
       </>}
 
