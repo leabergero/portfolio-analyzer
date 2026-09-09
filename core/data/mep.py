@@ -27,8 +27,10 @@ Descartadas y por qué, para no volver a intentarlas:
 """
 
 import json
-from datetime import date, timedelta
+import time
+from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import requests
@@ -41,7 +43,23 @@ _URL_ARGDATOS = "https://api.argentinadatos.com/v1/cotizaciones/dolares/bolsa"
 _URL_DOLARAPI = "https://dolarapi.com/v1/dolares/bolsa"
 _HEADERS = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
 
-_memoria = {"serie": None, "fuente": None, "dia": None}
+# La rueda del MEP es la de Buenos Aires, no la del reloj de la máquina: el
+# servidor de producción corre en UTC y durante la noche argentina `date.today()`
+# allá ya es mañana — pediría una rueda que todavía no existe y daría por
+# perdida la de hoy.
+TZ_BYMA = ZoneInfo("America/Argentina/Buenos_Aires")
+CIERRE_BYMA_H = 18          # a partir de esta hora el valor del día ya no se mueve
+_TTL_INTENTO_S = 3600       # cada cuánto se vuelve a preguntar, como mucho
+
+_memoria = {"serie": None, "fuente": None, "intento": 0.0}
+
+
+def _hoy_ba() -> str:
+    return datetime.now(TZ_BYMA).date().isoformat()
+
+
+def _rueda_cerrada() -> bool:
+    return datetime.now(TZ_BYMA).hour >= CIERRE_BYMA_H
 
 
 # ── Descarga ──────────────────────────────────────────────────────────────────
@@ -111,9 +129,26 @@ def sincronizar(forzar: bool = False) -> dict:
     días de atraso y valuar la cartera de hoy con el MEP de anteayer es un error
     silencioso.
     """
+    # El candado va primero y es en memoria: `serie()` se lee muchas veces por
+    # request y no puede pagar una consulta a la caché en cada una.
+    if not forzar and time.time() - _memoria["intento"] < _TTL_INTENTO_S:
+        return {"estado": "reciente", "ultima": None, "nuevas": 0}
+    _memoria["intento"] = time.time()
+
     ultima = cache.ultima_fecha_mep()
-    hoy = date.today().isoformat()
-    if not forzar and ultima and ultima >= (date.today() - timedelta(days=1)).isoformat():
+    hoy = _hoy_ba()
+    # "Al día" es tener la rueda de HOY **y con la rueda ya cerrada**. Las dos
+    # mitades importan, y las dos costaron plata:
+    #
+    #   · Antes alcanzaba con tener la de AYER, así que un proceso largo se
+    #     quedaba todo el día valuando con el dólar de ayer. El 2026-09-09 la VM
+    #     mostraba KARIN en US$22.021 y la misma cartera en local US$21.998: la
+    #     diferencia era el MEP, 1524,30 contra 1530,40.
+    #   · Y el valor del día en curso se mueve: el que se guarda a la mañana es
+    #     intradía, no el cierre. Ese mismo día la VM tenía el 08 en 1524,30 y el
+    #     definitivo era 1533,70. Hasta que cierra la rueda hay que volver a
+    #     preguntar; el TTL de arriba acota cuánto.
+    if not forzar and ultima and ultima >= hoy and _rueda_cerrada():
         return {"estado": "al dia", "ultima": ultima, "nuevas": 0}
 
     guardadas, fuentes = 0, []
@@ -130,6 +165,7 @@ def sincronizar(forzar: bool = False) -> dict:
 
     _memoria["serie"] = None                 # invalida el cacheado en memoria
     if not fuentes:
+        _memoria["intento"] = 0.0            # fuentes caídas: se reintenta ya
         return {"estado": "sin fuentes", "ultima": ultima, "nuevas": 0}
 
     _memoria["fuente"] = " + ".join(fuentes)
@@ -142,25 +178,22 @@ def sincronizar(forzar: bool = False) -> dict:
 def serie() -> pd.Series:
     """La serie completa, cacheada en memoria (se lee muchas veces por request).
 
-    Se sincroniza sola una vez por día. El disparador no puede ser el arranque y
-    nada más: servida con gunicorn, `main()` no se ejecuta nunca —el server de
-    producción tenía **cero ruedas** de MEP y la pestaña quedaba vacía—, y un
-    proceso que vive semanas se quedaría valuando con el dólar del día que
-    arrancó, que es un error silencioso y caro.
+    Se sincroniza sola. El disparador no puede ser el arranque y nada más:
+    servida con gunicorn, `main()` no se ejecuta nunca —el server de producción
+    tenía **cero ruedas** de MEP y la pestaña quedaba vacía—, y un proceso que
+    vive semanas se quedaría valuando con el dólar del día que arrancó, que es un
+    error silencioso y caro.
 
-    Es barato: `sincronizar()` compara la última fecha guardada y si ya está al
-    día vuelve sin tocar la red. El día sólo se marca cuando la lectura trajo
-    algo, así que si las fuentes están caídas se reintenta en la próxima lectura
-    en vez de esperar a mañana.
+    Es barato: `sincronizar()` sale por el candado de memoria sin tocar nada, y
+    cuando el candado vence compara la última fecha guardada. Si las fuentes
+    fallan el candado se suelta, así que se reintenta en la próxima lectura en
+    vez de esperar una hora.
     """
-    hoy = date.today().isoformat()
-    if _memoria["serie"] is None or _memoria["dia"] != hoy:
-        sincronizar()
+    r = sincronizar()
+    if _memoria["serie"] is None or r.get("nuevas"):
         # También al leer: la caché guarda lo que las fuentes publicaron el día
         # que se sincronizó, y ya tiene adentro picos que el filtro viejo dejó pasar.
         _memoria["serie"] = _filtrar_outliers(cache.leer_mep())
-        if not _memoria["serie"].empty:
-            _memoria["dia"] = hoy
     return _memoria["serie"]
 
 

@@ -1639,47 +1639,78 @@ def test_el_usuario_nuevo_estrena_con_la_cartera_modelo_y_si_la_borra_no_vuelve(
         assert store.nombres() == ["La mía"]
 
 
-def test_la_serie_del_mep_se_sincroniza_sola_una_vez_por_dia():
-    """La serie se pide sola: no alcanza con sincronizar al arrancar.
+def test_el_mep_no_se_queda_pegado_en_el_de_ayer():
+    """La serie se pide sola, y "al día" es tener HOY con la rueda cerrada.
 
-    Servida con gunicorn, `main()` no se ejecuta NUNCA, así que el servidor de
-    producción quedó con cero ruedas de MEP y la pestaña del dólar vacía —el
-    2026-09-08, en el deploy—. Y aunque arranque bien, un proceso que vive
-    semanas seguiría valuando con el dólar del día que arrancó: el error no se
-    ve, sólo da mal.
+    Tres bugs, uno arriba del otro, todos con la misma cara: la cartera valuada
+    con un dólar que no es el de hoy.
 
-    Una vez por día y no en cada lectura: `serie()` se llama muchas veces por
-    request. Y si las fuentes fallan, el día no se marca, así que se reintenta
-    en la próxima lectura en vez de esperar a mañana.
+      1. Servida con gunicorn `main()` no se ejecuta NUNCA, así que el servidor
+         quedó con cero ruedas de MEP y la pestaña del dólar vacía (2026-09-08).
+      2. Alcanzaba con tener la rueda de AYER para darse por al día, así que un
+         proceso largo se quedaba con el dólar de ayer hasta el día siguiente. El
+         2026-09-09 la VM mostraba KARIN en US$22.021 y la misma cartera en local
+         US$21.998: la diferencia era el MEP, 1524,30 contra 1530,40.
+      3. El valor del día en curso se mueve, y el que se guarda a la mañana es
+         intradía: ese mismo día la VM tenía el 08 en 1524,30 cuando el cierre
+         terminó siendo 1533,70.
+
+    Y no en cada lectura: `serie()` se llama muchas veces por request.
     """
+    import time
+
     import pandas as pd
 
     mep = require("core.data", "mep")
-    llamadas = []
-    original_sinc, original_leer = mep.sincronizar, mep.cache.leer_mep
+    salidas = []
     serie_falsa = pd.Series([1000.0], index=[pd.Timestamp("2026-09-01")])
-    vacia = pd.Series(dtype=float)
-    devolver = [serie_falsa]
 
-    mep.sincronizar = lambda *a, **k: llamadas.append(1)
-    mep.cache.leer_mep = lambda *a, **k: devolver[0]
+    o_arg, o_dolar = mep._desde_argentinadatos, mep._desde_dolarapi
+    o_leer, o_guardar, o_ultima = mep.cache.leer_mep, mep.cache.guardar_mep, mep.cache.ultima_fecha_mep
+    o_cerrada, o_hoy, o_mem = mep._rueda_cerrada, mep._hoy_ba, dict(mep._memoria)
+    estado = {"ultima": None, "cerrada": True}
+
+    mep._desde_argentinadatos = lambda: (salidas.append(1), serie_falsa)[1]
+    mep._desde_dolarapi = lambda: pd.Series(dtype=float)
+    mep.cache.leer_mep = lambda *a, **k: serie_falsa
+    mep.cache.guardar_mep = lambda s, f: 0
+    mep.cache.ultima_fecha_mep = lambda: estado["ultima"]
+    mep._rueda_cerrada = lambda: estado["cerrada"]
+    mep._hoy_ba = lambda: "2026-09-09"
     try:
-        mep._memoria.update({"serie": None, "dia": None})
+        # 1 · Sin nada guardado: sale a buscar, y una sola vez aunque se lea tres.
+        mep._memoria.update({"serie": None, "intento": 0.0})
         mep.serie(); mep.serie(); mep.serie()
-        assert len(llamadas) == 1, f"una sola sincronización por día, no {len(llamadas)}"
+        assert len(salidas) == 1, f"una salida a la red, no {len(salidas)}"
 
-        mep._memoria["dia"] = "2020-01-01"        # como si hubiera cambiado el día
+        # 2 · Tiene la de ayer y la rueda ya cerró: eso NO es estar al día.
+        estado["ultima"] = "2026-09-08"
+        mep._memoria["intento"] = 0.0
         mep.serie()
-        assert len(llamadas) == 2, "al cambiar el día tiene que volver a sincronizar"
+        assert len(salidas) == 2, "con la rueda de ayer hay que salir a buscar la de hoy"
 
-        # Fuentes caídas: no se marca el día, así que se reintenta.
-        devolver[0] = vacia
-        mep._memoria.update({"serie": None, "dia": None})
+        # 3 · Tiene la de hoy pero el mercado sigue abierto: el valor se mueve.
+        estado.update({"ultima": "2026-09-09", "cerrada": False})
+        mep._memoria["intento"] = 0.0
+        mep.serie()
+        assert len(salidas) == 3, "hasta que cierra la rueda, el valor de hoy se refresca"
+
+        # 4 · Tiene la de hoy y la rueda cerró: recién ahí se queda quieto.
+        estado["cerrada"] = True
+        mep._memoria["intento"] = 0.0
+        mep.serie()
+        assert len(salidas) == 3, "con la rueda cerrada y el día completo, no se pregunta más"
+
+        # 5 · El candado: dos lecturas seguidas no vuelven a preguntar.
+        estado["ultima"] = "2026-09-08"
+        mep._memoria["intento"] = time.time()
         mep.serie(); mep.serie()
-        assert len(llamadas) == 4, "sin datos hay que reintentar, no esperar a mañana"
+        assert len(salidas) == 3, "el candado de una hora evita preguntar en cada lectura"
     finally:
-        mep.sincronizar, mep.cache.leer_mep = original_sinc, original_leer
-        mep._memoria.update({"serie": None, "dia": None})
+        mep._desde_argentinadatos, mep._desde_dolarapi = o_arg, o_dolar
+        mep.cache.leer_mep, mep.cache.guardar_mep, mep.cache.ultima_fecha_mep = o_leer, o_guardar, o_ultima
+        mep._rueda_cerrada, mep._hoy_ba = o_cerrada, o_hoy
+        mep._memoria.clear(); mep._memoria.update(o_mem)
 
 
 def test_cache_no_alcanza_si_le_falta_la_ultima_rueda():
