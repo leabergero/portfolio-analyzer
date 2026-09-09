@@ -194,6 +194,27 @@ def _curva_futuros(subyacente: str):
     return resultado
 
 
+def _cierre_futuro(simbolo: str):
+    """Último cierre del contrato, o su precio en vivo si no tiene historia.
+
+    Cierre y no `regularMarketPrice` por lo mismo que en el resto del modelo: un
+    precio en vivo hace que dos máquinas den números distintos para la misma
+    cartera, y el vencimiento lejano de una curva se mueve poco de todos modos.
+    Los contratos de vencimiento lejano a veces no operan en semanas: para esos
+    el precio en vivo es lo único que hay.
+    """
+    try:
+        import yfinance as yf
+        t = yf.Ticker(simbolo)
+        s = t.history(period="1mo")["Close"].dropna()
+        if len(s):
+            return float(s.iloc[-1])
+        i = t.info or {}
+        return i.get("regularMarketPrice") or i.get("previousClose")
+    except Exception:
+        return None
+
+
 def _pedir_curva_futuros(raiz: str, sufijo: str, trimestral: bool):
     """La parte que sale a la red. Separada para que la caché de arriba se lea
     de un vistazo."""
@@ -201,8 +222,7 @@ def _pedir_curva_futuros(raiz: str, sufijo: str, trimestral: bool):
 
     try:
         import yfinance as yf
-        frente = yf.Ticker(f"{raiz}=F").info or {}
-        spot = frente.get("regularMarketPrice") or frente.get("previousClose")
+        spot = _cierre_futuro(f"{raiz}=F")
         if not spot:
             return None
         for meses in (12, 11, 13, 9, 15, 6, 18):
@@ -213,8 +233,7 @@ def _pedir_curva_futuros(raiz: str, sufijo: str, trimestral: bool):
                 m += 1
                 objetivo = base.replace(year=base.year + m // 12, month=m % 12 + 1)
             simbolo = f"{raiz}{_MESES_CODIGO[objetivo.month]}{str(objetivo.year)[-2:]}{sufijo}"
-            info = yf.Ticker(simbolo).info or {}
-            fwd = info.get("regularMarketPrice") or info.get("previousClose")
+            fwd = _cierre_futuro(simbolo)
             if fwd:
                 meses_reales = max((objetivo - dt.date.today()).days / 30.44, 1)
                 ret = ((fwd / spot) ** (12 / meses_reales) - 1) * 100
