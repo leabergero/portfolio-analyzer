@@ -553,26 +553,48 @@ function Analisis({ cartera, recargar, sim, setSim }) {
   // La simulación es parte de qué se está analizando: cambiarla es relanzar.
   const simKey = simul.cabecera(sim);
 
-  useEffect(() => {
+  const lanzar = useCallback(() => {
     if (!cartera) return;
     setEstado(null); setRun(null);
     api(`/api/analisis/${encodeURIComponent(cartera)}`,
         { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })
-      .then((d) => d.run_id && setRun(d.run_id));
-  }, [cartera, simKey]);
+      .then((d) => d.run_id && setRun(d.run_id))
+      .catch(() => setTimeout(lanzar, 2000));
+  }, [cartera]);
 
+  useEffect(() => { lanzar(); }, [lanzar, simKey]);
+
+  /* El bucle que va pintando los paneles a medida que terminan.
+
+     Los dos `catch` no son prolijidad: son el bucle. Sin ellos, un `fetch` que
+     falla —la pestaña que el navegador suspende en segundo plano, la wifi que
+     hipa, un servidor que se reinicia— rechaza la promesa, la cadena de
+     `setTimeout` no se vuelve a armar y el polling muere **en silencio**. La
+     pantalla queda congelada en "6 de 11 modelos listos" para siempre aunque el
+     servidor haya terminado los once hace rato, que fue exactamente lo que pasó
+     el 2026-09-09: el navegador abortó tres pedidos a la vez y no preguntó nunca
+     más. Un análisis que no avanza tiene que ser un análisis que no avanza, no
+     un cliente que dejó de mirar.
+
+     Y si la corrida ya no existe —el servidor se reinició, o pasaron veinte
+     corridas y se descartó la vieja— se relanza sola en vez de esperar por un
+     run_id que no va a volver. */
   useEffect(() => {
     if (!run || !cartera) return;
     let vivo = true;
     const consultar = async () => {
-      const d = await api(`/api/analisis/${encodeURIComponent(cartera)}/${run}`);
+      let d = null;
+      try {
+        d = await api(`/api/analisis/${encodeURIComponent(cartera)}/${run}`);
+      } catch { /* se reintenta abajo */ }
       if (!vivo) return;
-      setEstado(d);
-      if (d.estado !== "terminado") setTimeout(consultar, 1200);
+      if (d && /no existe|se descartó/i.test(d.error || "")) { lanzar(); return; }
+      if (d) setEstado(d);
+      if (!d || d.estado !== "terminado") setTimeout(consultar, 1200);
     };
     consultar();
     return () => { vivo = false; };
-  }, [run, cartera]);
+  }, [run, cartera, lanzar]);
 
   if (!cartera) return <div className="vacio">Elegí una cartera arriba para analizarla.</div>;
   if (!estado) return <div className="cargando">Lanzando los modelos…</div>;
