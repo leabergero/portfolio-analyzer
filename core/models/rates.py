@@ -35,8 +35,8 @@ _memoria = {}
 def _ultimo(ticker: str):
     """Rendimiento en decimal. yfinance publica estos índices en porcentaje."""
     try:
-        import yfinance as yf
-        s = yf.Ticker(ticker).history(period="5d")["Close"].dropna()
+        from core.data import yahoo
+        s = yahoo.ticker(ticker).history(period="5d")["Close"].dropna()
         if len(s):
             return float(s.iloc[-1]) / 100.0
     except Exception:

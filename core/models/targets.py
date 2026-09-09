@@ -138,8 +138,8 @@ def _a_escala(r: dict, destino, origen):
 
 def _pedir_objetivo_yfinance(simbolo: str):
     try:
-        import yfinance as yf
-        info = yf.Ticker(simbolo).info or {}
+        from core.data import yahoo
+        info = yahoo.ticker(simbolo).info or {}
     except Exception:
         return None
     actual = info.get("currentPrice") or info.get("regularMarketPrice") or info.get("previousClose")
@@ -213,8 +213,8 @@ def _cierre_futuro(simbolo: str):
     from datetime import datetime, timezone
 
     try:
-        import yfinance as yf
-        t = yf.Ticker(simbolo)
+        from core.data import yahoo
+        t = yahoo.ticker(simbolo)
         s = t.history(period="1mo")["Close"].dropna()
         if len(s):
             hoy = datetime.now(timezone.utc).date()
@@ -233,7 +233,7 @@ def _pedir_curva_futuros(raiz: str, sufijo: str, trimestral: bool):
     import datetime as dt
 
     try:
-        import yfinance as yf
+        from core.data import yahoo
         spot = _cierre_futuro(f"{raiz}=F")
         if not spot:
             return None

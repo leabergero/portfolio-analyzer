@@ -47,7 +47,7 @@ def inicio_historia() -> str:
 
 def _de_yfinance(ticker: str, desde: str, hasta: str) -> pd.DataFrame:
     try:
-        import yfinance as yf
+        from core.data import yahoo
     except ImportError:
         return pd.DataFrame()
     try:
@@ -55,7 +55,7 @@ def _de_yfinance(ticker: str, desde: str, hasta: str) -> pd.DataFrame:
         # ni corriendo después del cierre, y la caché queda una rueda atrás para
         # siempre (KOD.BA mostraba 18,50 del viernes contra 18,46 del lunes).
         fin = (date.fromisoformat(hasta) + timedelta(days=1)).isoformat()
-        df = yf.Ticker(ticker).history(start=desde, end=fin, auto_adjust=False)
+        df = yahoo.ticker(ticker).history(start=desde, end=fin, auto_adjust=False)
     except Exception:
         return pd.DataFrame()
     if df is None or df.empty:
@@ -205,8 +205,8 @@ def _spot_yfinance(ticker: str, ttl_horas: float = 1.0) -> pd.DataFrame:
     precio = cache.leer_respuesta(clave, ttl_horas, default="__falta__")
     if precio == "__falta__":
         try:
-            import yfinance as yf
-            i = yf.Ticker(ticker).info or {}
+            from core.data import yahoo
+            i = yahoo.ticker(ticker).info or {}
             precio = (i.get("currentPrice") or i.get("regularMarketPrice")
                       or i.get("previousClose"))
         except Exception:
@@ -266,8 +266,8 @@ def info(ticker: str, ttl_horas: float = 24 * 7):
 
     datos = {}
     try:
-        import yfinance as yf
-        crudo = yf.Ticker(ticker).info or {}
+        from core.data import yahoo
+        crudo = yahoo.ticker(ticker).info or {}
         # Solo lo que se usa: el .info completo son cientos de campos y no tiene
         # sentido guardarlos ni arrastrarlos.
         datos = {k: crudo.get(k) for k in

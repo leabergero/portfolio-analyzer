@@ -35,8 +35,8 @@ BENCHMARKS = {
 
 def _cierres(ticker: str, desde: str = None) -> pd.Series:
     try:
-        import yfinance as yf
-        s = yf.Ticker(ticker).history(start=desde or "2005-01-01")["Close"].dropna()
+        from core.data import yahoo
+        s = yahoo.ticker(ticker).history(start=desde or "2005-01-01")["Close"].dropna()
     except Exception:
         return pd.Series(dtype=float)
     if getattr(s.index, "tz", None) is not None:

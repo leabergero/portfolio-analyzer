@@ -19,27 +19,44 @@ import traceback
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 
+from core.io import store
 from core.models import (blacklitterman, capm, composicion, markowitz,
                          momentum, montecarlo, portfolio, regimenes, risk,
                          targets)
 
 # Cada entrada: nombre visible + función que recibe las posiciones.
+# Cada modelo recibe (posiciones, nombre de la cartera). El nombre casi nunca se
+# usa —los modelos trabajan sobre las posiciones y nada más— pero la evolución
+# necesita además lo que ya cerraste, que vive en el store bajo ese nombre.
 MODELOS = {
-    "posicion":     ("Posición",        lambda p: portfolio.valuar(p)),
-    "composicion":  ("Composición",     composicion.analizar),
-    "riesgo":       ("Riesgo",          risk.analizar),
-    "stress":       ("Stress test",     risk.stress_test),
-    "markowitz":    ("Markowitz",       markowitz.optimizar),
-    "montecarlo":   ("Monte Carlo",     montecarlo.simular),
-    "capm":         ("CAPM",            capm.analizar),
-    "momentum":     ("Momentum",        momentum.analizar),
-    "objetivos":    ("Objetivos",       targets.analizar),
-    "regimenes":    ("Regímenes",       regimenes.analizar),
+    "posicion":     ("Posición",        lambda p, c: portfolio.valuar(p)),
+    "composicion":  ("Composición",     lambda p, c: composicion.analizar(p)),
+    "riesgo":       ("Riesgo",          lambda p, c: risk.analizar(p)),
+    "stress":       ("Stress test",     lambda p, c: risk.stress_test(p)),
+    "markowitz":    ("Markowitz",       lambda p, c: markowitz.optimizar(p)),
+    "montecarlo":   ("Monte Carlo",     lambda p, c: montecarlo.simular(p)),
+    "capm":         ("CAPM",            lambda p, c: capm.analizar(p)),
+    "momentum":     ("Momentum",        lambda p, c: momentum.analizar(p)),
+    "objetivos":    ("Objetivos",       lambda p, c: targets.analizar(p)),
+    "regimenes":    ("Regímenes",       lambda p, c: regimenes.analizar(p)),
     # BL sin views devuelve el punto de partida y no sirve de nada: las views se
     # arman desde los precios objetivo, recortando confianza donde el momentum
     # va en contra. Es el uso para el que existe el modelo en esta aplicación.
-    "blacklitterman": ("Black-Litterman", lambda p: blacklitterman.analizar(
+    "blacklitterman": ("Black-Litterman", lambda p, c: blacklitterman.analizar(
         p, blacklitterman.views_combinadas(targets.analizar(p), momentum.analizar(p)))),
+
+    # Estos tres los pedía cada panel por su cuenta, en paralelo a los once de
+    # arriba y compitiendo con ellos por el mismo procesador: en la VM sumaban
+    # unos 20 s a cada apertura de cartera —`benchmarks` 20,4 s, `evolucion`
+    # 20,4 s, `correlaciones` 8,2 s— y `benchmarks` encima repetía el CAPM que
+    # el lote ya había corrido, porque corre los tres índices y uno de ellos es
+    # el mismo. Entran al lote: se calculan una vez, en paralelo con el resto, y
+    # el frontend los recibe por el mismo canal que todo lo demás. Los endpoints
+    # sueltos siguen existiendo para recalcular con otros parámetros.
+    "evolucion":    ("Evolución",       lambda p, c: portfolio.evolucion(
+        p, store.cargar_realizado(c))),
+    "correlaciones": ("Correlaciones",  lambda p, c: portfolio.correlaciones(p)),
+    "benchmarks":   ("Índices",         lambda p, c: capm.comparar_benchmarks(p)),
 }
 
 _corridas = {}
@@ -63,9 +80,9 @@ def _guardar(run_id, modelo, estado, dato=None):
             c["duracion"] = round(time.time() - c["inicio"], 2)
 
 
-def _ejecutar(run_id, modelo, fn, posiciones):
+def _ejecutar(run_id, modelo, fn, posiciones, cartera):
     try:
-        r = fn(posiciones)
+        r = fn(posiciones, cartera)
         _guardar(run_id, modelo, "error" if isinstance(r, dict) and "error" in r else "listo", r)
     except Exception as e:
         print(f"  [jobs] {modelo}: {type(e).__name__}: {e}")
@@ -103,7 +120,8 @@ def lanzar(nombre_cartera: str, posiciones: list, modelos: list = None) -> str:
     for m in elegidos:
         _guardar(run_id, m, "corriendo")
         fut = _pool.submit(contextvars.copy_context().run,
-                           _ejecutar, run_id, m, MODELOS[m][1], posiciones)
+                           _ejecutar, run_id, m, MODELOS[m][1], posiciones,
+                           nombre_cartera)
         # Red de seguridad: `_ejecutar` atrapa lo que falle DENTRO del modelo,
         # pero lo que falle antes de entrar —como el contexto de arriba— sólo
         # existe en el Future. Sin esto, un modelo que revienta ahí no da error:

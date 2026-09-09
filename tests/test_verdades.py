@@ -2014,9 +2014,9 @@ def test_los_once_modelos_terminan_y_con_la_plaza_puesta():
     jobs = require("api", "jobs")
     mercado = require("core", "mercado")
 
-    def lento(posiciones):
+    def lento(posiciones, cartera):
         time.sleep(0.15)
-        return {"plaza": mercado.actual()}
+        return {"plaza": mercado.actual(), "cartera": cartera}
 
     previos = dict(jobs.MODELOS)
     plaza_previa = mercado.actual()
@@ -2041,6 +2041,8 @@ def test_los_once_modelos_terminan_y_con_la_plaza_puesta():
     assert not colgados, f"modelos que no terminaron: {colgados}"
     plazas = {r["plaza"] for r in estado["resultados"].values()}
     assert plazas == {"EU"}, f"los modelos perdieron la plaza del request: {plazas}"
+    carteras = {r["cartera"] for r in estado["resultados"].values()}
+    assert carteras == {"test"}, f"y cada modelo sabe de qué cartera es: {carteras}"
 
 
 def test_el_precio_de_objetivos_es_el_mismo_que_valua_la_cartera():

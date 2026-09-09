@@ -658,7 +658,9 @@ function Panel({ tab, R, M, cartera, bench, recargar, sim, setSim }) {
     posicion: <Posicion d={{ ...d, cartera_nombre: cartera }} cartera={cartera}
                         recargar={recargar} bench={bench} sim={sim} setSim={setSim}
                         extras={{ composicion: R.composicion, riesgo: R.riesgo,
-                                  momentum: R.momentum, capm: R.capm }} />,
+                                  momentum: R.momentum, capm: R.capm,
+                                  correlaciones: R.correlaciones,
+                                  evolucion: R.evolucion, benchmarks: R.benchmarks }} />,
     riesgo: <Riesgo d={d} cartera={cartera} extras={{ stress: R.stress }} />,
     markowitz: <Markowitz d={d} cartera={cartera} bench={bench}
                           extras={{ objetivos: R.objetivos, bl: R.blacklitterman,
@@ -757,18 +759,17 @@ function AltaRapida({ cartera, recargar }) {
 
 function Posicion({ d, cartera, recargar, extras, bench, sim, setSim }) {
   const filas = d.posiciones || [];
-  const [corr, setCorr] = useState(null);
   const [real, setReal] = useState(null);
   const r = extras?.riesgo;
-  useEffect(() => { setCorr(null);
-    api(`/api/correlaciones/${encodeURIComponent(cartera)}`).then(setCorr); }, [cartera]);
+  // Correlaciones y evolución vienen con el lote de modelos, no de un pedido
+  // aparte: pedirlos por separado los ponía a competir con los once por el mismo
+  // procesador, y en el servidor sumaban veinte segundos a cada apertura.
+  const corr = extras?.correlaciones;
+  const ev = extras?.evolucion;
   // Lo cerrado se venía guardando y neteando sin que se viera en ningún lado.
   const [n, setN] = useState(0);
   useEffect(() => { setReal(null);
     api(`/api/carteras/${encodeURIComponent(cartera)}/realizado`).then(setReal); }, [cartera, n]);
-  const [ev, setEv] = useState(null);
-  useEffect(() => { setEv(null);
-    api(`/api/evolucion/${encodeURIComponent(cartera)}`).then(setEv); }, [cartera]);
   const cerrado = real?.n ? real.total_usd : null;
 
   return (
@@ -882,7 +883,8 @@ function Posicion({ d, cartera, recargar, extras, bench, sim, setSim }) {
       {extras?.capm
         ? (extras.capm.error
             ? <div className="aviso mal">{extras.capm.error}</div>
-            : <Capm d={extras.capm} cartera={cartera} bench={bench} />)
+            : <Capm d={extras.capm} cartera={cartera} bench={bench}
+                    todos={extras.benchmarks} />)
         : <div className="cargando">Comparando contra el índice…</div>}
 
       {/* 7 · Es momento de entrar o esperar */}
@@ -3187,10 +3189,9 @@ function DistribucionFinal({ d, corriendo }) {
 }
 
 /* ── Benchmark (CAPM) ── */
-function Capm({ d: inicial, cartera, bench }) {
+function Capm({ d: inicial, cartera, bench, todos }) {
   const c = colores();
   const [d, setD] = useState(inicial);
-  const [todos, setTodos] = useState(null);
   // El selector global manda: si cambia, se recalcula contra ese índice.
   useEffect(() => {
     if (bench === (d?.benchmark || MERCADOS[MERCADO].bench)) return;
@@ -3198,26 +3199,22 @@ function Capm({ d: inicial, cartera, bench }) {
     api(`/api/capm/${encodeURIComponent(cartera)}?benchmark=${bench}`).then(setD);
   }, [bench, cartera]);
 
-  // Los tres índices se comparan solos. Con un R² bajo, saber cuál de los tres
-  // explica la cartera es justamente lo que hay que mirar: dejarlo detrás de un
-  // botón era esconder la respuesta a la advertencia que da el panel de arriba.
+  // Los tres índices se comparan solos, y vienen con el lote de modelos: pedirlos
+  // aparte repetía el CAPM que el lote ya había corrido —son tres índices y uno
+  // de ellos es el mismo— y competía con él por el procesador. Con un R² bajo,
+  // saber cuál de los tres explica la cartera es justamente lo que hay que
+  // mirar: dejarlo detrás de un botón era esconder la respuesta a la advertencia
+  // que da el panel de arriba.
+  //
+  // El índice recomendado no sirve de nada si el resto de la pantalla se sigue
+  // midiendo contra otro. Se avisa por evento y no por props: el selector vive
+  // tres componentes más arriba, y es el mismo canal que la app ya usa para
+  // hablar de abajo hacia arriba.
   useEffect(() => {
-    let vivo = true;
-    setTodos(null);
-    api(`/api/capm/${encodeURIComponent(cartera)}/benchmarks`)
-      .then((r) => {
-        if (!vivo) return;
-        setTodos(r);
-        // El índice correcto no sirve de nada si el resto de la pantalla se
-        // sigue midiendo contra otro. Se avisa por evento y no por props: el
-        // selector vive tres componentes más arriba, y es el mismo canal que la
-        // app ya usa para hablar de abajo hacia arriba.
-        if (r?.recomendado) {
-          window.dispatchEvent(new CustomEvent("pa:indice", { detail: r.recomendado }));
-        }
-      });
-    return () => { vivo = false; };
-  }, [cartera]);
+    if (todos?.recomendado) {
+      window.dispatchEvent(new CustomEvent("pa:indice", { detail: todos.recomendado }));
+    }
+  }, [todos]);
   if (!d) return <div className="cargando">Comparando contra el índice…</div>;
   if (d.error) return <div className="aviso mal">{d.error}</div>;
   const nivel = d.diagnostico_r2?.nivel;

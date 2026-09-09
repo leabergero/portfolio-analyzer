@@ -110,8 +110,8 @@ def clasificar(retornos: pd.Series, persistencia: int = PERSISTENCIA):
 
 def _vix(indice):
     try:
-        import yfinance as yf
-        s = yf.Ticker("^VIX").history(start=str(indice[0].date()))["Close"]
+        from core.data import yahoo
+        s = yahoo.ticker("^VIX").history(start=str(indice[0].date()))["Close"]
         if getattr(s.index, "tz", None) is not None:
             s.index = s.index.tz_localize(None)
         return s.reindex(indice, method="ffill")
@@ -127,8 +127,8 @@ def _vol_merval(indice):
     honesto: mide miedo local realizado, no implícito, y se etiqueta como tal.
     """
     try:
-        import yfinance as yf
-        s = yf.Ticker("^MERV").history(start=str(indice[0].date()))["Close"]
+        from core.data import yahoo
+        s = yahoo.ticker("^MERV").history(start=str(indice[0].date()))["Close"]
         if getattr(s.index, "tz", None) is not None:
             s.index = s.index.tz_localize(None)
         rv = s.pct_change().rolling(VENTANA_VOL).std() * np.sqrt(RUEDAS) * 100
