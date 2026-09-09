@@ -50,10 +50,19 @@
        sesgo de la salvia del acento— en vez de tirar a azul mientras el acento
        tira a verde. Eso, y no el contraste, es lo que hacía que se leyera
        clínica.
-    4. **Contraste suficiente, no máximo.** El texto principal está en 11,7:1
-       sobre panel. AA pide 4,5 y AAA 7: sobra de largo, y el negro casi puro
-       que había antes (15,8:1) vibra sobre una superficie clara sin comprar
-       nada a cambio.
+    4. **Contraste suficiente, no máximo — para el texto.** El texto principal
+       está en 11,7:1 sobre panel. AA pide 4,5 y AAA 7: sobra de largo, y el
+       negro casi puro que había antes (15,8:1) vibra sobre una superficie clara
+       sin comprar nada a cambio.
+    5. **Los colores que significan algo van saturados.** Es lo contrario de la
+       regla anterior y no se contradice: al texto lo lee todo el mundo, pero un
+       número en verde o en rojo tiene que SALTAR. Sobre una superficie cálida un
+       verde o un rojo apagados se leen como parte del fondo —el primer intento
+       tenía el positivo en 40 % de saturación y el negativo en 48 %, y la
+       pantalla entera parecía terracota—. Van en 83 % y 76 %, con el matiz lejos
+       del 42° del lino: el rojo en 3° y el verde en 155°. La luminancia casi no
+       cambió; lo que cambió es el croma, que es lo que hace saltar un dato sin
+       encandilar.
 
   Todo texto pasa AA (4,5:1) sobre panel, series de gráficos incluidas: las lee
   `colores()` en app.jsx y se las pasa a Plotly, así que un gráfico nuevo nace
@@ -68,16 +77,16 @@
   --texto:      #35322D;
   --texto-2:    #55514A;
   --texto-3:    #746F65;
-  --acento:     #2D6A4F;
-  --acento-2:   #2F7355;
-  --acento-suave:#E0E9DF;
-  --positivo:   #2D6A4F;
-  --negativo:   #9E4238;
-  --alerta:     #7F5A11;
+  --acento:     #0A6B42;
+  --acento-2:   #0E7C4E;
+  --acento-suave:#D9EBE0;
+  --positivo:   #0A6B42;
+  --negativo:   #A81F17;
+  --alerta:     #9A5410;
   --sombra:     0 1px 2px rgba(58,55,48,.05), 0 10px 24px -14px rgba(58,55,48,.22);
-  --serie-1:#2D6A4F; --serie-2:#9A5B22; --serie-3:#3D5F86; --serie-4:#96404F;
-  --serie-5:#5F5183; --serie-6:#2C6E6B; --serie-7:#77682C; --serie-8:#57605F;
-  --marca-actual:#6F6F14; --marca-optima:#1F7A5C;
+  --serie-1:#0A6B42; --serie-2:#A85508; --serie-3:#24578F; --serie-4:#A32050;
+  --serie-5:#5B3FA0; --serie-6:#0D6E70; --serie-7:#6F6A0E; --serie-8:#4A5B66;
+  --marca-actual:#67720B; --marca-optima:#0B7E54;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
