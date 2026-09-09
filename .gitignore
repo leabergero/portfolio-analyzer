@@ -11,6 +11,10 @@ data/*.db-wal
 data/*.db-shm
 data/*.json
 !data/.gitkeep
+# ...menos los eventos del MEP: no son datos de nadie, son las anotaciones
+# macro que el panel del dólar dibuja sobre la serie. Son parte del análisis y
+# tienen que viajar con el código, o el server queda sin ellas.
+!data/eventos_mep.json
 
 # Credenciales — NUNCA versionar
 connectors.json
