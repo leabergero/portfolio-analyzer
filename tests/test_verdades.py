@@ -1898,6 +1898,30 @@ def test_precio_en_euros_entra_al_nucleo_en_dolares():
         "midiendo en euros el papel europeo ya está en su moneda: no se convierte"
 
 
+def test_la_plaza_de_una_cartera_sale_de_donde_cotiza():
+    """Una cartera de CEDEARs es argentina aunque coticen en dólares.
+
+    La plaza es dónde se opera, no en qué moneda: KARIN tiene GLDD.BA y KOD.BA
+    —dólares— junto a METR.BA, y toda ella se mira desde Argentina, con MEP,
+    Conectores y Cocos. Contar monedas en vez de plazas la mandaba a Estados
+    Unidos y le escondía las tres pestañas que sí usa.
+    """
+    mercado = require("core", "mercado")
+
+    argentina = [{"ticker": "GLDD.BA"}, {"ticker": "KOD.BA"}, {"ticker": "METR.BA"}]
+    europea = [{"ticker": "ASML.AS", "currency": "EUR"},
+               {"ticker": "SAP.DE", "currency": "EUR"},
+               {"ticker": "AAPL"}]
+    yanqui = [{"ticker": "AAPL"}, {"ticker": "MSFT"}]
+    bonos = [{"ticker": "AL30", "source": "cocos"}, {"ticker": "PLC4O", "source": "cocos"}]
+
+    assert mercado.de_posiciones(argentina) == "AR", "los CEDEARs en dólares son BYMA"
+    assert mercado.de_posiciones(europea) == "EU", "manda la mayoría, no el primero"
+    assert mercado.de_posiciones(yanqui) == "US"
+    assert mercado.de_posiciones(bonos) == "AR", "los bonos de Cocos no se van del país"
+    assert mercado.de_posiciones([]) == "AR", "una cartera vacía abre donde nació la app"
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

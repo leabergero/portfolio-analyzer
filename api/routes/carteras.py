@@ -4,6 +4,7 @@ import io
 
 from flask import Blueprint, Response, jsonify, request
 
+from core import mercado
 from core.io import csv_native, csv_yahoo, store
 from core.models import portfolio
 
@@ -12,8 +13,10 @@ bp = Blueprint("carteras", __name__, url_prefix="/api/carteras")
 
 @bp.get("")
 def listar():
+    """Cada cartera con su plaza: la pantalla la aplica sola al abrirla."""
     todas = store.cargar_todas()
-    return jsonify([{"nombre": n, "posiciones": len(p)} for n, p in todas.items()])
+    return jsonify([{"nombre": n, "posiciones": len(p),
+                     "mercado": mercado.de_posiciones(p)} for n, p in todas.items()])
 
 
 @bp.get("/<nombre>")

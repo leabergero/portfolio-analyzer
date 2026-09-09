@@ -66,6 +66,35 @@ def moneda() -> str:
     return cfg()["moneda"]
 
 
+def de_posiciones(posiciones) -> str:
+    """La plaza a la que pertenece una cartera, mirando dónde cotiza.
+
+    No hace falta que el usuario etiquete nada: una cartera de .BA es argentina
+    aunque la mitad sean CEDEARs en dólares —la plaza es BYMA, no la moneda— y
+    una de ASML.AS y SAP.DE es europea. Gana la mayoría de las posiciones; con
+    empate, Argentina, que es de donde salió la app.
+
+    Es sólo el valor de apertura: el selector de plaza sigue mandando.
+    """
+    from core.data import sources
+
+    cuenta = {}
+    for p in posiciones or []:
+        t = str(p.get("ticker") or "").upper()
+        if not t:
+            continue
+        if t.endswith(".BA") or sources.is_bond(t, p.get("source")) or p.get("source"):
+            plaza = "AR"
+        else:
+            mon = (p.get("currency") or sources.ticker_currency(t)).upper()
+            plaza = "AR" if mon == "ARS" else "EU" if mon == "EUR" else "US"
+        cuenta[plaza] = cuenta.get(plaza, 0) + 1
+
+    if not cuenta:
+        return "AR"
+    return max(cuenta, key=lambda k: (cuenta[k], k == "AR"))
+
+
 def _par(mon: str) -> pd.Series:
     """Serie del par contra el dólar. Vacía si esa moneda no se convierte."""
     par = PAR.get(mon)

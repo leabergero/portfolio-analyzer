@@ -4304,7 +4304,10 @@ function Carteras({ carteras, recargar, cartera, setCartera }) {
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginTop: 8 }}>
           {carteras.map((x) => (
             <button key={x.nombre} className={"btn" + (sel === x.nombre ? " primario" : "")}
-                    onClick={() => abrir(x.nombre)}>{x.nombre} <span style={{opacity:.6}}>({x.posiciones})</span></button>
+                    title={x.mercado ? `Se abre en ${MERCADOS[x.mercado].nombre}` : undefined}
+                    onClick={() => abrir(x.nombre)}>
+              {x.mercado && MERCADOS[x.mercado].bandera + " "}{x.nombre}{" "}
+              <span style={{opacity:.6}}>({x.posiciones})</span></button>
           ))}
           <button className="btn" onClick={() => {
             const n = prompt("Nombre de la cartera nueva:");
@@ -5262,13 +5265,29 @@ function App() {
   SIM_ACTIVA = simul.cabecera(sim);
   MERCADO = mercado;
 
-  const cambiarMercado = useCallback((m) => {
+  const aplicarMercado = useCallback((m) => {
     plaza.poner(m);
     setMercado(m);
     // El MEP, los conectores y Cocos no existen fuera de Argentina: quedarse
     // parado en una pestaña que ya no está en la barra deja la pantalla muerta.
     if (!MERCADOS[m].locales) setModo((x) => (MODOS_LOCALES.includes(x) ? "analisis" : x));
   }, []);
+
+  // La plaza la trae la cartera: una de ASML y SAP abre en Europa, una de .BA en
+  // Argentina — el servidor lo deduce de dónde cotizan sus activos, sin que haya
+  // que etiquetar nada. Vale hasta que el usuario toque el selector, y vuelve a
+  // mandar en cuanto cambia de cartera. Mismo trato que el índice del CAPM: lo
+  // que se elige a mano no se mueve solo.
+  const plazaElegida = useRef(false);
+  const cambiarMercado = useCallback((m) => {
+    plazaElegida.current = true;
+    aplicarMercado(m);
+  }, [aplicarMercado]);
+  useEffect(() => { plazaElegida.current = false; }, [cartera]);
+  useEffect(() => {
+    const m = carteras.find((c) => c.nombre === cartera)?.mercado;
+    if (m && !plazaElegida.current) aplicarMercado(m);
+  }, [cartera, carteras, aplicarMercado]);
   const cambiarSim = useCallback((l) => {
     simul.poner(cartera, l);
     setSims((s) => ({ ...s, [cartera]: l }));
