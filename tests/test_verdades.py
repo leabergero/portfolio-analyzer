@@ -1716,6 +1716,15 @@ def test_cache_no_alcanza_si_le_falta_la_ultima_rueda():
         "le falta el 08: esto es exactamente el bug de los 18,50 contra 18,46"
     assert suficiente(pd.DataFrame(), "2026-09-08") is False, "vacía nunca alcanza"
 
+    # El server de producción corre en UTC, así que `date.today()` allá ya es
+    # mañana durante la noche argentina. Una fecha futura tiene que recortarse a
+    # la última rueda real: si no, la caché nunca alcanza y se sale a buscar en
+    # cada request un día que todavía no existe.
+    from core.data.sources import TZ_BYMA
+    hoy_ba = dt.datetime.now(TZ_BYMA).date()
+    assert ultima_rueda("2099-01-01") <= hoy_ba, "una fecha futura se recorta a hoy"
+    assert ultima_rueda("2099-01-01").weekday() < 5, "y cae en día hábil"
+
 
 def test_la_cuotaparte_del_fci_se_convierte_con_el_mep_de_t_menos_1():
     """La cuotaparte que publica Cocos es de T-1 y se convierte con el MEP de T-1.

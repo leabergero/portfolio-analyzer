@@ -17,6 +17,7 @@ consultas.
 """
 
 from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
@@ -116,9 +117,12 @@ TTL_SIN_SERIE_H = 6.0
 # la última rueda. Acota el costo de los feriados, que `_ultima_rueda` no conoce.
 TTL_FRESCO_H = 2.0
 
-# Hora local a partir de la cual se da por publicada la rueda del día. BYMA
-# cierra a las 17 y yfinance viene con 20 minutos de delay.
+# Hora de Buenos Aires a partir de la cual se da por publicada la rueda del día.
+# BYMA cierra a las 17 y yfinance viene con 20 minutos de delay. La zona es
+# explícita porque el server de producción corre en UTC: con la hora de la
+# máquina, las 18 caían 15:00 ART y la rueda se daba por cerrada dos horas antes.
 CIERRE_BYMA_H = 18
+TZ_BYMA = ZoneInfo("America/Argentina/Buenos_Aires")
 
 
 def precios(ticker: str, desde: str = None, hasta: str = None,
@@ -221,8 +225,12 @@ def _ultima_rueda(hasta: str) -> date:
     hay que mantener, y el único costo de no tenerlos es un reintento por ticker
     cada `TTL_FRESCO_H`, que es justo lo que ese TTL acota.
     """
-    d = date.fromisoformat(hasta)
-    if d >= date.today() and datetime.now().hour < CIERRE_BYMA_H:
+    ahora = datetime.now(TZ_BYMA)
+    # `min` porque `hasta` sale de `date.today()`, que en un server UTC ya es
+    # mañana durante la noche argentina: sin recortar, la "última rueda" caía en
+    # un día que todavía no existe y la caché nunca alcanzaba.
+    d = min(date.fromisoformat(hasta), ahora.date())
+    if d == ahora.date() and ahora.hour < CIERRE_BYMA_H:
         d -= timedelta(days=1)
     while d.weekday() >= 5:          # 5 sábado, 6 domingo
         d -= timedelta(days=1)
