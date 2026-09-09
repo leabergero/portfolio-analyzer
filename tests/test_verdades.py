@@ -2034,6 +2034,41 @@ def test_los_once_modelos_terminan_y_con_la_plaza_puesta():
     assert plazas == {"EU"}, f"los modelos perdieron la plaza del request: {plazas}"
 
 
+def test_el_precio_de_objetivos_es_el_mismo_que_valua_la_cartera():
+    """Dos paneles de la misma pantalla no pueden mostrar dos precios distintos.
+
+    El consenso de analistas se cachea 24 h y el `.info` de yfinance trae el
+    precio adentro: quedaba congelado con el valor del momento en que se pidió.
+    El 2026-09-09 la misma cartera mostraba GLDD.BA a 8,55 en una máquina y 8,38
+    en otra, y la tabla de tenencias decía 8,37 en las dos. Peor: METR.BA salía
+    en PESOS (2.359) en una columna que muestra todo lo demás en dólares.
+
+    El objetivo sí se cachea —se mueve de semana en semana—; el precio de hoy no.
+    """
+    import pandas as pd
+
+    targets = require("core.models", "targets")
+    sources = require("core.data", "sources")
+
+    o_precios, o_obj = sources.precios_base, targets._objetivo_yfinance
+    # El consenso viejo: precio de ayer y objetivo medido contra ese precio.
+    sources.precios_base = lambda t, **k: pd.Series(
+        [8.37], index=[pd.Timestamp("2026-09-09")])
+    targets._objetivo_yfinance = lambda s: {
+        "actual": 8.55, "objetivo_medio": 8.85, "upside_pct": 3.5, "fuente": "yfinance"}
+    try:
+        r = targets.objetivo("GLDD.BA")
+    finally:
+        sources.precios_base, targets._objetivo_yfinance = o_precios, o_obj
+
+    assert casi(r["actual"], 8.37), \
+        f"el precio tiene que ser el de la serie de cierres, salió {r['actual']}"
+    assert casi(r["objetivo_medio"], 8.66, 0.01), \
+        f"el objetivo se lleva a la escala del precio de hoy, salió {r['objetivo_medio']}"
+    assert casi(r["upside_pct"], 3.5, 0.2), \
+        "el upside es invariante al cambio de escala"
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

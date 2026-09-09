@@ -99,6 +99,43 @@ def _objetivo_yfinance(simbolo: str):
     return r
 
 
+def _precio_de_mercado(simbolo: str):
+    """El último cierre: el MISMO precio con el que se valúa la cartera.
+
+    El `.info` de yfinance trae un precio en vivo, y se cachea 24 h junto con el
+    consenso —que sí conviene cachear, porque un precio objetivo se mueve de
+    semana en semana—. El precio de hoy no: dos máquinas que pidieron el `.info`
+    a horas distintas mostraban un "actual" distinto para el mismo papel —8,55 y
+    8,38 el 2026-09-09— y ninguno de los dos coincidía con el 8,37 que la tabla
+    de tenencias tenía dos paneles más arriba.
+    """
+    from core.data import sources
+
+    s = sources.precios_base(simbolo)
+    return round(float(s.iloc[-1]), 4) if not s.empty else None
+
+
+def _a_escala(r: dict, destino, origen):
+    """Los precios del consenso, llevados de la escala `origen` a `destino`.
+
+    El upside es invariante al cambio de escala —el ratio del CEDEAR y el tipo de
+    cambio se cancelan en el cociente— pero se recalcula igual contra el precio
+    de hoy: el que venía del consenso se midió contra el precio del momento en
+    que se pidió, que puede ser de ayer.
+    """
+    salida = dict(r)
+    if not (destino and origen):
+        return salida
+    factor = destino / origen
+    for k in ("objetivo_medio", "objetivo_alto", "objetivo_bajo"):
+        if salida.get(k) is not None:
+            salida[k] = round(float(salida[k]) * factor, 2)
+    salida["actual"] = destino
+    if salida.get("objetivo_medio"):
+        salida["upside_pct"] = round((salida["objetivo_medio"] / destino - 1) * 100, 1)
+    return salida
+
+
 def _pedir_objetivo_yfinance(simbolo: str):
     try:
         import yfinance as yf
@@ -209,17 +246,20 @@ def objetivo(ticker: str) -> dict:
 
     ticker = ticker.upper().strip()
     propio = _objetivo_yfinance(ticker)
-    precio_propio = (propio or {}).get("actual")
+    # El precio manda desde la serie de cierres, no desde el `.info` cacheado.
+    precio_propio = _precio_de_mercado(ticker) or (propio or {}).get("actual")
 
     if propio and propio.get("objetivo_medio"):
-        return {"ticker": ticker, "disponible": True, **propio, "reexpresado": False}
+        r = _a_escala(propio, precio_propio, propio.get("actual"))
+        return {"ticker": ticker, "disponible": True, **r, "reexpresado": False}
 
     for candidato in underlying_candidates(ticker):
         if candidato == ticker:
             continue
         r = (fmp.objetivo(candidato) if fmp.habilitado() else None) or _objetivo_yfinance(candidato)
         if r and r.get("objetivo_medio"):
-            return _reexpresar(ticker, r, precio_propio, candidato)
+            return _reexpresar(ticker, r, precio_propio, candidato,
+                               _precio_de_mercado(candidato))
 
     for candidato in underlying_candidates(ticker):
         if candidato in FUTURES_MAP:
@@ -233,17 +273,19 @@ def objetivo(ticker: str) -> dict:
     return salida
 
 
-def _reexpresar(ticker, r, precio_propio, origen):
-    """Lleva objetivo y precio a la escala del ticker propio, conservando el upside."""
+def _reexpresar(ticker, r, precio_propio, origen, precio_origen=None):
+    """Lleva objetivo y precio a la escala del ticker propio.
+
+    La escala de salida sale de dos precios de cierre —el del ticker y el del
+    instrumento del consenso—, no del `.info` de cada uno: así dos máquinas con
+    la misma cartera muestran el mismo número. Para la curva de futuros no hay
+    serie comparable y se usa el spot que ella misma trajo.
+    """
     salida = {"ticker": ticker, "disponible": True, **r,
               "origen_consenso": origen, "reexpresado": False}
-    if precio_propio and r.get("actual"):
-        factor = precio_propio / r["actual"]
-        salida["objetivo_medio"] = round(r["objetivo_medio"] * factor, 2)
-        for k in ("objetivo_alto", "objetivo_bajo"):
-            if r.get(k):
-                salida[k] = round(float(r[k]) * factor, 2)
-        salida["actual"] = precio_propio
+    referencia = precio_origen or r.get("actual")
+    if precio_propio and referencia:
+        salida.update(_a_escala(r, precio_propio, referencia))
         salida["reexpresado"] = True
     return salida
 
