@@ -134,10 +134,34 @@ def _curva_futuros(subyacente: str):
     """
     import datetime as dt
 
+    from core.data import cache
+
     spec = FUTURES_MAP.get(subyacente)
     if not spec:
         return None
     raiz, sufijo, trimestral = spec
+
+    # La curva se arma probando vencimientos hasta que uno conteste, y los que no
+    # existen contestan 404 después de esperar: siete pedidos a yfinance sin
+    # caché, unos nueve segundos, en CADA corrida de los modelos. Es la mitad del
+    # tiempo de un análisis completo. Un precio de futuro a doce meses no se
+    # mueve en un día; se guarda por seis horas, negativos incluidos —el
+    # vencimiento que no existe hoy tampoco existe en un rato—.
+    clave = f"futuros:{subyacente}"
+    guardado = cache.leer_respuesta(clave, 6.0, default="__falta__")
+    if guardado != "__falta__":
+        return guardado
+
+    resultado = _pedir_curva_futuros(raiz, sufijo, trimestral)
+    cache.guardar_respuesta(clave, resultado)
+    return resultado
+
+
+def _pedir_curva_futuros(raiz: str, sufijo: str, trimestral: bool):
+    """La parte que sale a la red. Separada para que la caché de arriba se lea
+    de un vistazo."""
+    import datetime as dt
+
     try:
         import yfinance as yf
         frente = yf.Ticker(f"{raiz}=F").info or {}

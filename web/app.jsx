@@ -88,12 +88,7 @@ const MERCADOS = {
 /* "dólares" o "euros", para los textos que nombran la moneda. */
 const MON = () => MERCADOS[MERCADO].moneda;
 
-const plaza = {
-  leer: () => { try { const m = localStorage.getItem("pa.mercado");
-                      return MERCADOS[m] ? m : "AR"; } catch { return "AR"; } },
-  poner: (m) => { try { localStorage.setItem("pa.mercado", m); } catch { /* sin memoria */ } },
-};
-let MERCADO = plaza.leer();
+let MERCADO = "AR";
 
 const SOBRE = "pa.sesion";
 const sesion = {
@@ -5282,7 +5277,6 @@ class Red extends React.Component {
 function App() {
   const [modo, setModo] = useState("analisis");
   const [tema, setTema] = useState(() => localStorage.getItem("tema") || "auto");
-  const [mercado, setMercado] = useState(plaza.leer);
   const [carteras, setCarteras] = useState([]);
   const [cartera, setCartera] = useState(null);
   // null = todavía no sabemos en qué modo corre el servidor ni quién sos.
@@ -5298,24 +5292,26 @@ function App() {
   // ANTES que los del padre, así que Análisis lanzaría su POST con la cabecera de
   // la cartera anterior y el primer análisis de cada cambio saldría mal.
   SIM_ACTIVA = simul.cabecera(sim);
-  MERCADO = mercado;
-
-  const aplicarMercado = useCallback((m) => {
-    plaza.poner(m);
-    setMercado(m);
-    // El MEP, los conectores y Cocos no existen fuera de Argentina: quedarse
-    // parado en una pestaña que ya no está en la barra deja la pantalla muerta.
-    if (!MERCADOS[m].locales) setModo((x) => (MODOS_LOCALES.includes(x) ? "analisis" : x));
-  }, []);
 
   // La plaza la trae la cartera: una de ASML y SAP se mira desde Europa, una de
   // .BA desde Argentina. El servidor la deduce de dónde cotizan los activos, y
   // en Carteras se puede fijar otra para el caso que ninguna posición puede
   // contar: un europeo con acciones de EE.UU. las mide igual en euros.
+  //
+  // Se resuelve en el MISMO render que la cartera, y no en un efecto: si llegara
+  // un tick después, Análisis alcanzaba a pedir una corrida con la plaza vieja y
+  // otra con la nueva —once modelos cada una, en un pool de seis— y la primera
+  // no servía para nada salvo tapar a la segunda. Es estado derivado, no estado.
+  const mercado = carteras.find((c) => c.nombre === cartera)?.mercado || "AR";
+  MERCADO = mercado;
+
+  // El MEP, los conectores y Cocos no existen fuera de Argentina: quedarse
+  // parado en una pestaña que ya no está en la barra deja la pantalla muerta.
   useEffect(() => {
-    const m = carteras.find((c) => c.nombre === cartera)?.mercado;
-    if (m) aplicarMercado(m);
-  }, [cartera, carteras, aplicarMercado]);
+    if (!MERCADOS[mercado].locales) {
+      setModo((x) => (MODOS_LOCALES.includes(x) ? "analisis" : x));
+    }
+  }, [mercado]);
   const cambiarSim = useCallback((l) => {
     simul.poner(cartera, l);
     setSims((s) => ({ ...s, [cartera]: l }));
