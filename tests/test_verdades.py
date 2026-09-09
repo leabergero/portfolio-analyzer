@@ -1956,6 +1956,53 @@ def test_la_plaza_elegida_a_mano_le_gana_a_la_deducida():
         assert store.plaza("copia") == "EU", "y sólo la de esa cartera"
 
 
+def test_los_once_modelos_terminan_y_con_la_plaza_puesta():
+    """Los modelos corren en un pool, y ahí se perdieron las dos cosas a la vez.
+
+    Bug real del 2026-09-09: para que la plaza elegida cruzara al pool se copiaba
+    el contexto del request… **una sola vez para los once modelos**. Un `Context`
+    no se puede entrar dos veces a la vez: el primero corría y los otros diez
+    morían con `RuntimeError: cannot enter context`. Como esa excepción se la
+    queda el Future y nadie la miraba, quedaban en "corriendo" para siempre: la
+    pantalla decía "1 de 11 modelos listos" y ahí se quedaba, sin un solo error.
+
+    Las dos mitades tienen que valer: que TODOS terminen, y que todos vean la
+    plaza del request. Los modelos de mentira duermen para forzar el solape, que
+    es la única condición en la que el bug aparece.
+    """
+    import time
+    jobs = require("api", "jobs")
+    mercado = require("core", "mercado")
+
+    def lento(posiciones):
+        time.sleep(0.15)
+        return {"plaza": mercado.actual()}
+
+    previos = dict(jobs.MODELOS)
+    plaza_previa = mercado.actual()
+    estado = None
+    try:
+        jobs.MODELOS.clear()
+        jobs.MODELOS.update({f"m{i}": (f"Modelo {i}", lento) for i in range(8)})
+        mercado.poner("EU")
+        run = jobs.lanzar("test", [{"ticker": "X"}])
+        mercado.poner(plaza_previa)      # el request terminó; el pool sigue solo
+        for _ in range(150):
+            estado = jobs.estado(run)
+            if estado["estado"] == "terminado":
+                break
+            time.sleep(0.1)
+    finally:
+        jobs.MODELOS.clear()
+        jobs.MODELOS.update(previos)
+        mercado.poner(plaza_previa)
+
+    colgados = {m: v["estado"] for m, v in estado["modelos"].items() if v["estado"] != "listo"}
+    assert not colgados, f"modelos que no terminaron: {colgados}"
+    plazas = {r["plaza"] for r in estado["resultados"].values()}
+    assert plazas == {"EU"}, f"los modelos perdieron la plaza del request: {plazas}"
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

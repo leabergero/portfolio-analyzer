@@ -93,12 +93,34 @@ def lanzar(nombre_cartera: str, posiciones: list, modelos: list = None) -> str:
     # cruza a un hilo nuevo: sin copiar el contexto acá, los modelos correrían
     # todos con la plaza por defecto y una cartera mirada desde Europa volvería
     # medida en dólares.
-    ctx = contextvars.copy_context()
+    #
+    # **Una copia por modelo, no una para todos.** Un mismo `Context` no se puede
+    # entrar dos veces a la vez: compartirlo entre los once dejaba correr al
+    # primero y mataba a los otros diez con `RuntimeError: cannot enter context`,
+    # y como la excepción se la queda el Future y nadie la miraba, esos modelos
+    # se quedaban en "corriendo" para siempre. La pantalla mostraba "1 de 11
+    # modelos listos" y ahí se quedaba.
     for m in elegidos:
         _guardar(run_id, m, "corriendo")
-        _pool.submit(ctx.run, _ejecutar, run_id, m, MODELOS[m][1], posiciones)
+        fut = _pool.submit(contextvars.copy_context().run,
+                           _ejecutar, run_id, m, MODELOS[m][1], posiciones)
+        # Red de seguridad: `_ejecutar` atrapa lo que falle DENTRO del modelo,
+        # pero lo que falle antes de entrar —como el contexto de arriba— sólo
+        # existe en el Future. Sin esto, un modelo que revienta ahí no da error:
+        # se queda calculando para siempre, que es la peor forma de fallar.
+        fut.add_done_callback(lambda f, m=m: _fallo_del_pool(run_id, m, f))
 
     return run_id
+
+
+def _fallo_del_pool(run_id, modelo, fut):
+    try:
+        e = fut.exception()
+    except Exception:                      # cancelado: no hay nada que reportar
+        return
+    if e is not None:
+        print(f"  [jobs] {modelo} no llegó a correr: {type(e).__name__}: {e}")
+        _guardar(run_id, modelo, "error", {"error": f"{type(e).__name__}: {e}"})
 
 
 def estado(run_id: str):
