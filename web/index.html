@@ -535,11 +535,14 @@ footer a:hover{text-decoration:underline}
                  font-size:12px;color:var(--texto-3)}
 .lab-pasos .pies b{color:var(--texto-2)}
 
-/* El cuarto spinner de FDB-05 acompaña a cada "Calculando…". */
+/* El cuarto spinner de FDB-05 acompaña a cada "Calculando…". En yema, como el
+   resto de lo que pide atención. El anillo de 1px es lo que lo salva en el tema
+   claro: la yema sola contra el panel da 1,45:1 y una forma de 24 px con ese
+   contraste se lava; el borde ámbar le pone el contorno que la mancha no tiene. */
 .cargando{display:flex;flex-direction:column;align-items:center;gap:15px}
-.cargando::before{content:"";width:24px;height:24px;background:var(--acento);
+.cargando::before{content:"";width:24px;height:24px;background:var(--destaque);
   animation:morph 1.8s ease-in-out infinite;
-  box-shadow:0 0 14px -3px var(--acento)}
+  box-shadow:0 0 0 1px var(--alerta), 0 0 14px -3px var(--destaque)}
 @keyframes morph{0%,100%{border-radius:50%;transform:rotate(0)}
                  50%{border-radius:12% 50% 12% 50%;transform:rotate(180deg)}}
 
