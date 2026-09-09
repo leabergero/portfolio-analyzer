@@ -63,9 +63,15 @@ def validar(ticker):
     if serie.empty:
         return jsonify({"ticker": ticker, "valido": False,
                         "detalle": "No se encontraron precios en ninguna fuente."})
+    # Un ticker en una moneda que no se sabe convertir se valúa igual, pero con
+    # el número crudo de su bolsa: SHEL.L cotiza en peniques y sumarlo a una
+    # cartera como si fueran dólares la infla sin que nada avise. El aviso lo da
+    # la pantalla al cargarlo, que es cuando todavía se puede no cargarlo.
+    moneda = sources.ticker_currency(ticker)
     return jsonify({
         "ticker": ticker, "valido": True,
-        "moneda": sources.ticker_currency(ticker),
+        "moneda": moneda,
+        "convertible": moneda in ("ARS", "USD", "EUR"),
         "es_bono": sources.is_bond(ticker),
         "subyacente": sources.base_symbol(ticker),
         "ruedas": len(serie),

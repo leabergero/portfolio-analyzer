@@ -2,9 +2,10 @@
 symbols.py — Qué es cada ticker y en qué moneda cotiza.
 
 Este es el módulo más peligroso del núcleo: casi todos los errores de valuación
-que se pagaron en las apps anteriores nacieron acá. Por eso es puro (solo
-stdlib), no hace red ni base de datos, y cada regla tiene su caso en
-`tests/test_verdades.py`.
+que se pagaron en las apps anteriores nacieron acá. Por eso las reglas son puras
+—solo stdlib— y cada una tiene su caso en `tests/test_verdades.py`. La única que
+sale del módulo es la moneda de un ticker con sufijo de bolsa que no sea .BA
+(ASML.AS, SAN.MC): esa la declara la fuente y no hay regla que adivinarla.
 
 Las dos convenciones que hay que tener claras, porque se parecen y no son lo
 mismo:
@@ -165,16 +166,21 @@ def is_bond(ticker: str, source: str = None) -> bool:
 
 
 def ticker_currency(ticker: str) -> str:
-    """"ARS" o "USD" — en qué moneda llega el precio de este ticker.
+    """En qué moneda llega el precio de este ticker: "ARS", "USD", "EUR", …
 
     Determina si se aplica o no la conversión por MEP. Equivocarse acá mueve la
     valuación por un factor de ~1.500.
+
+    Para BYMA la moneda sale de las reglas de abajo, que no necesitan red. Para
+    el resto **la declara la fuente**: ASML.AS cotiza en euros y darlo por
+    dólares infla la posición un 16 %. Sólo se pregunta por los tickers que
+    tienen sufijo de bolsa —sin punto es de EE.UU. y cotiza en dólares—, así que
+    un AAPL o un FCI de Cocos no salen a la red por esto.
     """
     t = ticker.upper().strip()
 
-    # Sin sufijo de BYMA es un ticker extranjero: nativamente en dólares.
     if not t.endswith(".BA"):
-        return "USD"
+        return "USD" if "." not in t else _moneda_declarada(t)
 
     # Bonos, ONs y letras: Cocos los devuelve en pesos incluso en su variante
     # "D". Va ANTES del chequeo de variante dólar, justamente por eso.
@@ -183,3 +189,15 @@ def ticker_currency(ticker: str) -> str:
 
     # Acciones y CEDEARs: la "D" sí significa que ya viene en dólares.
     return "USD" if is_d_variant(strip_ba(t)) else "ARS"
+
+
+def _moneda_declarada(ticker: str) -> str:
+    """La moneda de cotización según yfinance, cacheada una semana con la ficha.
+
+    Sin dato, dólares: es lo que hacía la app entera hasta ahora y no empeora
+    nada. Lo que diga la fuente sale tal cual, sin mayusculizar: `GBp` son
+    peniques y no libras, y escribirlo GBP invita a equivocarse por cien.
+    """
+    from core.data import sources
+    cur = (sources.info(ticker) or {}).get("currency")
+    return str(cur) if cur else "USD"

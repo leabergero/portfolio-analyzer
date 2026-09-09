@@ -41,7 +41,11 @@ PLAZAS = {
            "benchmark": "SP500", "rf": "US", "locales": False},
 }
 
-PAR = {"EUR": "EURUSD=X"}          # cuántos USD vale una unidad de la moneda
+# Cuántos dólares vale una unidad de la moneda. El euro es la única que se
+# convierte: el resto de las plazas europeas —Londres en peniques, Zúrich en
+# francos— quedan fuera a propósito.
+# ponytail: agregar una moneda es agregar su par acá y nada más.
+PAR = {"EUR": "EURUSD=X"}
 
 _actual = ContextVar("mercado", default="AR")
 
@@ -62,9 +66,9 @@ def moneda() -> str:
     return cfg()["moneda"]
 
 
-def _fx() -> pd.Series:
-    """Serie del par contra el dólar. Vacía si la moneda ES el dólar."""
-    par = PAR.get(moneda())
+def _par(mon: str) -> pd.Series:
+    """Serie del par contra el dólar. Vacía si esa moneda no se convierte."""
+    par = PAR.get(mon)
     if not par:
         return pd.Series(dtype=float)
     from core.data import sources
@@ -72,6 +76,49 @@ def _fx() -> pd.Series:
     if df.empty or "Close" not in df.columns:
         return pd.Series(dtype=float)
     return df["Close"].dropna()
+
+
+def _fx() -> pd.Series:
+    """El par de la moneda de medición. Vacía si se mide en dólares."""
+    return _par(moneda())
+
+
+def _alinear(s: pd.Series, fx: pd.Series) -> tuple:
+    idx = s.index
+    if getattr(idx, "tz", None) is not None:
+        s = s.copy()
+        s.index = idx.tz_localize(None)
+    return s, fx.reindex(s.index, method="ffill")
+
+
+def a_usd(s: pd.Series, mon: str) -> pd.Series:
+    """Una serie en su moneda de cotización, pasada a dólares.
+
+    El paso de entrada al núcleo, que calcula en dólares. Una moneda sin par
+    —peniques, francos— vuelve sin tocar: es lo que la app hacía con todo lo que
+    no fuera peso, y romper acá dejaría al ticker sin precio en vez de con uno
+    aproximado.
+    """
+    if s is None or s.empty or mon == "USD":
+        return s
+    fx = _par(mon)
+    if fx.empty:
+        return s
+    s, alineado = _alinear(s, fx)
+    return (s * alineado).dropna()
+
+
+def escalar_a_usd(monto, mon: str, fecha=None):
+    """Un importe suelto en su moneda de cotización, en dólares."""
+    if monto is None or mon == "USD":
+        return monto
+    fx = _par(mon)
+    if fx.empty:
+        return monto
+    previos = fx.loc[:pd.Timestamp(fecha)] if fecha is not None else fx
+    if not len(previos):
+        previos = fx
+    return float(monto) * float(previos.iloc[-1])
 
 
 def desde_usd(s: pd.Series) -> pd.Series:
@@ -85,11 +132,8 @@ def desde_usd(s: pd.Series) -> pd.Series:
     fx = _fx()
     if fx.empty:
         return s          # sin par no se inventa una conversión: queda en USD
-    idx = s.index
-    if getattr(idx, "tz", None) is not None:
-        s = s.copy()
-        s.index = idx.tz_localize(None)
-    return (s / fx.reindex(s.index, method="ffill")).dropna()
+    s, alineado = _alinear(s, fx)
+    return (s / alineado).dropna()
 
 
 def a_base(monto_usd, fecha=None):

@@ -350,7 +350,8 @@ def precios_base(ticker: str, desde: str = None, hasta: str = None,
     Acá se juntan las tres reglas que más errores causaron:
       1. bonos y ONs se dividen por 100 (cotizan cada 100 nominales),
       2. lo que cotiza en pesos se divide por el MEP **de cada fecha**,
-      3. lo que ya viene en dólares no se toca.
+      3. lo que cotiza en euros se multiplica por el EURUSD de cada fecha,
+      4. lo que ya viene en dólares no se toca.
 
     El dólar es el paso obligado de las tres, no el destino: si la plaza elegida
     mide en euros, el último paso pasa la serie a euros con el EURUSD de cada
@@ -370,6 +371,12 @@ def precios_base(ticker: str, desde: str = None, hasta: str = None,
     s = df["Close"].dropna()
     if is_bond(ticker, source):
         s = s / 100.0
-    if ticker_currency(ticker) == "ARS":
+
+    cotiza = ticker_currency(ticker)
+    if cotiza == mercado.moneda():
+        return s          # ya cotiza en la moneda de medición: nada que convertir
+    if cotiza == "ARS":
         s = mep_mod.serie_a_usd(s)
+    else:
+        s = mercado.a_usd(s, cotiza)
     return mercado.desde_usd(s)

@@ -718,12 +718,16 @@ function AltaRapida({ cartera, recargar }) {
         <button className="btn primario" onClick={agregar}>Agregar</button>
       </div>
       {check && !check.cargando && (
-        <div className={"aviso " + (check.valido && check.alcanza_para_analisis ? "ok"
+        <div className={"aviso " + (check.valido && !check.convertible ? "ojo"
+                                    : check.valido && check.alcanza_para_analisis ? "ok"
                                     : check.valido ? "ojo" : "mal")}>
           {check.valido
             ? <>Cotiza en <b>{check.moneda}</b>{check.subyacente !== check.ticker &&
                 <> (subyacente <b>{check.subyacente}</b>)</>}, último <b>{usd(check.ultimo_usd, 4)}</b>,
-               {" "}{check.ruedas} ruedas de historia. {check.detalle}</>
+               {" "}{check.ruedas} ruedas de historia. {check.detalle}
+               {check.convertible === false &&
+                 <> <b>Ojo:</b> la app convierte pesos, dólares y euros. Este precio
+                    entra tal cual y la posición va a quedar mal valuada.</>}</>
             : <>{check.detalle} Si es un bono u ON, elegí origen <b>cocos</b>.</>}
         </div>)}
       {msg && <div className={"aviso " + (msg.mal ? "mal" : "ok")}>{msg.mal || msg.ok}</div>}

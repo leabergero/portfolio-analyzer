@@ -1828,6 +1828,76 @@ def test_mercado_fija_tasa_libre_e_indice_de_apertura():
         mercado.poner(previa)
 
 
+def test_ticker_europeo_no_cotiza_en_dolares():
+    """ASML.AS cotiza en euros. Darlo por dólares infla la posición un 16 %.
+
+    Es el mismo bug que KOD.BA pero al revés y en otra plaza: la app dio por
+    dólares todo lo que no terminara en .BA, y con el mercado europeo eso pasó
+    de ser cierto a ser un error de valuación silencioso. La moneda de un ticker
+    con sufijo de bolsa la declara la fuente; los que no tienen punto son de
+    EE.UU. y NO se preguntan —salir a la red por un AAPL o por un FCI de Cocos
+    cuesta segundos y no aporta nada.
+    """
+    sources = require("core.data", "sources")
+    symbols = require("core.data", "symbols")
+
+    preguntados = []
+    original = sources.info
+
+    def espia(ticker, *a, **k):
+        preguntados.append(ticker)
+        return {"currency": "EUR"} if ticker.endswith((".AS", ".MC")) else {}
+
+    sources.info = espia
+    try:
+        assert symbols.ticker_currency("ASML.AS") == "EUR", "Ámsterdam cotiza en euros"
+        assert symbols.ticker_currency("SAN.MC") == "EUR", "Madrid cotiza en euros"
+        assert symbols.ticker_currency("AAPL") == "USD"
+        assert symbols.ticker_currency("COCOSPPA") == "USD", "un FCI de Cocos, sin red"
+        assert symbols.ticker_currency("METR.BA") == "ARS"
+        assert symbols.ticker_currency("KOD.BA") == "USD"
+    finally:
+        sources.info = original
+
+    assert preguntados == ["ASML.AS", "SAN.MC"], \
+        f"sólo se pregunta por los que tienen sufijo de bolsa, se preguntó: {preguntados}"
+
+
+def test_precio_en_euros_entra_al_nucleo_en_dolares():
+    """Un papel europeo se convierte a dólares para calcular, y no dos veces.
+
+    El núcleo mide en dólares: un precio en euros entra multiplicado por el
+    EURUSD de cada fecha. Y mirando la cartera DESDE Europa el mismo papel tiene
+    que salir con su número de pantalla, no con un ida y vuelta que le agregue
+    ruido: si ya cotiza en la moneda de medición, no se toca.
+    """
+    import pandas as pd
+    mercado = require("core", "mercado")
+    sources = require("core.data", "sources")
+
+    idx = pd.date_range("2026-01-01", periods=3, freq="D")
+    precio = pd.DataFrame({"Close": [100.0, 100.0, 100.0]}, index=idx)
+    fx = pd.Series([1.10, 1.10, 1.10], index=idx)          # USD por euro
+
+    plaza_previa = mercado.actual()
+    o_precios, o_info, o_par = sources.precios, sources.info, mercado._par
+    sources.precios = lambda t, *a, **k: precio
+    sources.info = lambda t, *a, **k: {"currency": "EUR"}
+    mercado._par = lambda mon: fx if mon == "EUR" else pd.Series(dtype=float)
+    try:
+        mercado.poner("US")
+        en_usd = sources.precios_base("ASML.AS")
+        mercado.poner("EU")
+        en_eur = sources.precios_base("ASML.AS")
+    finally:
+        sources.precios, sources.info, mercado._par = o_precios, o_info, o_par
+        mercado.poner(plaza_previa)
+
+    assert casi(en_usd.iloc[-1], 110.0, 1e-9), "100 € a 1,10 son 110 dólares"
+    assert casi(en_eur.iloc[-1], 100.0, 1e-9), \
+        "midiendo en euros el papel europeo ya está en su moneda: no se convierte"
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

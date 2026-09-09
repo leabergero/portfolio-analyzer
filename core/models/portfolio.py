@@ -103,7 +103,8 @@ def valuar(posiciones, precios=None) -> dict:
             compra_usd = mep_mod.a_usd(compra, p.get("buy_date"), serie_mep)
             comision_usd = mep_mod.a_usd(comision, p.get("buy_date"), serie_mep) or 0.0
         else:
-            compra_usd, comision_usd = compra, comision
+            compra_usd = mercado.escalar_a_usd(compra, moneda, p.get("buy_date"))
+            comision_usd = mercado.escalar_a_usd(comision, moneda, p.get("buy_date"))
 
         # El precio de hoy ya viene en la moneda de la plaza; el costo todavía
         # no. Se pasa con el cambio de SU fecha, por la misma razón que el MEP:
@@ -196,6 +197,14 @@ def pnl_realizado(trades) -> dict:
             venta = mep_mod.a_usd(venta, t["sell_date"], serie_mep)
             c_compra = mep_mod.a_usd(c_compra, t["buy_date"], serie_mep) or 0.0
             c_venta = mep_mod.a_usd(c_venta, t["sell_date"], serie_mep) or 0.0
+        elif moneda != "USD":
+            # Un cerrado en euros: cada pata al cambio de SU fecha, igual que con
+            # el MEP. La apertura activo/tipo de cambio queda para el peso, que
+            # es donde el salto del dólar explica la mitad del resultado.
+            compra = mercado.escalar_a_usd(compra, moneda, t["buy_date"])
+            venta = mercado.escalar_a_usd(venta, moneda, t["sell_date"])
+            c_compra = mercado.escalar_a_usd(c_compra, moneda, t["buy_date"]) or 0.0
+            c_venta = mercado.escalar_a_usd(c_venta, moneda, t["sell_date"]) or 0.0
         if compra is None or venta is None:
             continue
 
