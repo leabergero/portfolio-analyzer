@@ -9,7 +9,7 @@ Dos cosas que hay que tener presentes al leer este módulo:
 
   1. **Los precios llegan en pesos y cada 100 nominales**, incluso los del tramo
      en dólares. Este módulo devuelve el precio crudo tal como viene; dividir
-     por 100 y convertir por MEP es responsabilidad de `sources.precios_usd`,
+     por 100 y convertir por MEP es responsabilidad de `sources.precios_base`,
      que es donde está la regla escrita una sola vez.
 
   2. **El 2FA se pide una sola vez.** Los JWT de la sesión se guardan cifrados

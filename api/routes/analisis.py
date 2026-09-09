@@ -90,13 +90,13 @@ def evolucion(nombre):
 
 @bp.get("/riesgo/<nombre>")
 def riesgo(nombre):
-    return _simple(nombre, risk.analizar, request.args.get("benchmark", "SP500"))
+    return _simple(nombre, risk.analizar, request.args.get("benchmark"))
 
 
 @bp.get("/riesgo/<nombre>/por-activo")
 def riesgo_activos(nombre):
     """VaR, CVaR, VaR 99 y peor caída de cada activo, no solo del agregado."""
-    return _simple(nombre, risk.por_activo, request.args.get("benchmark", "SP500"))
+    return _simple(nombre, risk.por_activo, request.args.get("benchmark"))
 
 
 @bp.get("/riesgo/<nombre>/rolling")
@@ -118,7 +118,7 @@ def riesgo_ajustar(nombre):
     if objetivo is None:
         return jsonify({"error": "Falta el VaR objetivo (parámetro `var`, en %)."}), 400
     return _simple(nombre, risk.rebalancear_a_var, objetivo,
-                   request.args.get("benchmark", "SP500"))
+                   request.args.get("benchmark"))
 
 
 @bp.get("/correlaciones/<nombre>")
@@ -133,7 +133,7 @@ def mk_backtest(nombre):
     """¿La cartera optimizada habría funcionado fuera de muestra?"""
     return _simple(nombre, markowitz.backtest,
                    request.args.get("meses", 6, type=int),
-                   request.args.get("benchmark", "SP500"))
+                   request.args.get("benchmark"))
 
 
 @bp.get("/stress/<nombre>")
@@ -145,7 +145,7 @@ def stress(nombre):
 def mk(nombre):
     cap = request.args.get("cap", type=float)
     return _simple(nombre, markowitz.optimizar,
-                   request.args.get("benchmark", "SP500"), cap)
+                   request.args.get("benchmark"), cap)
 
 
 @bp.get("/montecarlo/<nombre>")
@@ -182,7 +182,7 @@ def mc_correlaciones(nombre):
 
 @bp.get("/capm/<nombre>")
 def capm_(nombre):
-    return _simple(nombre, capm.analizar, request.args.get("benchmark", "SP500"))
+    return _simple(nombre, capm.analizar, request.args.get("benchmark"))
 
 
 @bp.get("/capm/<nombre>/benchmarks")
@@ -240,4 +240,4 @@ def bl(nombre):
             cuerpo.get("manuales"))
 
     return jsonify(blacklitterman.analizar(
-        pos, views, cuerpo.get("benchmark", "SP500"), cuerpo.get("max_weight")))
+        pos, views, cuerpo.get("benchmark"), cuerpo.get("max_weight")))

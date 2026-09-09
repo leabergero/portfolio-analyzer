@@ -63,6 +63,38 @@ const simul = {
    mismo resultado. Si algún día hay dos vistas simultáneas, esto pasa a props. */
 let SIM_ACTIVA = "";
 
+/* Desde qué plaza se mira la cartera. No es un formato de pantalla: manda la
+   moneda de medición, la tasa libre de riesgo y el índice con el que abre —el
+   detalle está en `core/mercado.py`, acá vive sólo lo que se dibuja. Viaja en el
+   header `X-Mercado` de cada pedido.
+
+   `locales` es lo que sólo le sirve a quien invierte DESDE Argentina: el MEP,
+   los conectores y Cocos. Un europeo no tiene por qué ver esas tres pestañas.
+
+   ponytail: global como SIM_ACTIVA y por la misma razón — lo leen los treinta y
+   pico de fetch repartidos por los paneles y el formateador de importes. */
+const MERCADOS = {
+  AR: { bandera: "🇦🇷", nombre: "Argentina", simbolo: "$", moneda: "dólares",
+        bench: "MERVAL", locales: true,
+        pie: "Todos los valores en dólares, convertidos con el MEP de la fecha de cada operación." },
+  EU: { bandera: "🇪🇺", nombre: "Europa", simbolo: "€", moneda: "euros",
+        bench: "STOXX600", locales: false,
+        pie: "Todos los valores en euros, convertidos con el EURUSD de cada fecha." },
+  US: { bandera: "🇺🇸", nombre: "Estados Unidos", simbolo: "$", moneda: "dólares",
+        bench: "SP500", locales: false,
+        pie: "Todos los valores en dólares." },
+};
+
+/* "dólares" o "euros", para los textos que nombran la moneda. */
+const MON = () => MERCADOS[MERCADO].moneda;
+
+const plaza = {
+  leer: () => { try { const m = localStorage.getItem("pa.mercado");
+                      return MERCADOS[m] ? m : "AR"; } catch { return "AR"; } },
+  poner: (m) => { try { localStorage.setItem("pa.mercado", m); } catch { /* sin memoria */ } },
+};
+let MERCADO = plaza.leer();
+
 const SOBRE = "pa.sesion";
 const sesion = {
   leer: () => { try { return localStorage.getItem(SOBRE); } catch { return null; } },
@@ -75,6 +107,7 @@ const api = async (ruta, opciones) => {
   const guardado = sesion.leer();
   if (guardado) o.headers = { ...(o.headers || {}), "X-Sesion": guardado };
   if (SIM_ACTIVA) o.headers = { ...(o.headers || {}), "X-Sim": SIM_ACTIVA };
+  o.headers = { ...(o.headers || {}), "X-Mercado": MERCADO };
 
   const r = await fetch(ruta, o);
 
@@ -108,7 +141,7 @@ const api = async (ruta, opciones) => {
 };
 
 const usd = (n, dec = 2) =>
-  n == null ? "—" : "$" + Number(n).toLocaleString("es-AR",
+  n == null ? "—" : MERCADOS[MERCADO].simbolo + Number(n).toLocaleString("es-AR",
     { minimumFractionDigits: dec, maximumFractionDigits: dec });
 const pct = (n, dec = 2) => (n == null ? "—" : Number(n).toFixed(dec) + " %");
 const num = (n, dec = 2) => (n == null ? "—" : Number(n).toFixed(dec));
@@ -325,22 +358,35 @@ function Usuario({ yo }) {
   );
 }
 
-function Barra({ modo, setModo, tema, setTema, carteras, cartera, setCartera, yo }) {
+// Las tres últimas sólo existen para quien invierte desde Argentina: el MEP, el
+// broker y la cuenta espejo no le dicen nada a un europeo.
+const MODOS = [["analisis", "Análisis"], ["comparacion", "Comparación"],
+               ["carteras", "Carteras"], ["mercado", "Dólar MEP"],
+               ["conectores", "Conectores"], ["cocos", "Cocos"]];
+const MODOS_LOCALES = ["mercado", "conectores", "cocos"];
+
+function Barra({ modo, setModo, tema, setTema, carteras, cartera, setCartera, yo,
+                 mercado, setMercado }) {
   // El switch es binario y el tema tiene tres estados: "auto" se resuelve
   // mirando qué prefiere el sistema, y queda un enlace para volver a él.
   const sistemaOscuro = window.matchMedia?.("(prefers-color-scheme: dark)").matches;
   const esOscuro = tema === "dark" || (tema === "auto" && sistemaOscuro);
+  const locales = MERCADOS[mercado].locales;
   return (
     <div className="barra">
       <div className="marca">Portfolio <span>Analyzer</span></div>
       <div className="modos">
-        {[["analisis", "Análisis"], ["comparacion", "Comparación"],
-          ["carteras", "Carteras"], ["mercado", "Dólar MEP"],
-          ["conectores", "Conectores"], ["cocos", "Cocos"]].map(([k, t]) => (
+        {MODOS.filter(([k]) => locales || !MODOS_LOCALES.includes(k)).map(([k, t]) => (
           <button key={k} className={"modo" + (modo === k ? " on" : "")}
                   onClick={() => setModo(k)}>{t}</button>
         ))}
       </div>
+      <select className="plaza" value={mercado} title="Desde dónde mirás la cartera"
+              onChange={(e) => setMercado(e.target.value)}>
+        {Object.entries(MERCADOS).map(([k, m]) => (
+          <option key={k} value={k}>{m.bandera} {m.nombre}</option>
+        ))}
+      </select>
       {(modo === "analisis") && (
         <select value={cartera || ""} onChange={(e) => setCartera(e.target.value)}>
           <option value="">— elegí una cartera —</option>
@@ -495,7 +541,7 @@ function Analisis({ cartera, recargar, sim, setSim }) {
   const [run, setRun] = useState(null);
   const [estado, setEstado] = useState(null);
   const [tab, setTab] = useState("posicion");
-  const [bench, setBench] = useState("SP500");
+  const [bench, setBench] = useState(() => MERCADOS[MERCADO].bench);
   // Mientras el usuario no elija índice manda el que mejor explica la cartera:
   // lo dice el CAPM cuando termina de medir los tres. Si lo tocó se respeta —
   // un selector que se mueve solo después de que lo movieron es un bug.
@@ -714,7 +760,7 @@ function Posicion({ d, cartera, recargar, extras, bench, sim, setSim }) {
       <div className="kpis">
         {!(ev && !ev.error) && (
           <Kpi etiqueta="Valor total" valor={usd(d.valor_total)} ayuda={AYUDA.valor}
-               sub={d.mep_hoy ? `MEP $${d.mep_hoy}` : null} />)}
+               sub={MERCADOS[MERCADO].locales && d.mep_hoy ? `MEP $${d.mep_hoy}` : null} />)}
         <Kpi etiqueta="Costo" valor={usd(d.costo_total)} sub="comisiones incluidas" />
         <Kpi etiqueta="Resultado abierto" valor={usd(d.pnl)} tono={signo(d.pnl)} ayuda={AYUDA.pnl}
              sub={pct(d.pnl_pct)} />
@@ -776,9 +822,9 @@ function Posicion({ d, cartera, recargar, extras, bench, sim, setSim }) {
           </tbody>
         </table></div>
         <div className="pie">
-          Cada lote se valuó con el precio de hoy, y su costo con el dólar MEP del día
-          en que lo compraste. Convertir una compra vieja al dólar de hoy mediría el tipo
-          de cambio, no el rendimiento del activo.
+          Cada lote se valuó con el precio de hoy, y su costo con el tipo de cambio del
+          día en que lo compraste. Convertir una compra vieja al cambio de hoy mediría el
+          tipo de cambio, no el rendimiento del activo.
         </div>
       </div>
 
@@ -1555,8 +1601,8 @@ function RendimientoTotal({ ev }) {
           <span key={m.et} style={{ left: `${(m.pos * 100).toFixed(2)}%` }}>{m.et}</span>))}
       </div>
       <div className="pie">
-        La curva es el resultado acumulado en dólares, rueda por rueda, contando las
-        posiciones que ya cerraste y los dividendos cobrados. En dólares y no en porcentaje
+        La curva es el resultado acumulado en {MON()}, rueda por rueda, contando las
+        posiciones que ya cerraste y los dividendos cobrados. En plata y no en porcentaje
         porque un porcentaje sobre capital variable cae de golpe el día que ponés plata
         nueva, sin que haya pasado nada en el mercado. La línea punteada es el cero.
 
@@ -1925,7 +1971,7 @@ function ValorCartera({ ev, mep }) {
       <div className="cifra">{usd(ev.valor_hoy_usd)}</div>
       <div className="pie" style={{ marginTop: 6 }}>
         <span className={signo(cambio)}>{cambio >= 0 ? "▲" : "▼"} {pct(Math.abs(cambio), 1)}</span>
-        {" "}en el último mes{mep ? ` · MEP $${mep}` : ""}
+        {" "}en el último mes{MERCADOS[MERCADO].locales && mep ? ` · MEP $${mep}` : ""}
         {dCap && <> · {bajoAgua ? "por debajo de" : "por encima de"} los{" "}
           {usd(ev.puesto_neto_usd)} puestos</>}
       </div>
@@ -3127,7 +3173,7 @@ function Capm({ d: inicial, cartera, bench }) {
   const [todos, setTodos] = useState(null);
   // El selector global manda: si cambia, se recalcula contra ese índice.
   useEffect(() => {
-    if (bench === (d?.benchmark || "SP500")) return;
+    if (bench === (d?.benchmark || MERCADOS[MERCADO].bench)) return;
     setD(null);
     api(`/api/capm/${encodeURIComponent(cartera)}?benchmark=${bench}`).then(setD);
   }, [bench, cartera]);
@@ -5194,6 +5240,7 @@ class Red extends React.Component {
 function App() {
   const [modo, setModo] = useState("analisis");
   const [tema, setTema] = useState(() => localStorage.getItem("tema") || "auto");
+  const [mercado, setMercado] = useState(plaza.leer);
   const [carteras, setCarteras] = useState([]);
   const [cartera, setCartera] = useState(null);
   // null = todavía no sabemos en qué modo corre el servidor ni quién sos.
@@ -5209,6 +5256,15 @@ function App() {
   // ANTES que los del padre, así que Análisis lanzaría su POST con la cabecera de
   // la cartera anterior y el primer análisis de cada cambio saldría mal.
   SIM_ACTIVA = simul.cabecera(sim);
+  MERCADO = mercado;
+
+  const cambiarMercado = useCallback((m) => {
+    plaza.poner(m);
+    setMercado(m);
+    // El MEP, los conectores y Cocos no existen fuera de Argentina: quedarse
+    // parado en una pestaña que ya no está en la barra deja la pantalla muerta.
+    if (!MERCADOS[m].locales) setModo((x) => (MODOS_LOCALES.includes(x) ? "analisis" : x));
+  }, []);
   const cambiarSim = useCallback((l) => {
     simul.poner(cartera, l);
     setSims((s) => ({ ...s, [cartera]: l }));
@@ -5254,9 +5310,12 @@ function App() {
   return (
     <>
       <Barra modo={modo} setModo={setModo} tema={tema} setTema={setTema}
-             carteras={carteras} cartera={cartera} setCartera={setCartera} yo={yo} />
+             carteras={carteras} cartera={cartera} setCartera={setCartera} yo={yo}
+             mercado={mercado} setMercado={cambiarMercado} />
       <div className="hoja">
-        <Red key={modo}>
+        {/* Cambiar de plaza cambia la moneda de medición: lo que hay en pantalla
+            está calculado en la anterior y hay que volver a pedirlo entero. */}
+        <Red key={modo + ":" + mercado}>
         {modo === "analisis" && <Analisis cartera={cartera} sim={sim} setSim={cambiarSim} />}
         {modo === "comparacion" && <Comparacion carteras={carteras} cartera={cartera} sim={sim} />}
         {modo === "carteras" && <Carteras carteras={carteras} recargar={recargar}
@@ -5269,7 +5328,7 @@ function App() {
       <footer>
         <span>© Leandro R. Bergero · Msc Finance and Banking BSM-UPF ·{" "}
           <a href="https://github.com/leabergero" target="_blank" rel="noopener">github.com/leabergero</a></span>
-        <span>Todos los valores en dólares, convertidos con el MEP de la fecha de cada operación.</span>
+        <span>{MERCADOS[mercado].pie}</span>
         {/* Ko-fi, el mismo de las otras apps. El badge va embebido en base64 y no
             traído del CDN: la CSP sólo deja imágenes propias y `data:`, y una
             imagen externa además le contaría a un tercero quién abre la app. */}

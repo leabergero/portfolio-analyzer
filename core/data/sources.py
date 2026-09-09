@@ -21,6 +21,7 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
+from core import mercado
 from core.data import cache
 from core.data.symbols import (  # noqa: F401  — API pública de la capa de datos
     D_FALSOS_POSITIVOS,
@@ -284,7 +285,7 @@ def divisor_nominal(ticker: str, precio: float, source: str = None) -> float:
     """100 si ese precio viene por lámina de 100 nominales, 1 si viene por nominal.
 
     Los bonos y ONs cotizan cada 100 nominales y así los publica la fuente de
-    precios (AL30D ~64 USD), por eso `precios_usd` divide por 100. Pero el
+    precios (AL30D ~64 USD), por eso `precios_base` divide por 100. Pero el
     precio que carga el usuario no siempre está en esa escala: el CSV exportado
     del broker trae AL30D a 0,643 —ya por nominal— y volver a dividirlo hace que
     una operación de 1.572 dólares figure como una de 15,72, que fue lo que pasó
@@ -342,19 +343,25 @@ def _fci_usd(ticker: str) -> pd.Series:
     return pd.Series([usd], index=[pd.Timestamp(fecha)])
 
 
-def precios_usd(ticker: str, desde: str = None, hasta: str = None,
-                source: str = None) -> pd.Series:
-    """Serie de cierres YA convertida a dólares, lista para calcular retornos.
+def precios_base(ticker: str, desde: str = None, hasta: str = None,
+                 source: str = None) -> pd.Series:
+    """Serie de cierres en la moneda de medición, lista para calcular retornos.
 
     Acá se juntan las tres reglas que más errores causaron:
       1. bonos y ONs se dividen por 100 (cotizan cada 100 nominales),
       2. lo que cotiza en pesos se divide por el MEP **de cada fecha**,
       3. lo que ya viene en dólares no se toca.
+
+    El dólar es el paso obligado de las tres, no el destino: si la plaza elegida
+    mide en euros, el último paso pasa la serie a euros con el EURUSD de cada
+    fecha (ver `core.mercado`). Convertir acá y no al mostrar es lo que hace que
+    la volatilidad del tipo de cambio entre a las métricas, que es justamente lo
+    que ve un inversor europeo.
     """
     from core.data import mep as mep_mod
 
     if source == SOURCE_FCI:
-        return _fci_usd(ticker)
+        return mercado.desde_usd(_fci_usd(ticker))
 
     df = precios(ticker, desde, hasta, source=source)
     if df.empty or "Close" not in df.columns:
@@ -365,4 +372,4 @@ def precios_usd(ticker: str, desde: str = None, hasta: str = None,
         s = s / 100.0
     if ticker_currency(ticker) == "ARS":
         s = mep_mod.serie_a_usd(s)
-    return s
+    return mercado.desde_usd(s)

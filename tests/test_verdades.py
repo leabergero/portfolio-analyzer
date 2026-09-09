@@ -925,13 +925,13 @@ def test_un_precio_suelto_valua_pero_no_entra_en_los_modelos():
     assert len(df) == 1 and round(float(df["Close"].iloc[0]), 2) == 7.26, \
         "Sin serie, el spot tiene que devolver igual un punto valuable."
 
-    original_usd = sources.precios_usd
-    sources.precios_usd = lambda t, **kw: pd.Series(
+    original_usd = sources.precios_base
+    sources.precios_base = lambda t, **kw: pd.Series(
         [7.26], index=[pd.Timestamp("2026-09-04")])
     try:
         ret_df, precios = matriz_retornos([{"ticker": "DELLD.BA", "qty": 146}])
     finally:
-        sources.precios_usd = original_usd
+        sources.precios_base = original_usd
 
     assert ret_df.empty and "DELLD.BA" not in precios, \
         "Un solo punto no puede entrar en la matriz de retornos."
@@ -950,14 +950,14 @@ def test_un_fci_que_cocos_no_cotiza_vale_su_ppc_y_no_desaparece():
     """
     portfolio, sources = require("core.models", "portfolio"), require("core.data", "sources")
 
-    original = sources.precios_usd
-    sources.precios_usd = lambda t, **k: __import__("pandas").Series(dtype=float)
+    original = sources.precios_base
+    sources.precios_base = lambda t, **k: __import__("pandas").Series(dtype=float)
     try:
         r = portfolio.valuar([{"ticker": "COCOXX", "qty": 1000, "buy_price": 1.5,
                                  "buy_date": "2026-08-31", "currency": "ARS",
                                  "source": sources.SOURCE_FCI, "commissions": 0}])
     finally:
-        sources.precios_usd = original
+        sources.precios_base = original
 
     f = r["posiciones"][0]
     assert not f["sin_precio"], "el fondo no puede quedar sin precio y fuera del total"
@@ -985,12 +985,12 @@ def test_un_fci_sin_broker_vale_lo_ultimo_visto_y_no_cero():
     with cache_aparte():
         try:
             cocos.precio_fci = lambda t: 1234.56        # broker vivo
-            con = sources.precios_usd("FCITEST", source=sources.SOURCE_FCI)
+            con = sources.precios_base("FCITEST", source=sources.SOURCE_FCI)
             assert len(con) == 1 and float(con.iloc[-1]) > 0, \
                 "con broker tiene que haber precio"
 
             cocos.precio_fci = lambda t: None           # broker caído
-            sin = sources.precios_usd("FCITEST", source=sources.SOURCE_FCI)
+            sin = sources.precios_base("FCITEST", source=sources.SOURCE_FCI)
         finally:
             cocos.precio_fci = original
 
@@ -1581,8 +1581,8 @@ def test_una_compra_simulada_no_inventa_pnl():
     portfolio, sources = require("core.models", "portfolio"), require("core.data", "sources")
 
     fechas = pd.date_range("2026-01-01", periods=40, freq="D")
-    original = sources.precios_usd
-    sources.precios_usd = lambda t, **k: pd.Series(
+    original = sources.precios_base
+    sources.precios_base = lambda t, **k: pd.Series(
         [10.0] * 39 + [12.5], index=fechas)
     try:
         con_sim = sim.aplicar(
@@ -1591,7 +1591,7 @@ def test_una_compra_simulada_no_inventa_pnl():
             [("NUEVO", 4)])
         r = portfolio.valuar(con_sim)
     finally:
-        sources.precios_usd = original
+        sources.precios_base = original
 
     fila = next(f for f in r["posiciones"] if f["ticker"] == "NUEVO")
     assert fila["sim"] is True, "la fila simulada va marcada: no es tenencia real"
@@ -1761,6 +1761,71 @@ def test_la_cuotaparte_del_fci_se_convierte_con_el_mep_de_t_menos_1():
     assert visto["fecha"].weekday() < 5, "T-1 tiene que ser día hábil"
     assert visto["cacheado"] == esperado, "el punto se cachea con la fecha de T-1"
     assert s.index[-1].date() == esperado, "la serie sale fechada en T-1"
+
+
+def test_mercado_euro_mide_en_euros_y_no_solo_lo_muestra():
+    """Mirar la cartera desde Europa no es cambiar el signo $ por el €.
+
+    Si la conversión se hiciera al formatear los números, la volatilidad, el
+    Sharpe y el beta seguirían siendo los del inversor en dólares: el europeo
+    carga además el movimiento del EURUSD, y eso sólo entra si la serie se
+    convierte ANTES de calcular los retornos. Este test lo fija: con un tipo de
+    cambio que se mueve y un precio que no, en dólares el retorno es cero y en
+    euros no.
+    """
+    import pandas as pd
+    mercado = require("core", "mercado")
+    sources = require("core.data", "sources")
+
+    idx = pd.date_range("2026-01-01", periods=4, freq="D")
+    quieto = pd.DataFrame({"Close": [100.0] * 4}, index=idx)
+    fx = pd.Series([1.00, 1.10, 1.05, 1.20], index=idx)      # USD por euro
+
+    plaza_previa = mercado.actual()
+    original_precios, original_fx = sources.precios, mercado._fx
+    sources.precios = lambda t, *a, **k: quieto
+    mercado._fx = lambda: fx
+    try:
+        mercado.poner("US")
+        en_usd = sources.precios_base("AAPL")
+        mercado.poner("EU")
+        en_eur = sources.precios_base("AAPL")
+    finally:
+        sources.precios, mercado._fx = original_precios, original_fx
+        mercado.poner(plaza_previa)
+
+    assert casi(en_usd.pct_change().dropna().std(), 0.0), \
+        "en dólares el precio no se movió: el retorno tiene que ser cero"
+    assert casi(en_eur.iloc[1], 100 / 1.10, 1e-9), "cada fecha con SU tipo de cambio"
+    assert en_eur.pct_change().dropna().std() > 0, \
+        "en euros el EURUSD mueve la serie: la volatilidad no puede ser cero"
+
+
+def test_mercado_fija_tasa_libre_e_indice_de_apertura():
+    """La tasa libre de riesgo la manda la moneda de medición, no el índice.
+
+    Medir en euros y descontar con la letra del Tesoro americano mezcla dos
+    monedas dentro del mismo Sharpe. Y el índice con el que abre cada plaza es
+    el suyo —Merval, STOXX, S&P—, aunque después gane el de mayor R².
+    """
+    mercado = require("core", "mercado")
+    rates = require("core.models", "rates")
+
+    previa = mercado.actual()
+    try:
+        for plaza, indice, region in (("AR", "MERVAL", "US"),
+                                      ("EU", "STOXX600", "EU"),
+                                      ("US", "SP500", "US")):
+            mercado.poner(plaza)
+            assert mercado.cfg()["benchmark"] == indice, f"{plaza} abre con {indice}"
+            assert mercado.cfg()["rf"] == region, f"{plaza} descuenta con la tasa {region}"
+        # El argumento viejo ya no decide: pedir el S&P midiendo en euros sigue
+        # dando la tasa europea.
+        mercado.poner("EU")
+        _, etiqueta = rates.risk_free_para("SP500")
+        assert "Bund" in etiqueta, f"midiendo en euros la tasa es el Bund, salió: {etiqueta}"
+    finally:
+        mercado.poner(previa)
 
 
 def main():

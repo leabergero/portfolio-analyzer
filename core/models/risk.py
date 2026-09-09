@@ -180,7 +180,7 @@ def concentracion_riesgo(pesos, covarianza) -> list:
 
 # ── Resumen de riesgo de una cartera ──────────────────────────────────────────
 
-def analizar(posiciones, benchmark: str = "SP500") -> dict:
+def analizar(posiciones, benchmark: str = None) -> dict:
     """Panel de riesgo completo, en dólares.
 
     Devuelve además de cada número la etiqueta de qué tasa libre se usó: sin eso
@@ -357,10 +357,10 @@ def _serie_para(ticker, source, cache):
     en la misma dirección que el activo.
     """
     if ticker not in cache:
-        cache[ticker] = sources.precios_usd(ticker, source=source)
+        cache[ticker] = sources.precios_base(ticker, source=source)
     base = symbols.base_symbol(ticker)
     if base != symbols.strip_ba(ticker) and base not in cache:
-        cache[base] = sources.precios_usd(base)
+        cache[base] = sources.precios_base(base)
     return cache[ticker], (cache.get(base) if base != symbols.strip_ba(ticker) else None)
 
 
@@ -436,7 +436,7 @@ def stress_test(posiciones) -> dict:
 
 # ── Riesgo por activo ─────────────────────────────────────────────────────────
 
-def por_activo(posiciones, benchmark: str = "SP500") -> dict:
+def por_activo(posiciones, benchmark: str = None) -> dict:
     """VaR, CVaR, VaR 99 y peor caída de **cada activo**, no solo de la cartera.
 
     Una cartera puede verse tranquila y contener un activo que solo, cae 60 %.
@@ -591,7 +591,7 @@ def riesgo_cambiario(posiciones) -> dict:
         ticker = str(p["ticker"]).upper()
         origen = p.get("source") or None
         moneda = (p.get("currency") or sources.ticker_currency(ticker)).upper()
-        s_usd = sources.precios_usd(ticker, source=origen)
+        s_usd = sources.precios_base(ticker, source=origen)
         if len(s_usd) < 60:
             continue
         precio = float(s_usd.iloc[-1])
@@ -651,7 +651,7 @@ def riesgo_cambiario(posiciones) -> dict:
 # ── Rebalanceo a un VaR objetivo ──────────────────────────────────────────────
 
 def rebalancear_a_var(posiciones, var_objetivo_pct: float,
-                      benchmark: str = "SP500") -> dict:
+                      benchmark: str = None) -> dict:
     """Qué comprar y qué vender para que la cartera no pase de cierto riesgo.
 
     **Rebalancea, no liquida.** La cartera sigue invertida al 100 %: se cambia

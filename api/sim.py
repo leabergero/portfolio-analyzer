@@ -50,7 +50,7 @@ def _compra(ticker: str, qty: float):
     ni para bien ni para mal. Va en USD y con la fecha de la última rueda, no
     con la de hoy: si el mercado está cerrado, ese es el precio que existe.
     """
-    s = sources.precios_usd(ticker)
+    s = sources.precios_base(ticker)
     if s.empty:
         return None
     return {"ticker": ticker, "qty": float(qty),

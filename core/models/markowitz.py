@@ -157,7 +157,7 @@ def nube_factible(mu, covarianza, rf: float, n_carteras: int = 2000) -> dict:
 
 # ── Optimización de una cartera concreta ──────────────────────────────────────
 
-def optimizar(posiciones, benchmark: str = "SP500", cap: float = None) -> dict:
+def optimizar(posiciones, benchmark: str = None, cap: float = None) -> dict:
     """Frontera, óptimos y qué habría que comprar o vender para llegar."""
     from core.models.portfolio import matriz_retornos, value_weights
     from core.models.rates import risk_free_para
@@ -224,7 +224,7 @@ def optimizar(posiciones, benchmark: str = "SP500", cap: float = None) -> dict:
     }
 
 
-def backtest(posiciones, meses: int = 6, benchmark: str = "SP500") -> dict:
+def backtest(posiciones, meses: int = 6, benchmark: str = None) -> dict:
     """¿La cartera óptima habría funcionado de verdad?
 
     Se optimiza con los datos ANTERIORES a la ventana de prueba y se mide qué

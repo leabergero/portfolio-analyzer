@@ -13,20 +13,23 @@ el benchmark no explica nada de lo que hace la cartera, así que su beta y su
 alpha son ruido con formato de número — y la interfaz tiene que decirlo, no
 mostrarlos como si tal cosa. Ese aviso es la función `diagnostico_r2()`.
 
-Los tres benchmarks se llevan a dólares antes de comparar, porque la cartera se
-mide en dólares: el STOXX 600 vía EURUSD, el Merval vía MEP. Comparar un índice
-en su moneda contra una cartera en otra mide el tipo de cambio.
+Los tres benchmarks se llevan a la moneda de medición antes de comparar: el
+STOXX 600 vía EURUSD, el Merval vía MEP, y desde ahí a euros si la plaza elegida
+mide en euros. Comparar un índice en su moneda contra una cartera en otra mide
+el tipo de cambio.
 """
 
 import numpy as np
 import pandas as pd
+
+from core import mercado
 
 RUEDAS = 252
 
 BENCHMARKS = {
     "SP500":    {"ticker": "SPY",    "moneda": "USD", "nombre": "S&P 500"},
     "STOXX600": {"ticker": "^STOXX", "moneda": "EUR", "nombre": "STOXX 600"},
-    "MERVAL":   {"ticker": "^MERV",  "moneda": "ARS", "nombre": "Merval (en USD)"},
+    "MERVAL":   {"ticker": "^MERV",  "moneda": "ARS", "nombre": "Merval"},
 }
 
 
@@ -42,8 +45,8 @@ def _cierres(ticker: str, desde: str = None) -> pd.Series:
 
 
 def serie_benchmark(clave: str, desde: str = None):
-    """(serie en USD, nombre para mostrar)."""
-    cfg = BENCHMARKS.get(clave, BENCHMARKS["SP500"])
+    """(serie en la moneda de medición, nombre para mostrar)."""
+    cfg = BENCHMARKS.get(clave or mercado.cfg()["benchmark"], BENCHMARKS["SP500"])
     s = _cierres(cfg["ticker"], desde)
     if s.empty:
         return s, cfg["nombre"]
@@ -55,7 +58,12 @@ def serie_benchmark(clave: str, desde: str = None):
         from core.data import mep
         s = mep.serie_a_usd(s)
 
-    return s, cfg["nombre"]
+    # El índice que no cotiza en la moneda de medición se muestra diciéndolo: un
+    # Merval leído en euros no es el Merval que publica BYMA.
+    nombre = cfg["nombre"]
+    if cfg["moneda"] != mercado.moneda():
+        nombre += " (en euros)" if mercado.moneda() == "EUR" else " (en dólares)"
+    return mercado.desde_usd(s), nombre
 
 
 def diagnostico_r2(r2: float) -> dict:
@@ -74,9 +82,14 @@ def diagnostico_r2(r2: float) -> dict:
                                       "alpha no son concluyentes: probá otro benchmark."}
 
 
-def analizar(posiciones, benchmark: str = "SP500") -> dict:
+def analizar(posiciones, benchmark: str = None) -> dict:
     from core.models.portfolio import matriz_retornos, value_weights
     from core.models.rates import risk_free_para
+
+    # Sin índice pedido manda el de la plaza —Merval en Argentina, STOXX en
+    # Europa, S&P en EE.UU.—, que es sólo el que abre: apenas `comparar_benchmarks`
+    # mide los tres, gana el de mayor R².
+    benchmark = benchmark or mercado.cfg()["benchmark"]
 
     ret_df, precios = matriz_retornos(posiciones)
     if ret_df.empty:

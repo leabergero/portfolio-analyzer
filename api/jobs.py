@@ -12,6 +12,7 @@ análisis es barato, y guardar resultados obligaría a invalidarlos cuando cambi
 los precios — más complejidad que beneficio.
 """
 
+import contextvars
 import threading
 import time
 import traceback
@@ -88,9 +89,14 @@ def lanzar(nombre_cartera: str, posiciones: list, modelos: list = None) -> str:
             for viejo in sorted(_corridas, key=lambda k: _corridas[k]["inicio"])[:-_MAX_CORRIDAS]:
                 _corridas.pop(viejo, None)
 
+    # La plaza elegida vive en un ContextVar del request, y un ContextVar no
+    # cruza a un hilo nuevo: sin copiar el contexto acá, los modelos correrían
+    # todos con la plaza por defecto y una cartera mirada desde Europa volvería
+    # medida en dólares.
+    ctx = contextvars.copy_context()
     for m in elegidos:
         _guardar(run_id, m, "corriendo")
-        _pool.submit(_ejecutar, run_id, m, MODELOS[m][1], posiciones)
+        _pool.submit(ctx.run, _ejecutar, run_id, m, MODELOS[m][1], posiciones)
 
     return run_id
 

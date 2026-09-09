@@ -63,7 +63,7 @@ def _confianza_a_omega(confianzas, tau, Sigma, P):
     return np.diag(diag)
 
 
-def analizar(posiciones, views=None, benchmark: str = "SP500",
+def analizar(posiciones, views=None, benchmark: str = None,
              max_weight: float = None) -> dict:
     """views: [{"ticker", "ret" (% anual esperado), "confidence" (1-90)}]"""
     from core.models.portfolio import matriz_retornos, value_weights

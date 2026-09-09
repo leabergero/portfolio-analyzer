@@ -37,3 +37,10 @@ web/app.js
 # entorno local
 .venv/
 node_modules/
+
+# Symlinks del worktree de laboratorio (comparten venv, node_modules y datos
+# con el árbol principal).
+/.venv
+/node_modules
+/data/usuarios
+/data/vault

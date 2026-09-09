@@ -59,7 +59,7 @@ def validar(ticker):
     cuando falla el análisis completo es la peor forma de enterarse.
     """
     ticker = ticker.upper().strip()
-    serie = sources.precios_usd(ticker)
+    serie = sources.precios_base(ticker)
     if serie.empty:
         return jsonify({"ticker": ticker, "valido": False,
                         "detalle": "No se encontraron precios en ninguna fuente."})
@@ -102,7 +102,7 @@ def comparar():
 
     if len(carteras) < 2:
         return jsonify({"error": "Hacen falta al menos dos carteras con posiciones."}), 400
-    return jsonify(comparacion.comparar(carteras, cuerpo.get("benchmark", "SP500")))
+    return jsonify(comparacion.comparar(carteras, cuerpo.get("benchmark")))
 
 
 # ── Noticias ──────────────────────────────────────────────────────────────────

@@ -14,6 +14,7 @@ cambio, no el rendimiento del activo.
 import numpy as np
 import pandas as pd
 
+from core import mercado
 from core.data import mep as mep_mod
 from core.data import sources
 
@@ -67,7 +68,7 @@ def precios_actuales(posiciones, hasta=None) -> dict:
     for t in sorted({str(p["ticker"]).upper() for p in posiciones}):
         origen = next((p.get("source") for p in posiciones
                        if str(p["ticker"]).upper() == t and p.get("source")), None)
-        s = sources.precios_usd(t, hasta=hasta, source=origen)
+        s = sources.precios_base(t, hasta=hasta, source=origen)
         if not s.empty:
             salida[t] = float(s.iloc[-1])
     return salida
@@ -103,6 +104,12 @@ def valuar(posiciones, precios=None) -> dict:
             comision_usd = mep_mod.a_usd(comision, p.get("buy_date"), serie_mep) or 0.0
         else:
             compra_usd, comision_usd = compra, comision
+
+        # El precio de hoy ya viene en la moneda de la plaza; el costo todavía
+        # no. Se pasa con el cambio de SU fecha, por la misma razón que el MEP:
+        # convertir una compra de 2024 al euro de hoy mide el tipo de cambio.
+        compra_usd = mercado.a_base(compra_usd, p.get("buy_date"))
+        comision_usd = mercado.a_base(comision_usd, p.get("buy_date")) or 0.0
 
         precio_hoy = precios.get(t)
 
@@ -151,7 +158,7 @@ def valuar(posiciones, precios=None) -> dict:
         "costo_total": round(total_costo, 2),
         "pnl": round(total_valor - total_costo, 2),
         "pnl_pct": round((total_valor / total_costo - 1) * 100, 2) if total_costo else 0,
-        "moneda": "USD",
+        "moneda": mercado.moneda(),
         "mep_hoy": round(float(serie_mep.iloc[-1]), 2) if not serie_mep.empty else None,
         "sin_precio": sorted(set(sin_precio)),
     }
@@ -211,6 +218,13 @@ def pnl_realizado(trades) -> dict:
         else:
             pnl_activo, pnl_fx = pnl, 0.0      # sin exposición: ya estaba en dólares
 
+        # A la moneda de medición con el cambio de la fecha de venta, que es el
+        # día en que se cobró. Los tres términos se convierten con el mismo
+        # número, así que la identidad P&L = papel + tipo de cambio sobrevive.
+        pnl = mercado.a_base(pnl, t["sell_date"])
+        pnl_activo = mercado.a_base(pnl_activo, t["sell_date"])
+        pnl_fx = mercado.a_base(pnl_fx, t["sell_date"])
+
         total += pnl
         total_activo += pnl_activo
         total_fx += pnl_fx
@@ -244,7 +258,7 @@ def matriz_retornos(posiciones, desde=None, hasta=None):
         t = str(p["ticker"]).upper()
         if t in retornos:
             continue
-        s = sources.precios_usd(t, desde=desde, hasta=hasta, source=p.get("source") or None)
+        s = sources.precios_base(t, desde=desde, hasta=hasta, source=p.get("source") or None)
         if len(s) < 30:
             continue
         precios[t] = float(s.iloc[-1])
@@ -417,7 +431,7 @@ def evolucion(posiciones, trades=None, n_ruedas: int = 30) -> dict:
     for ticker, *_ in tramos:
         if ticker in series or ticker in sin_serie:
             continue
-        s = _src.precios_usd(ticker, source=origen.get(ticker))
+        s = _src.precios_base(ticker, source=origen.get(ticker))
         if s.empty:
             sin_serie.add(ticker)
         else:

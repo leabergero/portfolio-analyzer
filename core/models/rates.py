@@ -14,9 +14,10 @@ La diferencia no es cosmética: con ^TNX ≈ 4,4 % y ^IRX ≈ 4,0 %, el exceso d
 retorno de una cartera cambia y con él todos los ratios que se comparan entre
 carteras.
 
-La cartera se mide en dólares, así que la tasa natural es siempre la de EE.UU.
-Para el benchmark europeo se ofrece el Bund por convención regional, pero es una
-aproximación y la interfaz lo dice.
+La región la fija la plaza elegida (`core.mercado`), que es la que fija la
+moneda de medición: midiendo en dólares, la letra del Tesoro; midiendo en euros,
+el Bund. El Bund es una estimación —no tiene ticker confiable en yfinance— y la
+interfaz lo dice.
 """
 
 import time
@@ -72,9 +73,16 @@ def risk_free(plazo: str = "corto", region: str = "US"):
     return valor, etiqueta
 
 
-# El benchmark define la región de la tasa, no la moneda de la cartera.
-_REGION = {"SP500": "US", "MERVAL": "US", "STOXX600": "EU"}
+def risk_free_para(benchmark: str = None, plazo: str = "corto"):
+    """La tasa libre de riesgo de la plaza desde la que se mira la cartera.
 
+    La región la fija la **moneda de medición**, no el índice elegido: la tasa
+    libre de riesgo de un retorno medido en euros es una tasa en euros, aunque
+    ese día se esté comparando contra el S&P 500. Medir en euros y descontar con
+    la letra del Tesoro americano mezcla dos monedas dentro del mismo Sharpe.
 
-def risk_free_para(benchmark: str, plazo: str = "corto"):
-    return risk_free(plazo, _REGION.get(benchmark, "US"))
+    El argumento `benchmark` queda por compatibilidad con las llamadas viejas;
+    ya no decide nada.
+    """
+    from core import mercado
+    return risk_free(plazo, mercado.cfg()["rf"])

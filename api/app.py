@@ -12,6 +12,7 @@ Correr:
 """
 
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -21,13 +22,13 @@ from flask_cors import CORS
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from api.routes import acceso, analisis, carteras, datos  # noqa: E402
-from core import usuarios  # noqa: E402
+from core import mercado, usuarios  # noqa: E402
 from core.broker import cocos, sesion  # noqa: E402
 from core.io import store  # noqa: E402
 from core.data import mep  # noqa: E402
 
 WEB = Path(__file__).resolve().parent.parent / "web"
-PUERTO = 5002
+PUERTO = int(os.environ.get("PA_PUERTO", 5002))
 
 app = Flask(__name__, static_folder=None)
 CORS(app)
@@ -108,6 +109,16 @@ SOLO_LOCAL = ("/api/broker/vault", "/api/broker/conectar", "/api/broker/borrar",
 def modo():
     """En qué modo corre este servidor. Sin sesión: el front lo pregunta al abrir."""
     return jsonify({"modo": "web" if sesion.modo_web() else "local"})
+
+
+# ── Plaza ─────────────────────────────────────────────────────────────────────
+# Desde dónde se mira la cartera: define la moneda de medición, la tasa libre de
+# riesgo y el índice con el que abre. Viaja en cada request porque es del
+# navegador que pregunta, no del servidor. Sin cabecera, Argentina.
+
+@app.before_request
+def elegir_mercado():
+    mercado.poner(request.headers.get("X-Mercado"))
 
 
 @app.before_request

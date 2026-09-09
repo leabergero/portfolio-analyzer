@@ -346,7 +346,7 @@ CRITERIOS = [
 ]
 
 
-def comparar(carteras: dict, benchmark: str = "SP500") -> dict:
+def comparar(carteras: dict, benchmark: str = None) -> dict:
     """Compara dos o más carteras sobre el mismo período, con estadística.
 
     carteras: {nombre: [posiciones]}
