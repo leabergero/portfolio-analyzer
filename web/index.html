@@ -54,15 +54,23 @@
        está en 11,7:1 sobre panel. AA pide 4,5 y AAA 7: sobra de largo, y el
        negro casi puro que había antes (15,8:1) vibra sobre una superficie clara
        sin comprar nada a cambio.
-    5. **Los colores que significan algo van saturados.** Es lo contrario de la
-       regla anterior y no se contradice: al texto lo lee todo el mundo, pero un
-       número en verde o en rojo tiene que SALTAR. Sobre una superficie cálida un
-       verde o un rojo apagados se leen como parte del fondo —el primer intento
-       tenía el positivo en 40 % de saturación y el negativo en 48 %, y la
-       pantalla entera parecía terracota—. Van en 83 % y 76 %, con el matiz lejos
-       del 42° del lino: el rojo en 3° y el verde en 155°. La luminancia casi no
-       cambió; lo que cambió es el croma, que es lo que hace saltar un dato sin
-       encandilar.
+    5. **Los colores que significan algo van saturados y tan brillantes como el
+       contraste permita.** Es lo contrario de la regla anterior y no se
+       contradice: al texto lo lee todo el mundo, pero un número en verde o en
+       rojo tiene que SALTAR. Sobre una superficie cálida un verde o un rojo
+       apagados se leen como parte del fondo —un primer intento con el positivo
+       en 40 % de saturación y el negativo en 48 % dejó la pantalla entera
+       terracota—. Verde y rojo van al **máximo brillo que todavía pasa AA sobre
+       panel**: 4,52 y 4,53 contra los 6,0 y 6,7 que tenían, con el matiz lejos
+       del 42° del lino. Ese 4,5 es el techo del brillo, no un piso de
+       accesibilidad que sobre: subirlos un punto más los saca de AA.
+    6. **La yema es superficie, nunca tinta.** Un amarillo de verdad no llega ni
+       a 1,6:1 contra un panel claro: como texto o como línea fina no se ve, y
+       oscurecerlo hasta que se lea lo convierte en el mismo ocre del fondo. Va
+       de relleno —el aviso que hay que mirar, la barra de simulación, el punto
+       de "corriendo"— con el texto oscuro encima, que ahí sí da 8,09:1. Para
+       cuando hace falta ámbar de tinta está `--alerta`, que es su versión
+       legible.
 
   Todo texto pasa AA (4,5:1) sobre panel, series de gráficos incluidas: las lee
   `colores()` en app.jsx y se las pasa a Plotly, así que un gráfico nuevo nace
@@ -80,13 +88,15 @@
   --acento:     #0A6B42;
   --acento-2:   #0E7C4E;
   --acento-suave:#D9EBE0;
-  --positivo:   #0A6B42;
-  --negativo:   #A81F17;
-  --alerta:     #9A5410;
+  --positivo:   #08814F;
+  --negativo:   #D72B1F;
+  --alerta:     #9C6404;
+  --destaque:   #F5C93F;
+  --destaque-suave:#FBEEC4;
   --sombra:     0 1px 2px rgba(58,55,48,.05), 0 10px 24px -14px rgba(58,55,48,.22);
-  --serie-1:#0A6B42; --serie-2:#A85508; --serie-3:#24578F; --serie-4:#A32050;
-  --serie-5:#5B3FA0; --serie-6:#0D6E70; --serie-7:#6F6A0E; --serie-8:#4A5B66;
-  --marca-actual:#67720B; --marca-optima:#0B7E54;
+  --serie-1:#08804E; --serie-2:#AF5807; --serie-3:#2670C6; --serie-4:#D42364;
+  --serie-5:#8357CE; --serie-6:#0B7C85; --serie-7:#79720A; --serie-8:#597386;
+  --marca-actual:#B88308; --marca-optima:#08A169;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
@@ -94,6 +104,7 @@
     --borde-suave:#212D35; --texto:#E6EDF2; --texto-2:#A6B4BF; --texto-3:#78868F;
     --acento:#4FC3A8; --acento-2:#6FD9BE; --acento-suave:#10302A;
     --positivo:#5FBF8B; --negativo:#E0765C; --alerta:#DDA95E;
+    --destaque:#F2C94C; --destaque-suave:#3B3216;
     --sombra:0 1px 2px rgba(0,0,0,.45), 0 8px 22px -14px rgba(0,0,0,.7);
     --serie-1:#4FC3A8; --serie-2:#DFA45E; --serie-3:#78A6DD; --serie-4:#E08098;
     --serie-5:#AE9BD8; --serie-6:#5FC3C3; --serie-7:#C6B36A; --serie-8:#93A5B3;
@@ -105,6 +116,7 @@
   --borde-suave:#212D35; --texto:#E6EDF2; --texto-2:#A6B4BF; --texto-3:#78868F;
   --acento:#4FC3A8; --acento-2:#6FD9BE; --acento-suave:#10302A;
   --positivo:#5FBF8B; --negativo:#E0765C; --alerta:#DDA95E;
+  --destaque:#F2C94C; --destaque-suave:#3B3216;
   --sombra:0 1px 2px rgba(0,0,0,.45), 0 8px 22px -14px rgba(0,0,0,.7);
   --serie-1:#4FC3A8; --serie-2:#DFA45E; --serie-3:#78A6DD; --serie-4:#E08098;
   --serie-5:#AE9BD8; --serie-6:#5FC3C3; --serie-7:#C6B36A; --serie-8:#93A5B3;
@@ -213,7 +225,7 @@ td.fx{font-weight:600}
      padding:9px 13px;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px}
 .tab.on{color:var(--acento);border-bottom-color:var(--acento);font-weight:600}
 .tab .pin{display:inline-block;width:6px;height:6px;border-radius:50%;margin-left:6px}
-.pin.listo{background:var(--positivo)} .pin.corriendo{background:var(--alerta)}
+.pin.listo{background:var(--positivo)} .pin.corriendo{background:var(--destaque)}
 .pin.error{background:var(--negativo)}
 
 /* ── Avisos ── */
@@ -221,7 +233,9 @@ td.fx{font-weight:600}
        border-radius:0 8px 8px 0;font-size:13px;color:var(--texto-2);margin:10px 0}
 .aviso.ok{border-left-color:var(--positivo);background:var(--acento-suave);color:var(--texto)}
 .aviso.mal{border-left-color:var(--negativo)}
-.aviso.ojo{border-left-color:var(--alerta)}
+/* Lo que hay que mirar antes de seguir va sobre yema: el ámbar del borde solo
+   no alcanzaba para separarlo de un aviso cualquiera. */
+.aviso.ojo{border-left-color:var(--destaque);background:var(--destaque-suave);color:var(--texto)}
 .aviso b{color:var(--texto)}
 .vacio{padding:44px 20px;text-align:center;color:var(--texto-3);font-size:14px}
 .cargando{padding:26px;text-align:center;color:var(--texto-3);font-size:13px}
@@ -495,7 +509,8 @@ footer a:hover{text-decoration:underline}
 
 /* Simulación: la barra que prueba compras y ventas sobre la cartera sin
    guardarlas. Va marcada al borde para que nadie la lea como cartera real. */
-.lab-sim{border-color:var(--alerta);box-shadow:inset 3px 0 0 var(--alerta)}
+.lab-sim{border-color:var(--destaque);background:var(--destaque-suave);
+         box-shadow:inset 3px 0 0 var(--destaque)}
 .lab-marca{background:transparent;font-family:inherit;cursor:pointer;align-self:center;
            margin:0 0 6px 12px}
 .lab-marca:hover{background:var(--panel-2)}
