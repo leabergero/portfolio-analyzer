@@ -1682,6 +1682,78 @@ def test_la_serie_del_mep_se_sincroniza_sola_una_vez_por_dia():
         mep._memoria.update({"serie": None, "dia": None})
 
 
+def test_cache_no_alcanza_si_le_falta_la_ultima_rueda():
+    """Una caché que corta en la rueda anterior NO alcanza, aunque sea de ayer.
+
+    Bug original (2026-09-09): la app mostraba KOD.BA a 18,50 y Yahoo a 18,46.
+    Se juntaban dos cosas. `end` es exclusivo en Yahoo, así que la corrida del
+    día D bajaba hasta D-1; y `_suficiente` toleraba 3 días de atraso, así que
+    al día siguiente perdonaba el agujero en vez de ir a buscarlo. La caché
+    quedaba una rueda atrás PARA SIEMPRE, en todos los activos de la cartera.
+
+    Fechas fijas a propósito: 2026-09-04 viernes, 09-05 sábado, 09-06 domingo,
+    09-07 lunes, 09-08 martes. Nada que dependa de hoy.
+    """
+    import datetime as dt
+
+    import pandas as pd
+
+    ultima_rueda, suficiente = require("core.data.sources",
+                                      "_ultima_rueda", "_suficiente")
+
+    assert ultima_rueda("2026-09-05") == dt.date(2026, 9, 4), "el sábado no es rueda"
+    assert ultima_rueda("2026-09-06") == dt.date(2026, 9, 4), "el domingo tampoco"
+    assert ultima_rueda("2026-09-08") == dt.date(2026, 9, 8), "martes cerrado es rueda"
+
+    def serie(hasta):
+        idx = pd.to_datetime(["2026-09-03", "2026-09-04", "2026-09-07", "2026-09-08"])
+        idx = idx[idx <= pd.Timestamp(hasta)]
+        return pd.DataFrame({"Close": [1.0] * len(idx)}, index=idx)
+
+    assert suficiente(serie("2026-09-08"), "2026-09-08") is True, \
+        "llega a la última rueda: no hay que salir a buscar"
+    assert suficiente(serie("2026-09-07"), "2026-09-08") is False, \
+        "le falta el 08: esto es exactamente el bug de los 18,50 contra 18,46"
+    assert suficiente(pd.DataFrame(), "2026-09-08") is False, "vacía nunca alcanza"
+
+
+def test_la_cuotaparte_del_fci_se_convierte_con_el_mep_de_t_menos_1():
+    """La cuotaparte que publica Cocos es de T-1 y se convierte con el MEP de T-1.
+
+    Bug original: `_fci_usd` la sellaba con `date.today()`, así que tomaba pesos
+    del cierre anterior y los dividía por el MEP de hoy. Un día de salto del MEP
+    valuaba el fondo mal, y el punto quedaba cacheado un día adelantado. Es el
+    mismo error de corrimiento que tenía la caché de cierres.
+
+    Y el lunes T-1 tiene que caer en el viernes, no en el domingo: sin MEP de
+    domingo la conversión volvía None y el fondo desaparecía del total.
+    """
+    import datetime as dt
+
+    fci_usd, ultima_rueda = require("core.data.sources", "_fci_usd", "_ultima_rueda")
+    sources = __import__("core.data.sources", fromlist=["_"])
+    from core.broker import cocos
+    from core.data import cache, mep
+
+    visto = {}
+    orig = (cocos.precio_fci, cache.guardar_precios, mep.a_usd)
+    cocos.precio_fci = lambda t: 1234.5                      # cuotaparte en pesos
+    cache.guardar_precios = lambda t, df: visto.update(cacheado=df.index[-1].date())
+    mep.a_usd = lambda ars, fecha, *a, **k: visto.update(ars=ars, fecha=fecha) or 2.0
+    try:
+        s = fci_usd("COCOSPPA")
+    finally:
+        cocos.precio_fci, cache.guardar_precios, mep.a_usd = orig
+
+    esperado = ultima_rueda((dt.date.today() - dt.timedelta(days=1)).isoformat())
+    assert visto["ars"] == 1234.5, "tiene que convertir la cuotaparte que dio el broker"
+    assert visto["fecha"] == esperado, f"convirtió con el MEP de {visto['fecha']}, no de T-1"
+    assert visto["fecha"] < dt.date.today(), "T-1 nunca puede ser hoy"
+    assert visto["fecha"].weekday() < 5, "T-1 tiene que ser día hábil"
+    assert visto["cacheado"] == esperado, "el punto se cachea con la fecha de T-1"
+    assert s.index[-1].date() == esperado, "la serie sale fechada en T-1"
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

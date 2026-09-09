@@ -725,7 +725,10 @@ def fci_tracking():
 # ── Participaciones en FCI, como lotes de cartera ─────────────────────────────
 
 def precio_fci(ticker: str):
-    """Cuotaparte de hoy de un FCI, en pesos (que es como la informa Cocos).
+    """Última cuotaparte de un FCI, en pesos (que es como la informa Cocos).
+
+    Es la de T-1: los fondos se valúan al cierre anterior. Quien la fecha es
+    `sources._fci_usd`, y la fecha importa porque define con qué MEP se convierte.
 
     None si no hay posición en ese fondo o el broker no publicó precio: la
     posición sale marcada «sin precio», que es mejor que valuarla mal.

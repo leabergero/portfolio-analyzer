@@ -16,7 +16,7 @@ La caché va primero siempre: es la única fuente que no se cae ni tiene límite
 consultas.
 """
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 import pandas as pd
 
@@ -49,7 +49,11 @@ def _de_yfinance(ticker: str, desde: str, hasta: str) -> pd.DataFrame:
     except ImportError:
         return pd.DataFrame()
     try:
-        df = yf.Ticker(ticker).history(start=desde, end=hasta, auto_adjust=False)
+        # Yahoo trata `end` como exclusivo: con end=hoy la rueda de hoy no viene
+        # ni corriendo después del cierre, y la caché queda una rueda atrás para
+        # siempre (KOD.BA mostraba 18,50 del viernes contra 18,46 del lunes).
+        fin = (date.fromisoformat(hasta) + timedelta(days=1)).isoformat()
+        df = yf.Ticker(ticker).history(start=desde, end=fin, auto_adjust=False)
     except Exception:
         return pd.DataFrame()
     if df is None or df.empty:
@@ -108,6 +112,14 @@ def _de_cocos(ticker: str, desde: str, hasta: str) -> pd.DataFrame:
 # no pasa por acá.
 TTL_SIN_SERIE_H = 6.0
 
+# Cuánto se espera antes de volver a salir por un ticker cuya caché no llega a
+# la última rueda. Acota el costo de los feriados, que `_ultima_rueda` no conoce.
+TTL_FRESCO_H = 2.0
+
+# Hora local a partir de la cual se da por publicada la rueda del día. BYMA
+# cierra a las 17 y yfinance viene con 20 minutos de delay.
+CIERRE_BYMA_H = 18
+
 
 def precios(ticker: str, desde: str = None, hasta: str = None,
             source: str = None, refrescar: bool = False) -> pd.DataFrame:
@@ -124,6 +136,12 @@ def precios(ticker: str, desde: str = None, hasta: str = None,
     if not refrescar:
         cacheado = cache.leer_precios(ticker, desde, hasta)
         if _suficiente(cacheado, hasta):
+            return cacheado
+        # Le falta la última rueda, pero si ya se intentó hace poco no se vuelve
+        # a salir. Un feriado de BYMA deja a los ~60 tickers "atrasados" sin que
+        # exista el dato que falta, y sin esto cada request los reintenta todos.
+        if not cacheado.empty and cache.leer_respuesta(
+                f"fresco:{ticker}", TTL_FRESCO_H) is True:
             return cacheado
         # Un ticker que ya dio vacío no se vuelve a preguntar por unas horas.
         # Sin esto, cada panel reintenta yfinance y BYMA por los mismos tickers
@@ -145,6 +163,7 @@ def precios(ticker: str, desde: str = None, hasta: str = None,
             continue
         if df is not None and not df.empty and "Close" in df.columns:
             cache.guardar_precios(ticker, df)
+            cache.guardar_respuesta(f"fresco:{ticker}", True)
             return df.loc[desde:hasta]
 
     # Sin fuente disponible: lo que haya en la caché es mejor que nada.
@@ -194,17 +213,33 @@ def _spot_yfinance(ticker: str, ttl_horas: float = 1.0) -> pd.DataFrame:
                         index=[pd.Timestamp(date.today())])
 
 
+def _ultima_rueda(hasta: str) -> date:
+    """Última rueda que ya debería estar publicada a la fecha `hasta`.
+
+    El fin de semana no cuenta, y la rueda de hoy tampoco hasta que cierre. Los
+    feriados de BYMA quedan afuera a propósito: meterlos pide un calendario que
+    hay que mantener, y el único costo de no tenerlos es un reintento por ticker
+    cada `TTL_FRESCO_H`, que es justo lo que ese TTL acota.
+    """
+    d = date.fromisoformat(hasta)
+    if d >= date.today() and datetime.now().hour < CIERRE_BYMA_H:
+        d -= timedelta(days=1)
+    while d.weekday() >= 5:          # 5 sábado, 6 domingo
+        d -= timedelta(days=1)
+    return d
+
+
 def _suficiente(df: pd.DataFrame, hasta: str) -> bool:
     """¿La caché alcanza, o hay que salir a buscar?
 
-    Alcanza si tiene datos y el último es de los últimos 3 días hábiles. Evita
-    reescribir la caché entera en cada request — el otro 77 % del tiempo que se
-    iba en el análisis.
+    Alcanza si llega a la última rueda publicada. Antes toleraba 3 días y esa
+    holgura se comía justo la rueda que `end` exclusivo no bajaba: la corrida del
+    día D guardaba hasta D-1 y al día siguiente la tolerancia lo perdonaba, así
+    que el agujero no se cerraba nunca y la app vivía una rueda atrás.
     """
     if df is None or df.empty:
         return False
-    ultimo = df.index[-1].date()
-    return (date.fromisoformat(hasta) - ultimo).days <= 3
+    return df.index[-1].date() >= _ultima_rueda(hasta)
 
 
 def info(ticker: str, ttl_horas: float = 24 * 7):
@@ -252,7 +287,7 @@ def divisor_nominal(ticker: str, precio: float, source: str = None) -> float:
 
 
 def _fci_usd(ticker: str) -> pd.Series:
-    """Un solo punto: la cuotaparte de hoy del FCI, en dólares.
+    """Un solo punto: la última cuotaparte del FCI (T-1), en dólares.
 
     Un FCI no tiene serie —Cocos no publica histórico de cuotapartes— y no se
     inventa una. Con un punto alcanza para valuar la posición y calcular el
@@ -274,11 +309,15 @@ def _fci_usd(ticker: str) -> pd.Series:
     hoy = date.today()
     # Cocos informa la cuotaparte en pesos, también la de los fondos en dólares.
     ars = cocos.precio_fci(ticker)
-    fecha = hoy
+    # Un FCI se valúa a T-1: la cuotaparte que publica el broker es la del cierre
+    # anterior, no la de hoy. Fecharla hoy la convertía con el MEP de hoy —pesos
+    # de un día, tipo de cambio de otro— y dejaba el punto cacheado un día
+    # adelantado, que es el mismo error que traía la app con los cierres.
+    fecha = _ultima_rueda((hoy - timedelta(days=1)).isoformat())
 
     if ars:
         cache.guardar_precios(ticker, pd.DataFrame({"Close": [float(ars)]},
-                                                   index=[pd.Timestamp(hoy)]))
+                                                   index=[pd.Timestamp(fecha)]))
     else:
         # Sin broker: la última que se llegó a ver, con su fecha real.
         df = cache.leer_precios(ticker, "1900-01-01", hoy.isoformat())
