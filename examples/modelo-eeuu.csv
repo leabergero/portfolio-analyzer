@@ -1,0 +1,8 @@
+record,ticker,buy_date,buy_price,qty,commissions,sell_date,sell_price,sell_commissions,source,currency,asset_type,notes
+,AAPL,2024-07-15,234.4,30.0,10.55,,0.0,0.0,,USD,,tecnologia de consumo
+,MSFT,2024-10-15,418.74,20.0,12.56,,0.0,0.0,,USD,,software y nube
+,NVDA,2025-01-15,136.24,60.0,12.26,,0.0,0.0,,USD,,semiconductores
+,JNJ,2025-03-17,162.84,50.0,12.21,,0.0,0.0,,USD,,salud
+,JPM,2025-05-15,267.49,25.0,10.03,,0.0,0.0,,USD,,banca
+,XOM,2025-08-15,106.49,60.0,9.58,,0.0,0.0,,USD,,energia
+,VOO,2024-11-15,538.5,15.0,12.12,,0.0,0.0,,USD,,ETF del S&P 500

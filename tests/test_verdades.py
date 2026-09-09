@@ -1620,15 +1620,24 @@ def test_el_usuario_nuevo_estrena_con_la_cartera_modelo_y_si_la_borra_no_vuelve(
 
     with datos_aparte():
         store.como("usuario-nuevo")
-        assert store.sembrar(), "un usuario sin nada tiene que estrenar con la modelo"
-        assert store.nombres() == ["Modelo"]
-        assert len(store.cargar("Modelo")) > 0, "la modelo sin posiciones no sirve de ejemplo"
-        assert len(store.cargar_realizado("Modelo")) > 0, "y trae historia: cerradas y dividendos"
+        mercado = require("core", "mercado")
+        assert store.sembrar(), "un usuario sin nada tiene que estrenar con las modelo"
+        # Una por plaza: con una sola cartera argentina, Europa y EE.UU. no se
+        # pueden ni mirar.
+        assert sorted(store.nombres()) == sorted(store.MODELOS), \
+            f"tienen que sembrarse las tres, salieron {store.nombres()}"
+        plazas = {mercado.de_posiciones(store.cargar(n)) for n in store.nombres()}
+        assert plazas == {"AR", "EU", "US"}, f"una por plaza, salieron {plazas}"
+        for n in store.nombres():
+            assert len(store.cargar(n)) > 0, f"{n} sin posiciones no sirve de ejemplo"
+        assert len(store.cargar_realizado("Modelo Argentina")) > 0, \
+            "la argentina trae historia: cerradas y dividendos"
 
         assert not store.sembrar(), "no se siembra dos veces sobre el mismo usuario"
 
-        store.borrar("Modelo")
-        assert not store.sembrar(), "borrada es borrada: no vuelve en el próximo ingreso"
+        for n in list(store.nombres()):
+            store.borrar(n)
+        assert not store.sembrar(), "borradas es borradas: no vuelven en el próximo ingreso"
         assert store.nombres() == []
 
         # Y no pisa lo de nadie: quien ya tiene carteras no recibe la modelo.

@@ -29,7 +29,18 @@ import os
 from pathlib import Path
 
 _DATA = Path(__file__).resolve().parents[2] / "data"
-MODELO = Path(__file__).resolve().parents[2] / "examples" / "modelo.csv"
+_EJEMPLOS = Path(__file__).resolve().parents[2] / "examples"
+
+# Con qué estrena el que entra por primera vez: una cartera por plaza. No es
+# decoración — la app tiene tres formas de mirar una cartera (Argentina, Europa,
+# EE.UU.) y con una sola cartera argentina las otras dos no se pueden ni ver. La
+# plaza de cada una la deduce `mercado.de_posiciones` de dónde cotizan sus
+# activos, así que no hay nada que configurar.
+MODELOS = {
+    "Modelo Argentina": _EJEMPLOS / "modelo.csv",
+    "Modelo Europa": _EJEMPLOS / "modelo-europa.csv",
+    "Modelo EE.UU.": _EJEMPLOS / "modelo-eeuu.csv",
+}
 CARTERAS = _DATA / "portfolios.json"
 REALIZADO = _DATA / "realized.json"
 
@@ -178,31 +189,39 @@ def duplicar(origen: str, destino: str) -> int:
     return n
 
 
-def sembrar(nombre: str = "Modelo") -> bool:
-    """Le deja al usuario nuevo una cartera de ejemplo. Devuelve si la sembró.
+def sembrar() -> bool:
+    """Le deja al usuario nuevo una cartera modelo por plaza. Devuelve si sembró.
 
     Una app de carteras vacía no se puede recorrer: sin posiciones no hay
     riesgo, ni frontera, ni Monte Carlo que mirar, y el que entra por primera
     vez no ve qué hace la herramienta hasta después de cargar diez lotes a mano.
+    Son tres y no una porque la app mira una cartera desde tres plazas, y con
+    una sola cartera argentina las otras dos no se pueden ni ver.
 
     Se siembra **una sola vez**, y la condición es que el archivo de carteras no
-    exista todavía. Borrarla lo escribe —aunque quede vacío—, así que la cartera
-    modelo no reaparece en el próximo ingreso: si la borraste, la borraste.
+    exista todavía. Borrarlas lo escribe —aunque quede vacío—, así que las
+    carteras modelo no reaparecen en el próximo ingreso: si las borraste, las
+    borraste.
     """
-    if _carteras().exists() or not MODELO.exists():
+    if _carteras().exists():
         return False
 
     from core.io import csv_native
 
-    texto = MODELO.read_text(encoding="utf-8-sig")
-    posiciones = csv_native.read_positions(io.StringIO(texto))
-    if not posiciones:
-        return False
-    guardar(nombre, posiciones)
-    realizadas = csv_native.read_realizado(io.StringIO(texto))
-    if realizadas:
-        agregar_realizado(nombre, realizadas, "modelo")
-    return True
+    sembradas = 0
+    for nombre, ruta in MODELOS.items():
+        if not ruta.exists():
+            continue
+        texto = ruta.read_text(encoding="utf-8-sig")
+        posiciones = csv_native.read_positions(io.StringIO(texto))
+        if not posiciones:
+            continue
+        guardar(nombre, posiciones)
+        realizadas = csv_native.read_realizado(io.StringIO(texto))
+        if realizadas:
+            agregar_realizado(nombre, realizadas, "modelo")
+        sembradas += 1
+    return sembradas > 0
 
 
 def agregar(nombre: str, nuevas: list) -> dict:
