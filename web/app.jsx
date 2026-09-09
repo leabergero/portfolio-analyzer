@@ -366,7 +366,7 @@ const MODOS = [["analisis", "Análisis"], ["comparacion", "Comparación"],
 const MODOS_LOCALES = ["mercado", "conectores", "cocos"];
 
 function Barra({ modo, setModo, tema, setTema, carteras, cartera, setCartera, yo,
-                 mercado, setMercado }) {
+                 mercado }) {
   // El switch es binario y el tema tiene tres estados: "auto" se resuelve
   // mirando qué prefiere el sistema, y queda un enlace para volver a él.
   const sistemaOscuro = window.matchMedia?.("(prefers-color-scheme: dark)").matches;
@@ -381,12 +381,11 @@ function Barra({ modo, setModo, tema, setTema, carteras, cartera, setCartera, yo
                   onClick={() => setModo(k)}>{t}</button>
         ))}
       </div>
-      <select className="plaza" value={mercado} title="Desde dónde mirás la cartera"
-              onChange={(e) => setMercado(e.target.value)}>
-        {Object.entries(MERCADOS).map(([k, m]) => (
-          <option key={k} value={k}>{m.bandera} {m.nombre}</option>
-        ))}
-      </select>
+      {/* La plaza no se elige acá: es de la cartera y se fija en Carteras. Un
+          selector suelto en la barra invitaba a cambiarla como si fuera una
+          vista, cuando cambia la moneda con la que se mide todo. */}
+      <span className="plaza" title={`Se mide desde ${MERCADOS[mercado].nombre}`}>
+        {MERCADOS[mercado].bandera} {MERCADOS[mercado].nombre}</span>
       {(modo === "analisis") && (
         <select value={cartera || ""} onChange={(e) => setCartera(e.target.value)}>
           <option value="">— elegí una cartera —</option>
@@ -4266,15 +4265,30 @@ function Carteras({ carteras, recargar, cartera, setCartera }) {
   const [msg, setMsg] = useState(null);
   const [destino, setDestino] = useState("");
 
+  // "" = la plaza se deduce sola de los activos. Con valor, el usuario dijo otra
+  // cosa y eso manda: es el único dato de la cartera que sus posiciones no
+  // pueden contar.
+  const [plazaFija, setPlazaFija] = useState("");
+  const meta = carteras.find((x) => x.nombre === sel);
+  const plazaActiva = plazaFija || meta?.mercado || "AR";
+
   const abrir = async (n) => {
     setSel(n); setMsg(null);
+    const m = carteras.find((x) => x.nombre === n);
+    setPlazaFija(m?.mercado_fijado ? m.mercado : "");
     setFilas(await api(`/api/carteras/${encodeURIComponent(n)}`));
   };
   const guardar = async () => {
     const r = await api(`/api/carteras/${encodeURIComponent(sel)}`, {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ posiciones: filas }) });
-    setMsg(r.error ? { mal: r.error } : { ok: `Guardadas ${r.guardadas} posiciones.` });
+    if (r.error) { setMsg({ mal: r.error }); recargar(); return; }
+    const p = await api(`/api/carteras/${encodeURIComponent(sel)}/mercado`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mercado: plazaFija || null }) });
+    setMsg({ ok: `Guardadas ${r.guardadas} posiciones · se mide desde `
+                 + `${MERCADOS[p.mercado || plazaActiva].nombre}`
+                 + `${p.mercado_fijado ? "" : " (deducido de los activos)"}.` });
     recargar();
   };
   const subir = async (archivo, ruta) => {
@@ -4359,6 +4373,27 @@ function Carteras({ carteras, recargar, cartera, setCartera }) {
       {sel && (
         <div className="panel">
           <h3>{sel}</h3>
+          {/* Desde dónde se mira esta cartera. Normalmente lo dicen los activos
+              —.BA es Argentina, ASML.AS es Europa— y no hay nada que elegir; el
+              chip está para lo que ninguna posición puede decir: un europeo con
+              acciones de EE.UU. las mide igual en euros. */}
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center",
+                        margin: "10px 0 2px" }}>
+            <span className="pie" style={{ margin: 0 }}>Se mide desde</span>
+            {Object.entries(MERCADOS).map(([k, m]) => (
+              <button key={k} className={"chip-plaza" + (plazaActiva === k ? " on" : "")}
+                      onClick={() => setPlazaFija(k)}>{m.bandera} {m.nombre}</button>
+            ))}
+            {plazaFija && (
+              <button className="btn" onClick={() => setPlazaFija("")}
+                      title="Volver a deducirla de los activos">automática</button>)}
+          </div>
+          <div className="pie" style={{ marginBottom: 12 }}>
+            {plazaFija ? "Elegida a mano: se guarda con la cartera."
+                       : "Deducida de dónde cotizan los activos."}
+            {" "}Manda la moneda de todos los números, la tasa libre de riesgo y el
+            índice con el que abre.
+          </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "8px 0 12px" }}>
             <button className="btn primario" onClick={guardar}>Guardar</button>
             <button className="btn" onClick={() => setFilas((f) => [...f, {
@@ -5273,20 +5308,13 @@ function App() {
     if (!MERCADOS[m].locales) setModo((x) => (MODOS_LOCALES.includes(x) ? "analisis" : x));
   }, []);
 
-  // La plaza la trae la cartera: una de ASML y SAP abre en Europa, una de .BA en
-  // Argentina — el servidor lo deduce de dónde cotizan sus activos, sin que haya
-  // que etiquetar nada. Vale hasta que el usuario toque el selector, y vuelve a
-  // mandar en cuanto cambia de cartera. Mismo trato que el índice del CAPM: lo
-  // que se elige a mano no se mueve solo.
-  const plazaElegida = useRef(false);
-  const cambiarMercado = useCallback((m) => {
-    plazaElegida.current = true;
-    aplicarMercado(m);
-  }, [aplicarMercado]);
-  useEffect(() => { plazaElegida.current = false; }, [cartera]);
+  // La plaza la trae la cartera: una de ASML y SAP se mira desde Europa, una de
+  // .BA desde Argentina. El servidor la deduce de dónde cotizan los activos, y
+  // en Carteras se puede fijar otra para el caso que ninguna posición puede
+  // contar: un europeo con acciones de EE.UU. las mide igual en euros.
   useEffect(() => {
     const m = carteras.find((c) => c.nombre === cartera)?.mercado;
-    if (m && !plazaElegida.current) aplicarMercado(m);
+    if (m) aplicarMercado(m);
   }, [cartera, carteras, aplicarMercado]);
   const cambiarSim = useCallback((l) => {
     simul.poner(cartera, l);
@@ -5334,7 +5362,7 @@ function App() {
     <>
       <Barra modo={modo} setModo={setModo} tema={tema} setTema={setTema}
              carteras={carteras} cartera={cartera} setCartera={setCartera} yo={yo}
-             mercado={mercado} setMercado={cambiarMercado} />
+             mercado={mercado} />
       <div className="hoja">
         {/* Cambiar de plaza cambia la moneda de medición: lo que hay en pantalla
             está calculado en la anterior y hay que volver a pedirlo entero. */}

@@ -5,10 +5,18 @@ JSON plano en `data/`, gitignored. Es el único dato de la aplicación que **no*
 es regenerable: la caché de precios y la serie MEP se vuelven a bajar, pero si
 se pierden las carteras se pierde el trabajo del usuario.
 
-Dos archivos, porque son dos cosas distintas:
+Tres archivos, porque son tres cosas distintas:
 
     portfolios.json   posiciones abiertas — lo que tenés hoy
     realized.json     operaciones cerradas — lo que ya ganaste o perdiste
+    plazas.json       desde qué mercado se mira cada cartera, cuando se eligió
+
+`plazas.json` guarda **sólo las excepciones**: la plaza normalmente se deduce de
+dónde cotizan los activos (`mercado.de_posiciones`) y no hace falta anotar nada.
+Se escribe cuando el usuario dice otra cosa —un europeo con acciones de EE.UU.
+que quiere medir en euros—, que es lo que ninguna posición puede decir. Va en un
+archivo aparte para no tocar el formato de las carteras, que es el que entra y
+sale por CSV.
 
 Borrar una cartera NO borra su P&L realizado. Es historia: que hayas cerrado
 todas las posiciones no significa que esas ganancias no hayan existido.
@@ -58,6 +66,31 @@ def _carteras() -> Path:
 
 def _realizado() -> Path:
     return REALIZADO if _usuario.get() is None else _dir() / "realized.json"
+
+
+def _plazas() -> Path:
+    return _dir() / "plazas.json"
+
+
+def plaza(nombre: str):
+    """La plaza que el usuario fijó para esa cartera, o None si no fijó ninguna."""
+    return _leer(_plazas()).get(nombre) or None
+
+
+def plazas() -> dict:
+    return _leer(_plazas())
+
+
+def fijar_plaza(nombre: str, clave) -> None:
+    """Fija la plaza de una cartera. Sin clave, vuelve a deducirse sola."""
+    datos = _leer(_plazas())
+    if clave:
+        datos[nombre] = clave
+    elif nombre not in datos:
+        return                      # nada que borrar: no se escribe por las dudas
+    else:
+        del datos[nombre]
+    _escribir(_plazas(), datos)
 
 _CAMPOS = ("ticker", "buy_date", "buy_price", "qty",
            "commissions", "source", "currency", "asset_type", "notes")
@@ -135,11 +168,14 @@ def borrar(nombre: str) -> bool:
         return False
     del datos[nombre]
     _escribir(_carteras(), datos)
+    fijar_plaza(nombre, None)
     return True
 
 
 def duplicar(origen: str, destino: str) -> int:
-    return guardar(destino, cargar(origen))
+    n = guardar(destino, cargar(origen))
+    fijar_plaza(destino, plaza(origen))
+    return n
 
 
 def sembrar(nombre: str = "Modelo") -> bool:

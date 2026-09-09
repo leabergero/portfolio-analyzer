@@ -13,10 +13,18 @@ bp = Blueprint("carteras", __name__, url_prefix="/api/carteras")
 
 @bp.get("")
 def listar():
-    """Cada cartera con su plaza: la pantalla la aplica sola al abrirla."""
+    """Cada cartera con su plaza: la pantalla la aplica sola al abrirla.
+
+    Deducida de dónde cotizan los activos, salvo que el usuario haya elegido
+    otra — `fijado` dice cuál de las dos es, para que la pantalla pueda ofrecer
+    volver a la automática.
+    """
     todas = store.cargar_todas()
+    fijadas = store.plazas()
     return jsonify([{"nombre": n, "posiciones": len(p),
-                     "mercado": mercado.de_posiciones(p)} for n, p in todas.items()])
+                     "mercado": fijadas.get(n) or mercado.de_posiciones(p),
+                     "mercado_fijado": bool(fijadas.get(n))}
+                    for n, p in todas.items()])
 
 
 @bp.get("/<nombre>")
@@ -28,6 +36,21 @@ def leer(nombre):
 def guardar(nombre):
     posiciones = (request.json or {}).get("posiciones", [])
     return jsonify({"ok": True, "guardadas": store.guardar(nombre, posiciones)})
+
+
+@bp.post("/<nombre>/mercado")
+def fijar_mercado(nombre):
+    """Ata la cartera a una plaza. Sin `mercado`, vuelve a deducirse sola.
+
+    Lo que ninguna posición puede decir: un europeo con acciones de EE.UU. las
+    mide en euros, y su cartera de AAPL y MSFT parece de Nueva York.
+    """
+    clave = (request.json or {}).get("mercado") or None
+    if clave and clave not in mercado.PLAZAS:
+        return jsonify({"error": f"No existe la plaza {clave}."}), 400
+    store.fijar_plaza(nombre, clave)
+    return jsonify({"ok": True, "mercado": clave or mercado.de_posiciones(store.cargar(nombre)),
+                    "mercado_fijado": bool(clave)})
 
 
 @bp.delete("/<nombre>")

@@ -1922,6 +1922,40 @@ def test_la_plaza_de_una_cartera_sale_de_donde_cotiza():
     assert mercado.de_posiciones([]) == "AR", "una cartera vacía abre donde nació la app"
 
 
+def test_la_plaza_elegida_a_mano_le_gana_a_la_deducida():
+    """Un europeo con acciones de EE.UU. las mide igual en euros.
+
+    Es lo único que las posiciones no pueden contar: una cartera de AAPL y MSFT
+    se deduce como estadounidense y para su dueño en Madrid es europea. Lo
+    elegido manda, se guarda aparte de las carteras —el formato del CSV no se
+    toca— y se borra con la cartera; volver a "automática" no deja rastro.
+    """
+    mercado = require("core", "mercado")
+    store = require("core.io", "store")
+    yanqui = [{"ticker": "AAPL", "qty": 1, "buy_price": 100, "buy_date": "2025-01-02"},
+              {"ticker": "MSFT", "qty": 1, "buy_price": 100, "buy_date": "2025-01-02"}]
+
+    with datos_aparte():
+        store.como("test-plazas")
+        store.guardar("mia", yanqui)
+        assert mercado.de_posiciones(store.cargar("mia")) == "US"
+        assert store.plaza("mia") is None, "sin elegir nada, no hay nada guardado"
+
+        store.fijar_plaza("mia", "EU")
+        assert store.plaza("mia") == "EU", "lo elegido a mano manda"
+
+        store.fijar_plaza("mia", None)
+        assert store.plaza("mia") is None, "volver a automática no deja rastro"
+
+        store.fijar_plaza("mia", "EU")
+        store.duplicar("mia", "copia")
+        assert store.plaza("copia") == "EU", "la copia se mira desde donde la original"
+
+        store.borrar("mia")
+        assert store.plaza("mia") is None, "la plaza se va con la cartera"
+        assert store.plaza("copia") == "EU", "y sólo la de esa cartera"
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

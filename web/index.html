@@ -110,6 +110,14 @@ body{margin:0;background:var(--fondo);color:var(--texto);
       font-weight:500;padding:6px 14px;border-radius:6px;cursor:pointer}
 .modo.on{background:var(--panel);color:var(--texto);box-shadow:var(--sombra)}
 .barra .der{margin-left:auto;display:flex;align-items:center;gap:10px}
+/* La plaza desde la que se mide: se muestra, no se elige — se fija en Carteras. */
+.plaza{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--texto-2);
+       border:1px solid var(--borde);border-radius:7px;padding:5px 10px;white-space:nowrap}
+.chip-plaza{display:inline-flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;
+            background:var(--panel);color:var(--texto-2);border:1px solid var(--borde);
+            border-radius:100px;padding:5px 12px}
+.chip-plaza:hover{border-color:var(--acento)}
+.chip-plaza.on{background:var(--acento);color:var(--fondo);border-color:var(--acento);font-weight:600}
 
 select,input,button{font:inherit}
 select,input[type=text],input[type=number],input[type=email],input[type=password]{background:var(--panel);color:var(--texto);
