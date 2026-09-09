@@ -200,15 +200,27 @@ def _cierre_futuro(simbolo: str):
     Cierre y no `regularMarketPrice` por lo mismo que en el resto del modelo: un
     precio en vivo hace que dos máquinas den números distintos para la misma
     cartera, y el vencimiento lejano de una curva se mueve poco de todos modos.
+
+    **Y la vela del día en curso no es un cierre.** Los futuros operan casi 24 h,
+    así que `history()` siempre trae la barra de hoy con el último precio
+    negociado adentro: dos máquinas que la leyeron con diez minutos de diferencia
+    daban 4.459,40 y 4.456,10. Se descarta contra la fecha UTC, que es la misma
+    en las dos máquinas aunque una corra en Buenos Aires y la otra no.
+
     Los contratos de vencimiento lejano a veces no operan en semanas: para esos
     el precio en vivo es lo único que hay.
     """
+    from datetime import datetime, timezone
+
     try:
         import yfinance as yf
         t = yf.Ticker(simbolo)
         s = t.history(period="1mo")["Close"].dropna()
         if len(s):
-            return float(s.iloc[-1])
+            hoy = datetime.now(timezone.utc).date()
+            cerradas = s[[d.date() < hoy for d in s.index]]
+            if len(cerradas):
+                return float(cerradas.iloc[-1])
         i = t.info or {}
         return i.get("regularMarketPrice") or i.get("previousClose")
     except Exception:
