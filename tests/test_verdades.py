@@ -2105,6 +2105,43 @@ def test_variacion_del_dia_solo_compara_lo_comparable():
     assert d["pnl_dia_pct"] == 10.0        # 110 contra 100, no contra 310
 
 
+def test_variacion_del_dia_sobrevive_al_cierre_del_mercado():
+    """Con el mercado cerrado el KPI sigue mostrando la última rueda operada.
+
+    Bug: yfinance con el mercado cerrado devuelve el último precio negociado,
+    que es el último cierre de la serie. Se lo tomaba por el precio "de hoy" y
+    se lo restaba contra ese mismo cierre: un finde, un feriado o la madrugada
+    del día siguiente mostraban 0,00 en vez del movimiento del viernes.
+    """
+    import pandas as pd
+
+    portfolio = require("core.models", "portfolio")
+    sources = require("core.data", "sources")
+
+    cierres = pd.Series([10.0, 11.0],
+                        index=[pd.Timestamp("2026-09-10"), pd.Timestamp("2026-09-11")])
+    o_base, o_spot, o_nueva = (sources.precios_base, sources.spot_base,
+                               sources.spot_rueda_nueva)
+    sources.precios_base = lambda t, **k: cierres
+    sources.spot_base = lambda t, s=None: 11.0      # el viernes, otra vez
+    sources.spot_rueda_nueva = lambda t, s=None, h=None: False
+    try:
+        previos, fechas = {}, {}
+        pr = portfolio.precios_actuales(
+            [{"ticker": "AAA", "qty": 1, "buy_price": 5, "currency": "USD",
+              "buy_date": "2024-01-02"}],
+            previos=previos, fechas=fechas, vivo=True)
+    finally:
+        (sources.precios_base, sources.spot_base,
+         sources.spot_rueda_nueva) = o_base, o_spot, o_nueva
+
+    assert casi(pr["AAA"], 11.0), f"el precio es el último cierre, salió {pr['AAA']}"
+    assert casi(previos["AAA"], 10.0), \
+        f"el previo es el cierre ANTERIOR al último, no el mismo: salió {previos['AAA']}"
+    assert fechas["_ultima"] == "2026-09-11", \
+        f"la rueda mostrada es la última operada, no hoy: salió {fechas['_ultima']}"
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

@@ -410,6 +410,33 @@ def a_moneda_de_medicion(s: pd.Series, ticker: str, source: str = None) -> pd.Se
 TTL_SPOT_H = 2.0
 
 
+def spot_rueda_nueva(ticker: str, source: str = None, hasta: str = None) -> bool:
+    """¿El spot trae una rueda que la serie de cierres todavía no tiene?
+
+    Con el mercado cerrado —un finde, un feriado, la madrugada— yfinance sigue
+    devolviendo el último precio negociado, que es exactamente el último cierre
+    de la serie. Tomarlo por el precio "de hoy" hace restar un cierre contra sí
+    mismo, y la variación del día sale 0,00.
+
+    La comparación va en la moneda del mercado, antes de convertir: el mismo
+    precio pasado por el MEP de dos días distintos da dos números distintos, y
+    un cierre repetido pasaría por rueda nueva.
+
+    Las dos consultas salen de caché —el spot por su TTL, los cierres por la
+    caché de precios—, así que esto no agrega tráfico.
+    """
+    if source == SOURCE_FCI:
+        return False
+    spot = _spot_yfinance(ticker, TTL_SPOT_H)
+    df = precios(ticker, hasta=hasta, source=source)
+    if spot.empty or df.empty or "Close" not in df.columns:
+        return False
+    cierres = df["Close"].dropna()
+    if not len(cierres):
+        return False
+    return abs(float(spot["Close"].iloc[-1]) - float(cierres.iloc[-1])) > 1e-9
+
+
 def spot_base(ticker: str, source: str = None) -> float | None:
     """Último precio negociado, en la moneda de medición.
 

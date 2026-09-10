@@ -11,7 +11,7 @@ convertida al dólar de hoy contra su valor de hoy mide el movimiento del tipo d
 cambio, no el rendimiento del activo.
 """
 
-from datetime import date
+from datetime import date, datetime
 
 import numpy as np
 import pandas as pd
@@ -68,13 +68,17 @@ def precios_actuales(posiciones, hasta=None, previos=None, fechas=None,
                      vivo=False) -> dict:
     """{ticker: precio en la moneda de medición}. Un pedido por ticker.
 
-    Con `vivo`, el precio es el último negociado y no el último cierre, y en
-    `previos` queda el cierre anterior a hoy: es lo que hace falta para decir
-    cuánto se movió la cartera en la rueda en curso. La serie de cierres no se
-    toca —los modelos siguen midiendo sobre ella— y por eso el precio en vivo
-    se pide aparte en vez de meterlo en la caché.
+    Con `vivo`, el precio de arriba es el último negociado y en `previos` queda
+    el de la rueda anterior: es lo que hace falta para decir cuánto se movió la
+    cartera. Con el mercado abierto eso es la rueda en curso; con el mercado
+    cerrado, la última rueda operada, que es la que hay que seguir mostrando.
+    La serie de cierres no se toca —los modelos siguen midiendo sobre ella— y
+    por eso el precio en vivo se pide aparte en vez de meterlo en la caché.
     """
-    hoy = date.today()
+    # En la zona del mercado, no en la del server: `date.today()` en un server
+    # UTC ya es mañana durante la noche argentina, y entonces el spot pasaba por
+    # una rueda nueva que no existe (mismo motivo que en `_ultima_rueda`).
+    hoy = datetime.now(sources.TZ_BYMA).date()
     salida = {}
     for t in sorted({str(p["ticker"]).upper() for p in posiciones}):
         origen = next((p.get("source") for p in posiciones
@@ -86,20 +90,33 @@ def precios_actuales(posiciones, hasta=None, previos=None, fechas=None,
         if not vivo or previos is None:
             continue
 
-        # El cierre de referencia es el último ANTERIOR a hoy. Tomar `iloc[-1]`
-        # a secas compararía contra una vela de hoy si alguien ya la trajo, y
-        # entonces el KPI mediría un rato de rueda en vez del día.
-        cerrados = s[s.index.date < hoy] if len(s) else s
+        # Los dos últimos puntos de precio, y la variación es la resta. El de
+        # arriba es el spot cuando trae una rueda que la serie todavía no tiene
+        # —la de hoy, o la de hoy a medio cerrar—; si no, es el último cierre.
+        #
+        # Un spot IGUAL al último cierre no es una rueda nueva: es ese mismo
+        # cierre, que es lo que devuelve yfinance con el mercado cerrado —un
+        # finde, un feriado, la madrugada—. Agregarlo como punto de hoy hacía
+        # que el KPI restara un cierre contra sí mismo y mostrara 0,00 en vez
+        # del movimiento de la última rueda operada.
+        puntos = [(f.date(), float(v)) for f, v in s.items()]
         ahora = sources.spot_base(t, origen)
-        if ahora and len(cerrados):
-            salida[t] = ahora
-            previos[t] = float(cerrados.iloc[-1])
-            if fechas is not None:
-                fechas[t] = str(cerrados.index[-1].date())
+        if ahora and puntos[-1][0] == hoy:
+            puntos[-1] = (hoy, ahora)          # rueda en curso: vale más que su vela
+        elif ahora and sources.spot_rueda_nueva(t, origen, hasta):
+            puntos.append((hoy, ahora))
+        if len(puntos) < 2:
+            continue
+        salida[t] = puntos[-1][1]
+        previos[t] = puntos[-2][1]
+        if fechas is not None:
+            fechas[t] = (str(puntos[-2][0]), str(puntos[-1][0]))
 
-    if vivo and fechas is not None and fechas:
-        fechas["_previa"] = max(v for k, v in fechas.items() if not k.startswith("_"))
-        fechas["_ultima"] = hoy.isoformat()
+    if vivo and fechas is not None:
+        pares = [v for k, v in fechas.items() if not k.startswith("_")]
+        if pares:
+            fechas["_previa"] = max(previa for previa, _ in pares)
+            fechas["_ultima"] = max(ultima for _, ultima in pares)
     return salida
 
 
