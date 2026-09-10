@@ -11,6 +11,8 @@ convertida al dólar de hoy contra su valor de hoy mide el movimiento del tipo d
 cambio, no el rendimiento del activo.
 """
 
+from datetime import date
+
 import numpy as np
 import pandas as pd
 
@@ -62,29 +64,64 @@ def concentracion(pesos) -> dict:
 
 # ── Valuación ─────────────────────────────────────────────────────────────────
 
-def precios_actuales(posiciones, hasta=None) -> dict:
-    """{ticker: último precio en USD}. Un pedido por ticker, no por lote."""
+def precios_actuales(posiciones, hasta=None, previos=None, fechas=None,
+                     vivo=False) -> dict:
+    """{ticker: precio en la moneda de medición}. Un pedido por ticker.
+
+    Con `vivo`, el precio es el último negociado y no el último cierre, y en
+    `previos` queda el cierre anterior a hoy: es lo que hace falta para decir
+    cuánto se movió la cartera en la rueda en curso. La serie de cierres no se
+    toca —los modelos siguen midiendo sobre ella— y por eso el precio en vivo
+    se pide aparte en vez de meterlo en la caché.
+    """
+    hoy = date.today()
     salida = {}
     for t in sorted({str(p["ticker"]).upper() for p in posiciones}):
         origen = next((p.get("source") for p in posiciones
                        if str(p["ticker"]).upper() == t and p.get("source")), None)
         s = sources.precios_base(t, hasta=hasta, source=origen)
-        if not s.empty:
-            salida[t] = float(s.iloc[-1])
+        if s.empty:
+            continue
+        salida[t] = float(s.iloc[-1])
+        if not vivo or previos is None:
+            continue
+
+        # El cierre de referencia es el último ANTERIOR a hoy. Tomar `iloc[-1]`
+        # a secas compararía contra una vela de hoy si alguien ya la trajo, y
+        # entonces el KPI mediría un rato de rueda en vez del día.
+        cerrados = s[s.index.date < hoy] if len(s) else s
+        ahora = sources.spot_base(t, origen)
+        if ahora and len(cerrados):
+            salida[t] = ahora
+            previos[t] = float(cerrados.iloc[-1])
+            if fechas is not None:
+                fechas[t] = str(cerrados.index[-1].date())
+
+    if vivo and fechas is not None and fechas:
+        fechas["_previa"] = max(v for k, v in fechas.items() if not k.startswith("_"))
+        fechas["_ultima"] = hoy.isoformat()
     return salida
 
 
-def valuar(posiciones, precios=None) -> dict:
+def valuar(posiciones, precios=None, previos=None, fechas=None, vivo=False) -> dict:
     """Valúa la cartera lote por lote, en dólares.
 
     El costo de cada lote se convierte con el MEP de **su** fecha de compra;
     el valor actual, con el precio de hoy. Un lote sin precio disponible no se
     inventa: sale marcado y queda fuera de los totales.
     """
-    precios = precios if precios is not None else precios_actuales(posiciones)
+    if precios is None:
+        previos = {} if previos is None else previos
+        fechas = {} if fechas is None else fechas
+        precios = precios_actuales(posiciones, previos=previos, fechas=fechas, vivo=vivo)
+    previos = previos or {}
     serie_mep = mep_mod.serie()
 
     filas, total_valor, total_costo = [], 0.0, 0.0
+    # La variación del día se mide sólo sobre los lotes que tienen los DOS
+    # precios. Sumar al total de ayer los que no tienen cierre anterior daría
+    # una diferencia que es la tenencia entera, no lo que se movió.
+    hoy_comp, ayer_comp = 0.0, 0.0
     for p in posiciones:
         t = str(p["ticker"]).upper()
         qty = float(p.get("qty", 0))
@@ -145,6 +182,12 @@ def valuar(posiciones, precios=None) -> dict:
             # tenencia real.
             "sim": bool(p.get("sim")),
         }
+        previo = previos.get(t)
+        if valor is not None and previo and not estimado:
+            fila["precio_previo_usd"] = round(previo, 4)
+            hoy_comp += valor
+            ayer_comp += qty * previo
+
         if valor is not None and costo is not None:
             fila["pnl_usd"] = round(valor - costo, 2)
             fila["pnl_pct"] = round((valor / costo - 1) * 100, 2) if costo else None
@@ -162,6 +205,13 @@ def valuar(posiciones, precios=None) -> dict:
         "moneda": mercado.moneda(),
         "mep_hoy": round(float(serie_mep.iloc[-1]), 2) if not serie_mep.empty else None,
         "sin_precio": sorted(set(sin_precio)),
+        # Cuánto se movió la cartera en la última rueda. En pesos esto lleva
+        # adentro el MEP del día: la tenencia se mide en dólares, así que un
+        # papel quieto con el dólar en alza baja igual.
+        "pnl_dia": round(hoy_comp - ayer_comp, 2) if ayer_comp else None,
+        "pnl_dia_pct": round((hoy_comp / ayer_comp - 1) * 100, 2) if ayer_comp else None,
+        "dia_fecha": (fechas or {}).get("_ultima"),
+        "dia_previa": (fechas or {}).get("_previa"),
     }
 
 

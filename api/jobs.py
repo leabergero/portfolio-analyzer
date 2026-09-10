@@ -29,7 +29,9 @@ from core.models import (blacklitterman, capm, composicion, markowitz,
 # usa —los modelos trabajan sobre las posiciones y nada más— pero la evolución
 # necesita además lo que ya cerraste, que vive en el store bajo ese nombre.
 MODELOS = {
-    "posicion":     ("Posición",        lambda p, c: portfolio.valuar(p)),
+    # El único que pide precio en vivo: es la foto de la tenencia y la variación
+    # del día. Todo lo demás mide sobre cierres, y así sigue.
+    "posicion":     ("Posición",        lambda p, c: portfolio.valuar(p, vivo=True)),
     "composicion":  ("Composición",     lambda p, c: composicion.analizar(p)),
     "riesgo":       ("Riesgo",          lambda p, c: risk.analizar(p)),
     "stress":       ("Stress test",     lambda p, c: risk.stress_test(p)),

@@ -206,9 +206,21 @@ def _spot_yfinance(ticker: str, ttl_horas: float = 1.0) -> pd.DataFrame:
     if precio == "__falta__":
         try:
             from core.data import yahoo
-            i = yahoo.ticker(ticker).info or {}
-            precio = (i.get("currentPrice") or i.get("regularMarketPrice")
-                      or i.get("previousClose"))
+            tk = yahoo.ticker(ticker)
+            # `fast_info` sale por otro endpoint y tarda una décima; `.info`
+            # baja cientos de campos y es la llamada que hacía tardar 6 s una
+            # cartera de diez papeles. Queda de reserva porque hay tickers que
+            # sólo contestan ahí.
+            precio = None
+            try:
+                fi = tk.fast_info
+                precio = fi.get("lastPrice") or fi.get("last_price")
+            except Exception:
+                precio = None
+            if not precio:
+                i = tk.info or {}
+                precio = (i.get("currentPrice") or i.get("regularMarketPrice")
+                          or i.get("previousClose"))
         except Exception:
             precio = None
         cache.guardar_respuesta(clave, precio)
@@ -367,11 +379,19 @@ def precios_base(ticker: str, desde: str = None, hasta: str = None,
     df = precios(ticker, desde, hasta, source=source)
     if df.empty or "Close" not in df.columns:
         return pd.Series(dtype=float)
+    return a_moneda_de_medicion(df["Close"].dropna(), ticker, source)
 
-    s = df["Close"].dropna()
+
+def a_moneda_de_medicion(s: pd.Series, ticker: str, source: str = None) -> pd.Series:
+    """Las cuatro reglas de conversión, en un solo lugar.
+
+    La usan la serie de cierres y el precio en vivo: son las mismas reglas y
+    tenerlas dos veces es la forma más segura de que una se olvide de los bonos.
+    """
+    from core.data import mep as mep_mod
+
     if is_bond(ticker, source):
         s = s / 100.0
-
     cotiza = ticker_currency(ticker)
     if cotiza == mercado.moneda():
         return s          # ya cotiza en la moneda de medición: nada que convertir
@@ -380,3 +400,25 @@ def precios_base(ticker: str, desde: str = None, hasta: str = None,
     else:
         s = mercado.a_usd(s, cotiza)
     return mercado.desde_usd(s)
+
+
+# Cuánto vale un precio en vivo antes de volver a preguntarlo. Cinco minutos:
+# es para mirar cuánto se movió la cartera hoy, no para operar.
+TTL_SPOT_H = 5 / 60
+
+
+def spot_base(ticker: str, source: str = None) -> float | None:
+    """Último precio negociado, en la moneda de medición.
+
+    Sólo para mostrar: la variación del día y la valuación de la tenencia. NO
+    entra a la serie de cierres —de eso se encarga `_spot_yfinance`, que no la
+    toca— porque un precio intradiario metido entre cierres ensucia los retornos
+    y hace que dos máquinas den números distintos.
+    """
+    if source == SOURCE_FCI:
+        return None
+    df = _spot_yfinance(ticker, TTL_SPOT_H)
+    if df.empty:
+        return None
+    s = a_moneda_de_medicion(df["Close"], ticker, source)
+    return float(s.iloc[-1]) if len(s) else None

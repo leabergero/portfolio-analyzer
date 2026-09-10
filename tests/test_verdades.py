@@ -2080,6 +2080,31 @@ def test_el_precio_de_objetivos_es_el_mismo_que_valua_la_cartera():
         "el upside es invariante al cambio de escala"
 
 
+
+
+def test_variacion_del_dia_solo_compara_lo_comparable():
+    """La variación del día se mide contra el cierre anterior, y sólo sobre los
+    lotes que tienen los dos precios.
+
+    Un lote sin cierre previo —un FCI, un papel que empezó a cotizar ayer— no
+    puede entrar al total de ayer: si entrara, la 'variación' incluiría su
+    tenencia entera y diría que la cartera se movió miles de dólares.
+    """
+    from core.models import portfolio
+
+    posiciones = [
+        {"ticker": "AAA", "qty": 10, "buy_price": 5, "currency": "USD", "buy_date": "2024-01-02"},
+        {"ticker": "BBB", "qty": 4, "buy_price": 20, "currency": "USD", "buy_date": "2024-01-02"},
+    ]
+    # AAA subió de 10 a 11; BBB no tiene cierre anterior y queda afuera.
+    d = portfolio.valuar(posiciones,
+                         precios={"AAA": 11.0, "BBB": 50.0},
+                         previos={"AAA": 10.0})
+
+    assert d["pnl_dia"] == 10.0            # 10 unidades × 1 dólar, sólo AAA
+    assert d["pnl_dia_pct"] == 10.0        # 110 contra 100, no contra 310
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]
