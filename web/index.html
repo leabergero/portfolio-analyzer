@@ -547,6 +547,140 @@ footer a:hover{text-decoration:underline}
                  50%{border-radius:12% 50% 12% 50%;transform:rotate(180deg)}}
 
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+/* ── Bienvenida (sin sesión) ───────────────────────────────────────────────
+   Es la única pantalla que no sigue el tema: se pinta siempre oscura, con
+   valores literales en vez de los tokens de arriba. Alguien con el tema claro
+   igual la ve como fue diseñada.
+
+   El carrusel es scroll-snap nativo: el navegador hace el arrastre, la inercia,
+   el táctil y las flechas del teclado. El JS del componente sólo agrega en qué
+   slide estamos, el autoplay y su barra. */
+.bv {
+  --bv-acento: #4FC3A8;
+  --bv-acento2: #6FD9BE;
+  --bv-borde: rgba(255,255,255,.10);
+  --bv-slide: min(880px, 88vw);
+  --bv-alto: clamp(300px, 54vh, 560px);
+  position: relative;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  padding: 34px 0 26px;
+  background: #16212A;
+  color: #E6EDF2;
+  overflow-x: hidden;
+}
+.bv > header, .bv > .bv-carrusel, .bv > footer { position: relative; z-index: 1 }
+
+/* Dos manchas difuminadas que derivan muy despacio, en ciclos de distinta
+   duración para que no se las vea volver juntas al mismo lugar. Sólo transform
+   y opacity: no repintan nada. */
+.bv-luz { position: absolute; z-index: 0; border-radius: 50%; filter: blur(90px);
+          pointer-events: none; will-change: transform, opacity }
+.bv-luz.a { width: 52vw; height: 52vw; left: -10vw; top: -18vw; background: #1B4C5E;
+            opacity: .55; animation: bv-deriva-a 34s ease-in-out infinite alternate }
+.bv-luz.b { width: 44vw; height: 44vw; right: -12vw; top: -8vw; background: #12503E;
+            opacity: .5; animation: bv-deriva-b 47s ease-in-out infinite alternate }
+@keyframes bv-deriva-a { to { transform: translate3d(10vw,9vh,0) scale(1.18); opacity: .38 } }
+@keyframes bv-deriva-b { to { transform: translate3d(-12vw,13vh,0) scale(1.12); opacity: .62 } }
+
+/* El pie de la app trae borde y márgenes propios; acá no van. */
+.bv > header, .bv > footer { text-align: center; margin: 0; padding: 0 22px;
+                             border: 0; max-width: none; display: block }
+.bv h1 { margin: 0; font-size: clamp(26px, 4vw, 38px); letter-spacing: -.02em; font-weight: 700 }
+.bv h1 span { color: var(--bv-acento) }
+.bv header p { margin: 8px 0 0; color: #A6B4BF }
+
+.bv-entrar {
+  display: inline-flex; align-items: center; gap: 11px;
+  padding: 11px 28px 11px 13px; border-radius: 999px;
+  font-weight: 600; font-size: 15px; color: #071018; text-decoration: none;
+  background: linear-gradient(120deg, var(--bv-acento), var(--bv-acento2));
+  box-shadow: 0 10px 30px -10px rgba(79,195,168,.75);
+  transition: transform .18s, box-shadow .18s;
+}
+.bv-entrar:hover { transform: translateY(-2px); box-shadow: 0 16px 36px -12px rgba(79,195,168,.95) }
+.bv-entrar:active { transform: translateY(0) }
+/* El logo de Google va sobre blanco: su marca no se apoya sobre un color. */
+.bv-g { width: 26px; height: 26px; display: grid; place-items: center;
+        background: #fff; border-radius: 50%; flex: none }
+
+.bv-carrusel { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 16px }
+/* El padding lateral es el que deja asomar el slide vecino; sin él, el snap
+   centrado no tiene de dónde centrar. */
+.bv-pista {
+  display: flex; gap: 26px; overflow-x: auto; overscroll-behavior-x: contain;
+  scroll-snap-type: x mandatory; scroll-behavior: smooth;
+  padding: 4px calc((100vw - var(--bv-slide)) / 2); scrollbar-width: none;
+}
+.bv-pista::-webkit-scrollbar { display: none }
+.bv-pista:focus-visible { outline: 2px solid var(--bv-acento2); outline-offset: -4px; border-radius: 22px }
+.bv-slide { flex: 0 0 var(--bv-slide); scroll-snap-align: center }
+
+.bv-card {
+  position: relative; height: var(--bv-alto); border-radius: 20px; overflow: hidden;
+  border: 1px solid var(--bv-borde);
+  background: linear-gradient(135deg, #101820, #0D2A26);
+  display: flex; flex-direction: column; justify-content: flex-end;
+  box-shadow: 0 18px 50px -22px rgba(0,0,0,.9);
+  transition: transform .4s, border-color .4s, box-shadow .4s;
+}
+/* El glow sólo en la que se está mirando: si brillan todas, no destaca ninguna. */
+.bv-slide.on .bv-card { box-shadow: 0 0 0 1px rgba(79,195,168,.28),
+                                    0 0 70px -14px rgba(79,195,168,.45),
+                                    0 24px 60px -26px rgba(0,0,0,.95) }
+.bv-slide:not(.on) .bv-card { transform: scale(.94); border-color: transparent; cursor: pointer }
+.bv-slide:not(.on) .bv-card:hover { transform: scale(.97); border-color: var(--bv-borde);
+    box-shadow: 0 0 50px -18px rgba(79,195,168,.35), 0 18px 50px -22px rgba(0,0,0,.9) }
+
+/* La captura ocupa la tarjeta entera; el degradado de abajo es lo que hace
+   legible el texto encima sin recortar la imagen. */
+.bv-card img { position: absolute; inset: 0; width: 100%; height: 100%;
+               object-fit: cover; object-position: top center; opacity: .68 }
+.bv-card::after { content: ""; position: absolute; inset: 0;
+  background: linear-gradient(to top, rgba(5,8,16,.96) 12%, rgba(5,8,16,.55) 48%, transparent 78%) }
+
+.bv-texto { position: relative; z-index: 1; padding: 26px 30px 30px }
+.bv-kicker { margin: 0 0 6px; font-size: 12px; letter-spacing: .14em;
+             text-transform: uppercase; color: var(--bv-acento) }
+.bv-titulo { margin: 0; font-size: clamp(21px, 2.6vw, 29px); letter-spacing: -.015em; font-weight: 700 }
+.bv-bajada { margin: 10px 0 0; max-width: 58ch; color: #C5CFDD }
+
+/* Entrada escalonada, sólo en el slide visible. */
+.bv-kicker, .bv-titulo, .bv-bajada { opacity: 0; transform: translateY(14px);
+                                     transition: opacity .5s, transform .5s }
+.on .bv-kicker { opacity: 1; transform: none; transition-delay: .05s }
+.on .bv-titulo { opacity: 1; transform: none; transition-delay: .13s }
+.on .bv-bajada { opacity: 1; transform: none; transition-delay: .21s }
+
+.bv-controles { display: flex; align-items: center; justify-content: center; gap: 18px }
+.bv-flecha { width: 40px; height: 40px; display: grid; place-items: center; border-radius: 50%;
+             border: 1px solid var(--bv-borde); background: rgba(255,255,255,.06);
+             color: #E6EDF2; font-size: 17px; cursor: pointer;
+             transition: background .2s, border-color .2s }
+.bv-flecha:hover { background: rgba(255,255,255,.13); border-color: rgba(255,255,255,.28) }
+.bv-puntos { display: flex; gap: 9px }
+.bv-punto { width: 9px; height: 9px; padding: 0; border: 0; border-radius: 50%;
+            background: rgba(255,255,255,.22); cursor: pointer;
+            transition: background .25s, width .25s }
+.bv-punto[aria-current="true"] { width: 26px; border-radius: 999px; background: var(--bv-acento) }
+.bv-progreso { width: min(340px, 60vw); height: 2px; margin: 0 auto; border-radius: 2px;
+               background: rgba(255,255,255,.10); overflow: hidden }
+.bv-progreso i { display: block; height: 100%; width: 0;
+                 background: linear-gradient(90deg, var(--bv-acento), var(--bv-acento2)) }
+
+.bv-aviso { max-width: 420px; margin: 0 auto; padding: 12px 16px; border-radius: 10px;
+            background: rgba(224,118,92,.12); border: 1px solid rgba(224,118,92,.35);
+            color: #E6EDF2; font-size: 14px }
+
+@media (prefers-reduced-motion: reduce) {
+  .bv-pista { scroll-behavior: auto }
+  .bv-card, .bv-kicker, .bv-titulo, .bv-bajada { transition: none }
+  .bv-kicker, .bv-titulo, .bv-bajada { opacity: 1; transform: none }
+  .bv-progreso { display: none }
+  .bv-luz { animation: none }
+}
 </style>
 </head>
 <body>
