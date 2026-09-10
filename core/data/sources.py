@@ -402,9 +402,12 @@ def a_moneda_de_medicion(s: pd.Series, ticker: str, source: str = None) -> pd.Se
     return mercado.desde_usd(s)
 
 
-# Cuánto vale un precio en vivo antes de volver a preguntarlo. Cinco minutos:
-# es para mirar cuánto se movió la cartera hoy, no para operar.
-TTL_SPOT_H = 5 / 60
+# Cuánto vale un precio en vivo antes de volver a preguntarlo. Dos horas: el
+# dato de yfinance no se mueve al minuto —viene con retraso y para los CEDEARs
+# menos líquidos se queda quieto ruedas enteras—, así que preguntarlo más
+# seguido no trae un número más nuevo, sólo más consultas. Es para mirar cuánto
+# se movió la cartera hoy, no para operar.
+TTL_SPOT_H = 2.0
 
 
 def spot_base(ticker: str, source: str = None) -> float | None:
