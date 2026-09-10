@@ -217,6 +217,14 @@ function Grafico({ datos, layout, alto = 280 }) {
 
 /* ═══════════════ KPI con explicación ═══════════════ */
 
+function diaEtiqueta(iso) {
+  if (!iso) return "";
+  const hoy = new Date();
+  const local = `${hoy.getFullYear()}-${String(hoy.getMonth() + 1).padStart(2, "0")}-${String(hoy.getDate()).padStart(2, "0")}`;
+  if (iso === local) return "hoy";
+  return new Date(iso + "T12:00:00").toLocaleDateString("es", { day: "numeric", month: "short" });
+}
+
 function Kpi({ etiqueta, valor, sub, tono, ayuda }) {
   const [abierto, setAbierto] = useState(false);
   return (
@@ -300,7 +308,24 @@ const AYUDA = {
    opción de salir. La foto viene en el id_token; si Google no la manda o el
    archivo no carga, queda la inicial del nombre — nunca un hueco roto. */
 
-function Usuario({ yo }) {
+/* Quién decide si esto es un teléfono: el navegador, que sabe el ancho real y
+   se entera cuando rotás. El User-Agent no sabe ninguna de las dos cosas —y en
+   iPhone ni siquiera manda Sec-CH-UA-Mobile, que es de Chromium. */
+function useMedia(q) {
+  const [va, setVa] = useState(() => window.matchMedia(q).matches);
+  useEffect(() => {
+    const m = window.matchMedia(q);
+    const on = () => setVa(m.matches);
+    m.addEventListener("change", on);
+    setVa(m.matches);
+    return () => m.removeEventListener("change", on);
+  }, [q]);
+  return va;
+}
+
+const ES_MOVIL = "(max-width: 640px)";
+
+function Usuario({ yo, compacto }) {
   const [abierto, setAbierto] = useState(false);
   const [sinFoto, setSinFoto] = useState(false);
   const caja = useRef(null);
@@ -335,9 +360,11 @@ function Usuario({ yo }) {
                          color: "var(--panel)", fontSize: 11, fontWeight: 700 }}>
             {inicial}</span>
         )}
-        <span style={{ maxWidth: 130, overflow: "hidden", textOverflow: "ellipsis",
-                       whiteSpace: "nowrap" }}>
-          {yo.nombre || yo.email}</span>
+        {!compacto && (
+          <span style={{ maxWidth: 130, overflow: "hidden", textOverflow: "ellipsis",
+                         whiteSpace: "nowrap" }}>
+            {yo.nombre || yo.email}</span>
+        )}
       </button>
 
       {abierto && (
@@ -359,6 +386,82 @@ const MODOS = [["analisis", "Análisis"], ["comparacion", "Comparación"],
                ["carteras", "Carteras"], ["mercado", "Dólar MEP"],
                ["conectores", "Conectores"], ["cocos", "Cocos"]];
 const MODOS_LOCALES = ["mercado", "conectores", "cocos"];
+
+/* La barra de la app no entra en un teléfono: los seis modos miden 517 px de
+   ancho y la pantalla tiene 393. Acá van en un panel que se abre, y arriba
+   queda sólo lo que hace falta ver siempre: dónde estás, qué cartera mirás y
+   quién sos.
+
+   Es un componente aparte y no una versión con media queries del de escritorio
+   a propósito: el camino de PC no cambia ni una línea. */
+function BarraMovil({ modo, setModo, tema, setTema, carteras, cartera, setCartera, yo, mercado }) {
+  const [abierto, setAbierto] = useState(false);
+  const locales = MERCADOS[mercado].locales;
+  const visibles = MODOS.filter(([k]) => locales || !MODOS_LOCALES.includes(k));
+  const sistemaOscuro = window.matchMedia?.("(prefers-color-scheme: dark)").matches;
+  const esOscuro = tema === "dark" || (tema === "auto" && sistemaOscuro);
+
+  // Con el panel abierto, el fondo no se scrollea: si no, el dedo arrastra la
+  // página de atrás y se pierde el menú.
+  useEffect(() => {
+    if (!abierto) return;
+    const esc = (e) => { if (e.key === "Escape") setAbierto(false); };
+    document.addEventListener("keydown", esc);
+    document.body.style.overflow = "hidden";
+    return () => { document.removeEventListener("keydown", esc);
+                   document.body.style.overflow = ""; };
+  }, [abierto]);
+
+  const elegir = (k) => { setModo(k); setAbierto(false); };
+
+  return (
+    <>
+      <div className="barra-m">
+        <button className="barra-m-ham" onClick={() => setAbierto(true)}
+                aria-label="Menú" aria-expanded={abierto}>
+          <span /><span /><span />
+        </button>
+        <div className="marca">Portfolio <span>Analyzer</span></div>
+        {yo?.email && <Usuario yo={yo} compacto />}
+      </div>
+
+      {/* La cartera se cambia mucho más seguido que el modo: queda a mano. */}
+      {modo === "analisis" && (
+        <div className="barra-m-cartera">
+          <select value={cartera || ""} onChange={(e) => setCartera(e.target.value)}>
+            <option value="">— elegí una cartera —</option>
+            {carteras.map((c) => <option key={c.nombre} value={c.nombre}>{c.nombre}</option>)}
+          </select>
+        </div>
+      )}
+
+      {abierto && (
+        <div className="menu-m-fondo" onClick={() => setAbierto(false)}>
+          <nav className="menu-m" onClick={(e) => e.stopPropagation()}>
+            <div className="menu-m-alto">
+              <span className="plaza" title={`Se mide desde ${MERCADOS[mercado].nombre}`}>
+                {MERCADOS[mercado].bandera} {MERCADOS[mercado].nombre}</span>
+              <button className="btn" onClick={() => setAbierto(false)} aria-label="Cerrar">✕</button>
+            </div>
+            {visibles.map(([k, t]) => (
+              <button key={k} className={"menu-m-item" + (modo === k ? " on" : "")}
+                      onClick={() => elegir(k)}>{t}</button>
+            ))}
+            <div className="menu-m-pie">
+              {tema !== "auto" && (
+                <button className="btn auto" onClick={() => setTema("auto")}>auto</button>)}
+              <label className="lab-dianoche" title={esOscuro ? "Pasar a claro" : "Pasar a oscuro"}>
+                <input type="checkbox" checked={!esOscuro} aria-label="Tema claro"
+                       onChange={() => setTema(esOscuro ? "light" : "dark")} />
+                <span className="g"><span className="estrellas" /></span>
+              </label>
+            </div>
+          </nav>
+        </div>
+      )}
+    </>
+  );
+}
 
 function Barra({ modo, setModo, tema, setTema, carteras, cartera, setCartera, yo,
                  mercado }) {
@@ -784,7 +887,10 @@ function Posicion({ d, cartera, recargar, extras, bench, sim, setSim }) {
                sub={MERCADOS[MERCADO].locales && d.mep_hoy ? `MEP $${d.mep_hoy}` : null} />)}
         <Kpi etiqueta="Costo" valor={usd(d.costo_total)} sub="comisiones incluidas" />
         <Kpi etiqueta="Resultado abierto" valor={usd(d.pnl)} tono={signo(d.pnl)} ayuda={AYUDA.pnl}
-             sub={pct(d.pnl_pct)} />
+             sub={<>{pct(d.pnl_pct)}{d.pnl_dia != null && <>{" · "}
+               <span className={d.pnl_dia >= 0 ? "up" : "down"}
+                     title={`${pct(d.pnl_dia_pct)} en la rueda del ${d.dia_fecha}, contra el cierre anterior`}>
+                 {diaEtiqueta(d.dia_fecha)} {usd(d.pnl_dia)}</span></>}</>} />
         {cerrado != null && (
           <Kpi etiqueta="Resultado realizado" valor={usd(cerrado)} tono={signo(cerrado)}
                sub={`${real.n} operaciones cerradas`} ayuda={AYUDA.realizado} />)}
@@ -5407,6 +5513,7 @@ class Red extends React.Component {
 function App() {
   const [modo, setModo] = useState("analisis");
   const [tema, setTema] = useState(() => localStorage.getItem("tema") || "auto");
+  const movil = useMedia(ES_MOVIL);
   const [carteras, setCarteras] = useState([]);
   const [cartera, setCartera] = useState(null);
   // null = todavía no sabemos en qué modo corre el servidor ni quién sos.
@@ -5484,11 +5591,12 @@ function App() {
   if (web === null || yo === null) return <div className="cargando">Abriendo…</div>;
   if (!yo.dentro) return <Ingreso configurado={yo.configurado} />;
 
+  const Cabecera = movil ? BarraMovil : Barra;
   return (
     <>
-      <Barra modo={modo} setModo={setModo} tema={tema} setTema={setTema}
-             carteras={carteras} cartera={cartera} setCartera={setCartera} yo={yo}
-             mercado={mercado} />
+      <Cabecera modo={modo} setModo={setModo} tema={tema} setTema={setTema}
+                carteras={carteras} cartera={cartera} setCartera={setCartera} yo={yo}
+                mercado={mercado} />
       <div className="hoja">
         {/* Cambiar de plaza cambia la moneda de medición: lo que hay en pantalla
             está calculado en la anterior y hay que volver a pedirlo entero. */}

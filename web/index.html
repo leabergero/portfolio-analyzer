@@ -184,6 +184,7 @@ select,input[type=text],input[type=number],input[type=email],input[type=password
          font-weight:600;display:flex;align-items:center;gap:5px}
 .kpi .val{font-size:22px;font-weight:600;letter-spacing:-.02em;margin-top:3px}
 .kpi .sub{font-size:12px;color:var(--texto-3);margin-top:1px}
+.kpi .sub .up{color:var(--positivo)} .kpi .sub .down{color:var(--negativo)}
 .kpi.pos .val{color:var(--positivo)} .kpi.neg .val{color:var(--negativo)}
 
 /* El popup se abre al pasar el mouse Y al hacer clic: en tablet no hay hover,
@@ -547,6 +548,36 @@ footer a:hover{text-decoration:underline}
                  50%{border-radius:12% 50% 12% 50%;transform:rotate(180deg)}}
 
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+/* ── Barra en teléfono ─────────────────────────────────────────────────────
+   Clases propias, no variantes de las de arriba: en una pantalla grande esto
+   no se renderiza nunca y no puede pisarle nada al escritorio. */
+.barra-m{position:sticky;top:0;z-index:50;display:flex;align-items:center;gap:12px;
+         height:52px;padding:0 14px;background:var(--panel);
+         border-bottom:1px solid var(--borde);
+         padding-top:env(safe-area-inset-top)}
+.barra-m .marca{flex:1;font-size:15px}
+.barra-m-ham{width:34px;height:34px;flex:none;display:grid;align-content:center;gap:4px;
+             padding:0 7px;border:1px solid var(--borde);border-radius:8px;
+             background:var(--panel-2);cursor:pointer}
+.barra-m-ham span{display:block;height:2px;border-radius:2px;background:var(--texto)}
+.barra-m-cartera{position:sticky;top:52px;z-index:49;padding:8px 14px;
+                 background:var(--panel);border-bottom:1px solid var(--borde-suave)}
+.barra-m-cartera select{width:100%}
+
+.menu-m-fondo{position:fixed;inset:0;z-index:60;background:rgba(0,0,0,.55);
+              display:flex;justify-content:flex-start}
+.menu-m{width:min(300px,84vw);height:100%;overflow-y:auto;padding:14px;
+        background:var(--panel);border-right:1px solid var(--borde);
+        display:flex;flex-direction:column;gap:6px;
+        padding-top:calc(14px + env(safe-area-inset-top))}
+.menu-m-alto{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+.menu-m-item{text-align:left;border:0;background:transparent;color:var(--texto);
+             font:inherit;font-size:15px;padding:12px 12px;border-radius:8px;cursor:pointer}
+.menu-m-item:hover{background:var(--panel-2)}
+.menu-m-item.on{background:var(--acento-suave);color:var(--acento);font-weight:600}
+.menu-m-pie{margin-top:auto;padding-top:14px;border-top:1px solid var(--borde-suave);
+            display:flex;align-items:center;gap:10px}
+
 /* ── Bienvenida (sin sesión) ───────────────────────────────────────────────
    Es la única pantalla que no sigue el tema: se pinta siempre oscura, con
    valores literales en vez de los tokens de arriba. Alguien con el tema claro
