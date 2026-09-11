@@ -147,6 +147,11 @@ def _normalizar(posicion: dict) -> dict:
         "currency": str(posicion.get("currency", "") or "").strip().upper(),
         "asset_type": str(posicion.get("asset_type", "") or "").strip(),
         "notes": str(posicion.get("notes", "") or "").strip(),
+        # De qué importación vino, para poder pisarla sin tocar lo demás. El
+        # `source` no sirve para eso: además de marcar el origen, decide de
+        # dónde sale el precio, así que un valor inventado ahí deja a un bono
+        # sin cotización. Vacío = cargada a mano.
+        "lote": str(posicion.get("lote", "") or "").strip(),
     }
 
 
@@ -265,6 +270,26 @@ def reemplazar_source(nombre: str, source: str, nuevas: list) -> dict:
     previas = cargar(nombre)
     resto = [p for p in previas if (p.get("source") or "") != source]
     limpias = [_normalizar(x) for x in nuevas if str(x.get("ticker") or "").strip()]
+    guardar(nombre, resto + limpias)
+    return {"importadas": len(limpias), "reemplazadas": len(previas) - len(resto),
+            "total": len(resto) + len(limpias)}
+
+
+def reemplazar_lote(nombre: str, lote: str, nuevas: list) -> dict:
+    """Deja en la cartera exactamente las posiciones de esa importación.
+
+    Gemela de `reemplazar_source`, pero marcando por importación y no por
+    proveedor de precios: lo que viene del broker son CEDEARs y bonos, que ya
+    necesitan su propio `source` para que la cotización salga de donde debe.
+
+    Lo cargado a mano no lleva lote y no lo toca ninguna reimportación.
+    """
+    if not lote:
+        raise ValueError("Sin lote no se puede reemplazar nada sin riesgo.")
+    previas = cargar(nombre)
+    resto = [p for p in previas if (p.get("lote") or "") != lote]
+    limpias = [_normalizar(dict(x, lote=lote)) for x in nuevas
+               if str(x.get("ticker") or "").strip()]
     guardar(nombre, resto + limpias)
     return {"importadas": len(limpias), "reemplazadas": len(previas) - len(resto),
             "total": len(resto) + len(limpias)}

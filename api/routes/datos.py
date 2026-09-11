@@ -431,6 +431,138 @@ def cocos_fci_importar():
                     "tickers": [l["ticker"] for l in t["lotes"]], **r})
 
 
+# ── Compras y ventas: dos importaciones, cada una con su botón ───────────────
+# Separadas a propósito. La foto de lo que tenés y la historia de lo que hiciste
+# son decisiones distintas: alguien puede querer la cartera del broker sin pisar
+# su P&L cargado a mano, o al revés.
+
+def _especies_d_del_usuario() -> set:
+    """Instrumentos que el usuario ya anota en su tramo en dólares.
+
+    Se mira todo lo suyo, abierto y cerrado: si en alguna cartera figura
+    `EWZD.BA`, entonces para él EWZ se anota así y no de otra forma.
+    """
+    from core.data.symbols import base_symbol, is_d_variant, strip_ba
+
+    vistos = set()
+    for nombre in store.nombres():
+        vistos |= {p["ticker"] for p in store.cargar(nombre)}
+        vistos |= {t["ticker"] for t in store.cargar_realizado(nombre)}
+    return {base_symbol(strip_ba(t)) for t in vistos if is_d_variant(strip_ba(t))}
+
+
+def _operaciones():
+    return cocos.operaciones(_especies_d_del_usuario())
+
+
+@bp.get("/cocos/operaciones")
+def cocos_operaciones():
+    """Lo que el historial dice que tenés abierto y lo que ya cerraste."""
+    r = _operaciones()
+    if r.get("error"):
+        return jsonify(r)
+    destino = store.cartera_de_cuenta(r.get("cuenta"))
+    return jsonify({**r, "cartera": destino, "carteras": store.nombres(),
+                    "cerrados": [{**c, "clave": cocos.clave_operacion(c)}
+                                 for c in r["cerrados"]],
+                    "ya_cargados": _ya_cargados(destino, r["abiertos"]),
+                    "ya_cerradas": _ya_cerradas(destino, r["cerrados"])})
+
+
+def _ya_cerradas(cartera: str, cerrados: list) -> list:
+    """Operaciones que la cartera ya tiene cargadas y volverían a entrar.
+
+    El deduplicado por clave no las ve: la misma venta cargada a mano desde
+    Yahoo y traída del broker tiene otros precios —una convierte de una forma y
+    la otra con el MEP— así que entran las dos y el resultado se cuenta doble.
+    Se comparan por papel, fecha de venta y cantidad, que es lo que identifica
+    la operación más allá de con qué número se la anotó.
+    """
+    if not cartera:
+        return []
+    from core.data.symbols import base_symbol, strip_ba
+
+    def clave(t):
+        return (base_symbol(strip_ba(t["ticker"])), t["sell_date"], round(float(t["qty"]), 4))
+
+    previas = {clave(t): t["ticker"] for t in store.cargar_realizado(cartera)
+               if (t.get("lote") or "") != cocos.LOTE_OPERACIONES}
+    choques = []
+    for c in cerrados:
+        ya = previas.get(clave(c))
+        if ya:
+            choques.append({"ticker": c["ticker"], "como_lo_tenes": ya,
+                            "clave": cocos.clave_operacion(c),
+                            "sell_date": c["sell_date"], "qty": c["qty"]})
+    return choques
+
+
+def _ya_cargados(cartera: str, abiertos: list) -> list:
+    """Tickers que la cartera ya tiene cargados a mano y volverían a entrar.
+
+    Importar no pisa lo cargado a mano —eso es deliberado, nadie quiere perder
+    lo que anotó— pero entonces el mismo papel queda dos veces y la cartera vale
+    el doble. Se avisa antes, que es cuando sirve.
+    """
+    if not cartera:
+        return []
+    del_broker = {a["ticker"] for a in abiertos}
+    return sorted({p["ticker"] for p in store.cargar(cartera)
+                   if p["ticker"] in del_broker
+                   and (p.get("lote") or "") != cocos.LOTE_OPERACIONES})
+
+
+def _cartera_para(cuenta):
+    """La cartera pedida, si existe y si esta cuenta no está atada a otra."""
+    cartera = (request.json or {}).get("cartera", "").strip()
+    if cartera not in store.nombres():
+        return None, (jsonify({"error": "Esa cartera no existe."}), 400)
+    previa = store.cartera_de_cuenta(cuenta)
+    if previa and previa != cartera:
+        return None, (jsonify({"error": f"Esta cuenta ya está asociada a «{previa}». "
+                                        "Desasociala antes de importarla en otra."}), 409)
+    return cartera, None
+
+
+@bp.post("/cocos/operaciones/posiciones")
+def cocos_importar_posiciones():
+    """Lleva a la cartera lo que quedó abierto después de netear el historial."""
+    r = _operaciones()
+    if r.get("error"):
+        return jsonify(r), 502
+    cartera, error = _cartera_para(r.get("cuenta"))
+    if error:
+        return error
+
+    van = r["abiertos"]
+    res = store.reemplazar_lote(cartera, cocos.LOTE_OPERACIONES, van)
+    if r.get("cuenta"):
+        store.asociar_cuenta(r["cuenta"], cartera)
+    return jsonify({"ok": True, "cartera": cartera, **res,
+                    "tickers": sorted({x["ticker"] for x in van})})
+
+
+@bp.post("/cocos/operaciones/cerradas")
+def cocos_importar_cerradas():
+    """Lleva al P&L realizado las compras que ya tienen su venta."""
+    r = _operaciones()
+    if r.get("error"):
+        return jsonify(r), 502
+    cartera, error = _cartera_para(r.get("cuenta"))
+    if error:
+        return error
+
+    # Sin `solo` van todas; con `solo`, las que quedaron tildadas.
+    solo = (request.json or {}).get("solo")
+    van = (r["cerrados"] if solo is None
+           else [c for c in r["cerrados"] if cocos.clave_operacion(c) in set(solo)])
+    res = store.agregar_realizado(cartera, van, lote=cocos.LOTE_OPERACIONES)
+    if r.get("cuenta"):
+        store.asociar_cuenta(r["cuenta"], cartera)
+    return jsonify({"ok": True, "cartera": cartera, **res,
+                    "tickers": sorted({x["ticker"] for x in van})})
+
+
 @bp.get("/cocos/fondos")
 def cocos_fondos():
     return jsonify(cocos.fondos_disponibles())

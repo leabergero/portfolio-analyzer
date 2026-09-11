@@ -810,6 +810,185 @@ def _resultados_realizados(movs: list) -> dict:
     return {"trades": trades, "por_fondo": por_fondo, "total_usd": round(total, 4)}
 
 
+# ── Compras y ventas de la cuenta, como cartera e historia ───────────────────
+# Cuatro cosas que el broker no dice de frente y que cambian el resultado:
+#
+#   1. **Se aparea por instrumento, nunca por moneda.** Comprar un CEDEAR en
+#      pesos y venderlo en dólares es la estrategia de dolarizarse, no dos
+#      posiciones distintas: NKE entró a 5.764,67 ARS y salió a 3,59 USD, y
+#      separarlos por moneda dejaba la compra colgada y perdía el resultado.
+#
+#   2. **Cada pata va a dólares con el MEP de SU fecha.** Es lo que mide la
+#      estrategia: 12.961 pesos del 2025-09-19 eran 8,20 dólares al MEP de ese
+#      día. El CEDEAR valía 8,42 en su especie D, y esos 22 centavos son la
+#      ganancia de haberse dolarizado por ahí — anotar 8,42 como costo la
+#      escondería, porque es el precio de después del arbitraje.
+#
+#   3. **`price` viene nulo, pero `amount` es el neto liquidado.** El precio sale
+#      de dividirlo por la cantidad y ya lleva las comisiones adentro: 19 VIST
+#      por 503,49 USD son 26,50 cada uno. Se cargan con comisión cero a
+#      propósito — sumarla aparte sería contarla dos veces.
+#
+#   4. **El ticker es el de la especie que la app puede cotizar.** Cocos informa
+#      el instrumento (`ADBE`, `AL30`), no la especie; un CEDEAR va a su tramo en
+#      dólares (`ADBED.BA`), que es donde hay serie de precios; un bono al suyo
+#      (`AL30D`, sin sufijo de mercado y con Cocos como fuente, que es la única
+#      que los tiene); y una acción argentina queda en pesos (`COME.BA`).
+#
+#   5. **Los bonos entran como todo lo demás.** Comprar AL30 en pesos y venderlo
+#      en dólares es el rulo de dolarización, no una amortización: el broker
+#      informa `AL30` en las dos patas y sólo cambia la moneda. Aparear por
+#      instrumento los cierra exacto —6.491 nominales comprados el 30/9 y
+#      vendidos el 1/10, 7.029 el 6/4, 5.136 el 14/4— y también cierra el caso
+#      en que la compra y la venta son las dos en pesos.
+
+LOTE_OPERACIONES = "cocos-ops"
+
+
+def clave_operacion(x: dict) -> str:
+    """Identifica una fila del preview sin mandar sus números de ida y vuelta.
+
+    El navegador elige por clave y el servidor filtra sobre lo que él mismo
+    calculó: así lo que termina guardado en la cartera nunca viene de afuera.
+    """
+    return "|".join(str(x.get(c, "")) for c in
+                    ("ticker", "buy_date", "sell_date", "qty"))
+
+
+def _con_especie_d(movs: list, conocidos=None) -> set:
+    """Instrumentos que tienen tramo en dólares: los CEDEARs.
+
+    Tres fuentes, de la más firme a la más débil:
+
+      · el broker, que marca `CEDEARS` en lo que hay hoy en la cuenta;
+      · haber operado alguna vez en dólares, que prueba que la especie existe;
+      · `conocidos`, los que el usuario ya usa así en sus propias carteras.
+
+    La tercera no es un lujo. Un CEDEAR comprado y vendido en pesos, y ya
+    cerrado, no aparece en ninguna de las otras dos: EWZ, GLD, GILD y TSLA se
+    importaban como `EWZ.BA` cuando el usuario los tiene como `EWZD.BA`, y además
+    de ser el ticker equivocado escondía que la operación ya estaba cargada.
+    """
+    con_d = set(conocidos or ())
+    pos = posiciones()
+    if isinstance(pos, list):
+        con_d |= {(p.get("short_ticker") or p.get("instrument_code") or "").upper()
+                  for p in pos if p.get("instrument_type") == "CEDEARS"}
+    con_d |= {(m.get("ticker") or "").upper() for m in movs
+              if (m.get("currency") or "").upper() == "USD"}
+    return con_d - {""}
+
+
+def operaciones(conocidos=None):
+    """Compras y ventas apareadas FIFO: lo que sigue abierto y lo que ya cerró.
+
+    `conocidos` son los instrumentos que el usuario ya maneja en su tramo en
+    dólares; sirven para no inventarle un ticker distinto del que usa.
+
+    Una venta sin su compra en el historial se ignora —inventar el precio de una
+    compra que no está sería inventar el resultado— y por eso se compara contra
+    la foto de posiciones del broker: si la cantidad no coincide, el historial no
+    llega hasta el principio y hay que decirlo antes de importar nada.
+    """
+    from core.data.symbols import d_ticker, is_cocos_only
+    from core.io.csv_yahoo import _netear_fifo
+
+    hist = _historial_completo()
+    if hist.get("error"):
+        return hist
+    movs = hist["movimientos"]
+    con_d = _con_especie_d(movs, conocidos)
+
+    ops = {}
+    for orden, m in enumerate(reversed(movs)):
+        tipo = m.get("movementType")
+        if tipo not in ("BUY", "SELL"):
+            continue
+        # Tal como lo informa el broker: siempre el instrumento, nunca la especie
+        # —AL30 en las dos patas del rulo, GLD y no GLDD—. Pasarlo por
+        # `base_symbol` lo truncaría: GLD terminaría en "GL", que no existe.
+        instrumento = (m.get("ticker") or "").upper().strip()
+        moneda = (m.get("currency") or "ARS").upper()
+        cantidad = abs((m.get("quantity") or {}).get("executed") or 0)
+        importe = abs(m.get("amount") or 0)
+        if not instrumento or not cantidad or not importe:
+            continue
+        usd = importe if moneda != "ARS" else mep.a_usd(importe, m.get("fecha"))
+        if not usd:
+            continue
+        compras, ventas = ops.setdefault(instrumento, ([], []))
+        (compras if tipo == "BUY" else ventas).append(
+            {"fecha": m.get("fecha"), "orden": orden, "precio": usd / cantidad,
+             "qty": cantidad, "comision": 0.0})
+
+    abiertos, cerrados = [], []
+    for instrumento, (compras, ventas) in ops.items():
+        # Un bono no cotiza en BYMA para la app: lo trae Cocos, que es la única
+        # fuente que los tiene, y va sin sufijo de mercado.
+        bono = is_cocos_only(instrumento)
+        if bono:
+            ticker, fuente = d_ticker(instrumento), "cocos"
+        else:
+            ticker = (d_ticker(instrumento) if instrumento in con_d else instrumento) + ".BA"
+            fuente = ""
+        quedan, cierres = _netear_fifo(compras, ventas)
+        for c in quedan:
+            abiertos.append({
+                "ticker": ticker, "buy_date": c["fecha"],
+                "buy_price": round(c["precio"], 6), "qty": round(c["qty"], 6),
+                "commissions": 0.0, "currency": "USD", "source": fuente,
+                "notes": f"Cocos · {instrumento}",
+            })
+        for c in cierres:
+            # Ya convertido: `moneda` USD para que el P&L no vuelva a convertirlo.
+            # La apertura activo/tipo de cambio queda en cero a propósito — con
+            # una pata en pesos y otra en dólares no hay forma honesta de partir
+            # el resultado en dos, y fingirla sería peor que no darla.
+            cerrados.append({
+                "ticker": ticker, "buy_date": c["buy_date"], "sell_date": c["sell_date"],
+                "buy_price": round(c["buy_price"], 6),
+                "sell_price": round(c["sell_price"], 6),
+                "qty": c["qty"], "buy_comm": 0.0, "sell_comm": 0.0, "moneda": "USD",
+                "pnl": round(c["qty"] * (c["sell_price"] - c["buy_price"]), 4),
+            })
+
+    abiertos.sort(key=lambda x: (x["ticker"], x["buy_date"]))
+    cerrados.sort(key=lambda x: x["sell_date"], reverse=True)
+    return {"abiertos": abiertos, "cerrados": cerrados,
+            "control": _control_posiciones(abiertos),
+            "cortado": hist["cortado"], "cuenta": _est().get("cuenta")}
+
+
+def _control_posiciones(abiertos: list) -> list:
+    """Lo que dice el historial contra lo que el broker tiene hoy en la cuenta.
+
+    Una diferencia no es un error de cuentas: es historial que falta, o un
+    movimiento que no es compra ni venta. Sale listada para que se vea antes de
+    importar, no después.
+    """
+    pos = posiciones()
+    if not isinstance(pos, list):
+        return []
+    from core.data.symbols import base_symbol, strip_ba
+
+    calculado = {}
+    for a in abiertos:
+        base = base_symbol(strip_ba(a["ticker"]))
+        calculado[base] = calculado.get(base, 0) + a["qty"]
+
+    filas = []
+    for p in pos:
+        base = base_symbol((p.get("short_ticker") or p.get("instrument_code") or "").upper())
+        if p.get("instrument_type") == "FCI":
+            continue
+        real, propio = p.get("quantity") or 0, calculado.pop(base, 0)
+        if abs(real - propio) > 1e-6:
+            filas.append({"ticker": base, "broker": real, "historial": round(propio, 6)})
+    for base, propio in calculado.items():          # en el historial y no en la cuenta
+        filas.append({"ticker": base, "broker": 0, "historial": round(propio, 6)})
+    return sorted(filas, key=lambda x: x["ticker"])
+
+
 # ── Participaciones en FCI, como lotes de cartera ─────────────────────────────
 
 def precio_fci(ticker: str):

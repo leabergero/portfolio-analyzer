@@ -70,7 +70,14 @@ COCOS_ONLY = SOBERANOS | set(ON_D_TICKER) | LETRAS
 # Símbolos reales de BYMA que terminan en "D" de casualidad y cotizan en pesos:
 # NO son la variante dólar de nada. Si aparece otro, va acá — no se toca la
 # regla general.
-D_FALSOS_POSITIVOS = {"YPFD"}
+#
+# Estos tres no tienen nada que ver entre sí —AMD es Advanced Micro Devices,
+# GLD el ETF de oro de SPDR, GILD la farmacéutica Gilead— y no son variantes de
+# nada: es el nombre del instrumento, que termina en D de casualidad. Su tramo
+# en dólares lleva otra D encima: AMDD, GLDD, GILDD. Sin esto, `base_symbol`
+# los recortaba a "AM", "GL" y "GIL", y una compra de GLD se importaba como
+# GL.BA, un papel que no existe.
+D_FALSOS_POSITIVOS = {"YPFD", "AMD", "GLD", "GILD"}
 
 
 # ── Descomposición del ticker ─────────────────────────────────────────────────

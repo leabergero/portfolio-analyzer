@@ -265,6 +265,21 @@ footer .kofi{opacity:.75;transition:opacity .15s;line-height:0;flex:none}
 footer .kofi:hover{opacity:1}
 footer .kofi img{height:28px;display:block;border:0;border-radius:5px}
 footer a:hover{text-decoration:underline}
+/* Borrar una operación cerrada. No tiene columna propia ni ocupa lugar en la
+   fila: va flotando sobre el borde derecho de la celda del ticker. Una columna
+   más —o incluso estos 20 px en el flujo— empujaban la tabla hasta necesitar
+   scroll horizontal, que es peor que no tener el botón. Aparece al pasar por
+   la fila y no se lleva ni un píxel del ancho. */
+td.mono{position:relative}
+.eliminar{position:absolute;right:1px;top:50%;transform:translateY(-50%);
+  border:0;background:none;padding:0 3px;cursor:pointer;
+  font:inherit;font-size:11px;line-height:1;color:var(--texto-3);opacity:0;
+  pointer-events:none;transition:opacity .15s,color .15s}
+tr:hover .eliminar{opacity:.5;pointer-events:auto}
+.eliminar:hover{opacity:1;color:var(--negativo)}
+.eliminar.arm{opacity:1;color:var(--negativo);font-weight:700}
+.eliminar:focus-visible{opacity:1;outline:2px solid var(--acento);outline-offset:1px}
+
 /* ── Componentes traídos de la librería UX-UI ───────────────────────────────
    Estuvieron detrás de ?lab=1 hasta que se aprobaron; el prefijo `lab-` quedó
    como marca de origen. Bloque autocontenido: se puede leer y podar de una. */

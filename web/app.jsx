@@ -1293,6 +1293,22 @@ function AltaDividendo({ cartera, recargar }) {
 }
 
 function PnlRealizado({ real, cartera, recargar, fciTrades, hayFci, conFci, setConFci }) {
+  // Borrar de a una, con la confirmación en el mismo botón: lo importado se
+  // puede volver a traer, pero lo cargado a mano no, así que un clic no alcanza.
+  const [porBorrar, setPorBorrar] = useState(null);
+  // Filtro por papel para el detalle. Con 45 operaciones, buscar las de un
+  // ticker a ojo es el trabajo que la tabla debería estar haciendo.
+  const [soloTicker, setSoloTicker] = useState("");
+  const claveTrade = (t) => JSON.stringify({ ticker: t.ticker, buy_date: t.buy_date,
+                                             sell_date: t.sell_date, qty: t.qty });
+  const borrar = (t) => {
+    if (porBorrar !== claveTrade(t)) { setPorBorrar(claveTrade(t)); return; }
+    setPorBorrar(null);
+    api(`/api/carteras/${encodeURIComponent(cartera)}/realizado`, {
+      method: "DELETE", headers: { "Content-Type": "application/json" },
+      body: claveTrade(t),
+    }).then(() => recargar());
+  };
   const [abierto, setAbierto] = useState(false);
   const [detalle, setDetalle] = useState(false);
   const trades = real.trades || [];
@@ -1311,6 +1327,8 @@ function PnlRealizado({ real, cartera, recargar, fciTrades, hayFci, conFci, setC
     return acc;
   }, {})).sort((a, b) => b.usd - a.usd);
   const ganadores = porTicker.filter((x) => x.usd > 0).length;
+  const detalladas = soloTicker ? trades.filter((t) => t.ticker === soloTicker) : trades;
+  const sumaDetalle = detalladas.reduce((s, t) => s + (t.pnl_usd || 0), 0);
   const enPesos = (real.total_origen || {}).ARS;
   const enDolar = (real.total_origen || {}).USD;
 
@@ -1358,6 +1376,18 @@ function PnlRealizado({ real, cartera, recargar, fciTrades, hayFci, conFci, setC
                 <button key={String(k)} className={"modo" + (detalle === k ? " on" : "")}
                         onClick={() => setDetalle(k)}>{txt}</button>))}
             </div>
+            {detalle === true && (
+              <span style={{ display: "flex", alignItems: "center", gap: 7,
+                             fontSize: 12, color: "var(--texto-3)" }}>
+                <select value={soloTicker} onChange={(e) => setSoloTicker(e.target.value)}>
+                  <option value="">todos los papeles</option>
+                  {porTicker.map((x) => <option key={x.ticker} value={x.ticker}>{x.ticker}</option>)}
+                </select>
+                {soloTicker && <>{detalladas.length}{" "}
+                  {detalladas.length === 1 ? "operación" : "operaciones"} ·{" "}
+                  <b className={signo(sumaDetalle)}>{usd(sumaDetalle)}</b>
+                  {" "}<button className="chip" onClick={() => setSoloTicker("")}>ver todas</button></>}
+              </span>)}
           </div>
           <div className="tabla-wrap"><table>
             {detalle === "fci" ? (
@@ -1390,23 +1420,33 @@ function PnlRealizado({ real, cartera, recargar, fciTrades, hayFci, conFci, setC
                   <th className="n">Dólar compra → venta</th>
                   <th className="n">Resultado origen</th>
                   <th className="n">Resultado inversión</th>
-                  <th className="n">Resultado tipo de cambio</th>
+                  <th className="n">Resultado tipo cambio</th>
                   <th className="n">Resultado USD</th></tr></thead>
-                <tbody>{[...trades].sort((a, b) => (a.sell_date < b.sell_date ? 1 : -1)).map((t, i) => (
+                <tbody>{[...detalladas].sort((a, b) => (a.sell_date < b.sell_date ? 1 : -1)).map((t, i) => (
                   <tr key={i}>
                     <td className="mono">{t.ticker}{t.tipo === "dividendo" &&
-                      <span className="chip ok" style={{ marginLeft: 6, minWidth: 0 }}>div</span>}</td>
+                      <span className="chip ok" style={{ marginLeft: 6, minWidth: 0 }}>div</span>}
+                      <button className={"eliminar" + (porBorrar === claveTrade(t) ? " arm" : "")}
+                              onMouseLeave={() => porBorrar === claveTrade(t) && setPorBorrar(null)}
+                              onClick={() => borrar(t)}
+                              title={porBorrar === claveTrade(t)
+                                     ? "Clic de nuevo para borrarla"
+                                     : `Borrar esta operación de ${cartera}`}>✕</button></td>
                     <td className="mono">{t.buy_date}</td>
                     <td className="mono">{t.sell_date}</td>
                     <td className="n">{num(t.qty, 2)}</td>
                     <td className="n">{num(t.buy_price, 2)}</td>
                     <td className="n">{num(t.sell_price, 2)}</td>
+                    {/* Los dos MEP arriba y la variación debajo: en una sola línea esta
+                        celda medía 223 px —el doble que cualquier otra— y era la que
+                        empujaba la tabla hasta necesitar scroll horizontal. */}
                     <td className={"n " + signo(t.pnl_fx_usd)}>
-                      {t.mep_compra && t.mep_venta
-                        ? `${num(t.mep_compra, 2)} → ${num(t.mep_venta, 2)}  ` +
-                          `(${t.mep_venta >= t.mep_compra ? "+" : ""}` +
-                          `${num((t.mep_venta / t.mep_compra - 1) * 100, 1)}%)`
-                        : "—"}</td>
+                      {t.mep_compra && t.mep_venta ? <>
+                        {num(t.mep_compra, 2)} → {num(t.mep_venta, 2)}
+                        <div style={{ fontSize: 10.5, color: "var(--texto-3)" }}>
+                          {t.mep_venta >= t.mep_compra ? "+" : ""}
+                          {num((t.mep_venta / t.mep_compra - 1) * 100, 1)} %
+                        </div></> : "—"}</td>
                     <td className={"n " + signo(t.pnl_origen)}>
                       {num(t.pnl_origen, 2)} {t.moneda}</td>
                     <td className={"n " + signo(t.pnl_activo_usd)}>{usd(t.pnl_activo_usd)}</td>
@@ -1420,7 +1460,7 @@ function PnlRealizado({ real, cartera, recargar, fciTrades, hayFci, conFci, setC
                 <thead><tr><th>Ticker</th><th className="n">Operaciones</th>
                   <th className="n">Resultado en su moneda</th>
                   <th className="n">Resultado inversión</th>
-                  <th className="n">Resultado tipo de cambio</th>
+                  <th className="n">Resultado tipo cambio</th>
                   <th className="n">Resultado en dólares</th></tr></thead>
                 <tbody>{porTicker.map((x) => (
                   <tr key={x.ticker}>
@@ -4961,6 +5001,8 @@ function MiCocos() {
   const [destino, setDestino] = useState("");     // cartera a la que se importan
   const [importando, setImportando] = useState(null);
   const [impRes, setImpRes] = useState(null);     // importación del resultado cerrado
+  const [ops, setOps] = useState(null);           // compras y ventas apareadas
+  const [impOps, setImpOps] = useState(null);     // importación de posiciones / cerradas
 
   const traerMovs = (offset = 0) => {
     setCargandoMovs(true);
@@ -4975,6 +5017,7 @@ function MiCocos() {
   const cargar = () => {
     setErr(null); setD(null); setMovs([]); setCat(null); setFci(null);
     setTenFci(null); setImportando(null); setImpRes(null);
+    setOps(null); setImpOps(null); setSinImportar(null);
     api("/api/cocos/resumen").then((r) => {
       if (r.error) { setErr(r.error); return; }
       setD(r);
@@ -4983,6 +5026,10 @@ function MiCocos() {
       api("/api/cocos/fci").then((f) => {
         setFci(f);
         if (f.cartera) setDestino((prev) => prev || f.cartera);
+      });
+      api("/api/cocos/operaciones").then((o) => {
+        setOps(o);
+        if (o.cartera) setDestino((prev) => prev || o.cartera);
       });
       api("/api/cocos/fci/tenencias").then((t) => {
         setTenFci(t);
@@ -4997,6 +5044,29 @@ function MiCocos() {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ cartera: destino }),
     }).then((r) => setImportando(r));
+  };
+
+  // Qué operaciones cerradas NO van. Arranca con las que la cartera ya tiene
+  // cargadas: importarlas de nuevo cuenta el resultado dos veces, así que el
+  // caso sano es el que viene tildado, y destildar es una decisión explícita.
+  const [sinImportar, setSinImportar] = useState(null);
+  const fuera = sinImportar ?? new Set((ops?.ya_cerradas || []).map((c) => c.clave));
+  const alternar = (clave) => {
+    const s = new Set(fuera);
+    s.has(clave) ? s.delete(clave) : s.add(clave);
+    setSinImportar(s);
+  };
+
+  const importarOps = (que) => {
+    setImpOps({ estado: "yendo", que });
+    const cuerpo = { cartera: destino };
+    if (que === "cerradas") {
+      cuerpo.solo = (ops.cerrados || []).map((c) => c.clave).filter((k) => !fuera.has(k));
+    }
+    api(`/api/cocos/operaciones/${que}`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(cuerpo),
+    }).then((r) => setImpOps({ ...r, que }));
   };
 
   const importarResultadoFci = () => {
@@ -5136,6 +5206,128 @@ function MiCocos() {
           <div className="pie">Las cuentas a las que Cocos puede transferir tus retiros.</div>
         </div>
       </div>
+
+      {/* ── Compras y ventas: la cartera y la historia, por separado ── */}
+      {ops && !ops.error && ((ops.abiertos || []).length > 0 || (ops.cerrados || []).length > 0) &&
+       (() => {
+        const cuantasCerradas = (ops.cerrados || []).filter((c) => !fuera.has(c.clave)).length;
+        return (
+        <div className="panel" style={{ marginBottom: 14 }}>
+          <h3>Compras y ventas · lo que tenés y lo que ya cerraste</h3>
+
+          {/* Lo que hay que saber ANTES de apretar nada. */}
+          {(ops.ya_cargados || []).length > 0 && (
+            <div className="aviso ojo">
+              <b>{ops.cartera}</b> ya tiene cargados a mano {ops.ya_cargados.length} de estos
+              papeles: <b className="mono">{ops.ya_cargados.join(", ")}</b>. Importar
+              las posiciones <b>no los pisa</b> —lo cargado a mano no se toca nunca— así que
+              quedarían <b>dos veces</b> y la cartera valdría el doble. Borralos antes, o
+              importá sólo las operaciones cerradas.
+            </div>)}
+          {(ops.ya_cerradas || []).length > 0 && (
+            <div className="aviso ojo">
+              <b>{ops.ya_cerradas.length} de estas operaciones cerradas ya están cargadas</b> en{" "}
+              {ops.cartera}: {ops.ya_cerradas.map((c) => `${c.ticker} ${c.sell_date} × ${num(c.qty, 0)}`).join(" · ")}.
+              El deduplicado no las ve —vienen con otros precios, porque una convierte de una
+              forma y la otra con el MEP— así que <b>el resultado se contaría dos veces</b>.
+              Borrá las que ya tenés antes de importar, con la ✕ de la tabla de cerradas.
+            </div>)}
+          {(ops.control || []).length > 0 && (
+            <div className="aviso ojo">
+              <b>El historial no cuadra con la cuenta</b> en {ops.control.length}{" "}
+              {ops.control.length === 1 ? "papel" : "papeles"}:{" "}
+              {ops.control.map((c) => `${c.ticker} (broker ${num(c.broker, 0)}, historial ${num(c.historial, 0)})`).join(" · ")}.
+              Suele ser historial que no llega hasta la primera compra.
+            </div>)}
+          {ops.cortado && (
+            <div className="aviso ojo">Historial recortado: faltan movimientos viejos y el
+              apareo puede quedar incompleto.</div>)}
+
+          <div className="tabla-wrap"><table>
+            <thead><tr>
+              <th>Ticker</th><th>Compra</th><th>Venta</th><th className="n">Cantidad</th>
+              <th className="n">Precio compra</th><th className="n">Precio venta</th>
+              <th className="n">Resultado</th>
+            </tr></thead>
+            <tbody>
+              {(ops.abiertos || []).map((a, i) => (
+                <tr key={"a" + i}>
+                  <td className="mono"><b>{a.ticker}</b>
+                    <span className="chip ok" style={{ marginLeft: 6, minWidth: 0 }}>abierta</span></td>
+                  <td className="mono">{a.buy_date}</td>
+                  <td style={{ color: "var(--texto-3)" }}>—</td>
+                  <td className="n">{num(a.qty, 2)}</td>
+                  <td className="n">{usd(a.buy_price, 4)}</td>
+                  <td className="n">—</td><td className="n">—</td>
+                </tr>))}
+              {(ops.cerrados || []).map((c, i) => (
+                <tr key={"c" + i} style={fuera.has(c.clave) ? { opacity: .45 } : undefined}>
+                  <td className="mono">
+                    <label style={{ display: "inline-flex", alignItems: "center", gap: 6,
+                                    cursor: "pointer" }}
+                           title={fuera.has(c.clave) ? "No se importa" : "Se importa"}>
+                      <input type="checkbox" checked={!fuera.has(c.clave)}
+                             onChange={() => alternar(c.clave)} />
+                      {c.ticker}
+                    </label></td>
+                  <td className="mono">{c.buy_date}</td>
+                  <td className="mono">{c.sell_date}</td>
+                  <td className="n">{num(c.qty, 2)}</td>
+                  <td className="n">{usd(c.buy_price, 4)}</td>
+                  <td className="n">{usd(c.sell_price, 4)}</td>
+                  <td className={"n " + signo(c.pnl)}>{usd(c.pnl)}</td>
+                </tr>))}
+              {(ops.cerrados || []).length > 0 && (
+                <tr style={{ fontWeight: 700 }}>
+                  <td colSpan={6}>Resultado de lo cerrado</td>
+                  <td className={"n " + signo(ops.cerrados.reduce((s, c) => s + c.pnl, 0))}>
+                    {usd(ops.cerrados.reduce((s, c) => s + c.pnl, 0))}</td>
+                </tr>)}
+            </tbody>
+          </table></div>
+
+          <div style={{ borderTop: "1px solid var(--borde)", marginTop: 12, paddingTop: 12,
+                        display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 13 }}>Llevar a la cartera</span>
+            <select value={destino} onChange={(e) => setDestino(e.target.value)}
+                    disabled={!!ops.cartera}>
+              <option value="">elegí una…</option>
+              {(ops.carteras || []).map((n) => <option key={n} value={n}>{n}</option>)}
+            </select>
+            <button className="btn" disabled={!destino || impOps?.estado === "yendo"
+                                              || !(ops.abiertos || []).length}
+                    onClick={() => importarOps("posiciones")}>
+              {impOps?.estado === "yendo" && impOps.que === "posiciones"
+                ? "Importando…" : `Importar ${(ops.abiertos || []).length} posiciones`}
+            </button>
+            <button className="btn"
+                    disabled={!destino || impOps?.estado === "yendo" || !cuantasCerradas}
+                    onClick={() => importarOps("cerradas")}>
+              {impOps?.estado === "yendo" && impOps.que === "cerradas"
+                ? "Importando…" : `Importar ${cuantasCerradas} operaciones cerradas`}
+            </button>
+            {impOps?.ok && <span className="ok" style={{ fontSize: 12 }}>
+              {impOps.que === "posiciones"
+                ? <>Listo: {impOps.importadas} posiciones en {impOps.cartera}
+                   {impOps.reemplazadas ? ` (pisó ${impOps.reemplazadas})` : ""}.</>
+                : <>Listo: {impOps.agregados} operaciones en {impOps.cartera}
+                   {impOps.reemplazados ? ` (pisó ${impOps.reemplazados})` : ""}.</>}
+            </span>}
+            {impOps?.error && <span className="mal" style={{ fontSize: 12 }}>{impOps.error}</span>}
+          </div>
+          <div className="pie">
+            Las dos importaciones son independientes: una trae <b>lo que tenés</b> y la otra
+            <b> lo que hiciste</b>. Cada una pisa sólo lo suyo de la vez anterior y nunca lo
+            que cargaste a mano. Una compra en pesos cierra contra su venta en dólares —es la
+            misma posición, no dos— y cada pata se pasa a dólares con el MEP de <b>su</b> fecha:
+            eso es lo que mide si dolarizarte por el CEDEAR o por el bono te convino. Vale
+            igual si comprás y vendés las dos veces en pesos. El precio sale del neto
+            liquidado, así que ya tiene la comisión adentro. Las cerradas se importan
+            sólo si están tildadas: vienen destildadas las que la cartera ya tiene, para
+            no contar el mismo resultado dos veces.
+          </div>
+        </div>);
+      })()}
 
       {/* ── Tracking de FCI ── */}
       <div className="panel" style={{ marginBottom: 14 }}>

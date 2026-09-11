@@ -867,6 +867,77 @@ def test_fci_cada_1000_cuotapartes():
         "Un CEDEAR no se toca: la escala /1000 es sólo de los FCI."
 
 
+def test_comprar_en_pesos_y_vender_en_dolares_es_una_sola_operacion():
+    """Dolarizarse por CEDEAR: entra en pesos, sale en dólares, cierra una vez.
+
+    Agrupar por moneda dejaba la compra colgada como posición abierta que ya no
+    existe y perdía el resultado de la venta. Pasó con NKE en la cuenta real:
+    244 nominales comprados en pesos el 2026-04-21 y vendidos en dólares el
+    2026-07-31.
+
+    Cada pata va a dólares con el MEP de SU fecha, que es lo que mide si la
+    jugada convino. Y el precio sale del neto liquidado —`amount` dividido por
+    la cantidad—, así que ya lleva la comisión adentro: `price` viene nulo.
+    """
+    cocos = require("core.broker", "cocos")
+
+    movs = [  # del más nuevo al más viejo, como los entrega el broker
+        {"movementType": "SELL", "ticker": "NKE", "fecha": "2026-07-31", "price": None,
+         "currency": "USD", "amount": 1000.0, "quantity": {"executed": -100}},
+        {"movementType": "BUY", "ticker": "COME", "fecha": "2026-03-01", "price": None,
+         "currency": "ARS", "amount": -50000.0, "quantity": {"executed": 1000}},
+        # El rulo de dolarización: el bono entra en pesos y sale en dólares, y el
+        # broker informa "AL30" en las dos patas.
+        {"movementType": "SELL", "ticker": "AL30", "fecha": "2026-03-01", "price": None,
+         "currency": "USD", "amount": 120.0, "quantity": {"executed": -1000}},
+        {"movementType": "BUY", "ticker": "AL30", "fecha": "2026-01-10", "price": None,
+         "currency": "ARS", "amount": -100000.0, "quantity": {"executed": 1000}},
+        {"movementType": "BUY", "ticker": "NKE", "fecha": "2026-01-10", "price": None,
+         "currency": "ARS", "amount": -800000.0, "quantity": {"executed": 100}},
+    ]
+    mep_por_fecha = {"2026-01-10": 1000.0, "2026-03-01": 1250.0}
+    orig_hist, orig_pos, orig_mep = (cocos._historial_completo, cocos.posiciones,
+                                     cocos.mep.a_usd)
+    cocos._historial_completo = lambda: {"movimientos": movs, "cortado": False}
+    # COME no está en la cuenta y nunca se operó en dólares: es una acción local.
+    cocos.posiciones = lambda: []
+    cocos.mep.a_usd = lambda importe, fecha, *a, **k: importe / mep_por_fecha[fecha]
+    try:
+        r = cocos.operaciones()
+    finally:
+        (cocos._historial_completo, cocos.posiciones,
+         cocos.mep.a_usd) = orig_hist, orig_pos, orig_mep
+
+    cerradas = {c["ticker"]: c for c in r["cerrados"]}
+    assert "NKED.BA" in cerradas, \
+        "La compra en pesos tiene que cerrar contra la venta en dólares, no quedar abierta."
+    nke = cerradas["NKED.BA"]
+    assert casi(nke["buy_price"], 8.0, 1e-6), \
+        "800.000 pesos al MEP de 1.000 son 800 dólares por 100 nominales: 8 cada uno."
+    assert casi(nke["sell_price"], 10.0, 1e-6), "La venta ya estaba en dólares."
+    assert casi(nke["pnl"], 200.0, 1e-6) and nke["moneda"] == "USD", \
+        "Ya convertido: marcarlo en pesos lo haría convertir de nuevo."
+    assert not any(a["ticker"].startswith("NKE") for a in r["abiertos"]), \
+        "No puede quedar abierta una posición que se vendió entera."
+
+    abiertas = {a["ticker"]: a for a in r["abiertos"]}
+    assert "COME.BA" in abiertas, \
+        "Una acción argentina no tiene tramo en dólares: queda con su ticker."
+    assert casi(abiertas["COME.BA"]["buy_price"], 0.04, 1e-9), \
+        "50.000 pesos al MEP de 1.250 son 40 dólares por 1.000 nominales: 0,04 cada uno."
+
+    # El bono cierra como cualquier otra cosa: comprar AL30 en pesos y venderlo
+    # en dólares es dolarizarse, no una amortización.
+    assert "AL30D" in cerradas, \
+        "El bono comprado en pesos y vendido en dólares tiene que cerrar."
+    al30 = cerradas["AL30D"]
+    assert casi(al30["buy_price"], 0.1, 1e-9), \
+        "100.000 pesos al MEP de 1.000 son 100 dólares por 1.000 nominales."
+    assert casi(al30["pnl"], 20.0, 1e-6), "Salió a 120 dólares: ganó 20."
+    assert not any("AL30" in a["ticker"] for a in r["abiertos"]), \
+        "Se vendió entero: no puede quedar nada abierto."
+
+
 def test_el_tiempo_bajo_el_agua_cuenta_la_racha_en_curso():
     """TWU: días corridos que el lote lleva SIN volver a lo que costó.
 
