@@ -181,10 +181,6 @@ const leerPref = () => { try { return localStorage.getItem(FCI_KEY) !== "0"; }
 const guardarPref = (v) => { try { localStorage.setItem(FCI_KEY, v ? "1" : "0"); }
                              catch { /* sin almacenamiento: vale sólo esta sesión */ } };
 
-// El lote con el que el importador de Cocos marca el resultado de los FCI
-// (`cocos.LOTE_RESULTADOS_FCI`). Es lo que los distingue del resto de lo cerrado.
-const LOTE_FCI = "cocos-fci";
-
 /* El mismo color con transparencia. Las bandas de un abanico se pisan entre
    ellas, y el `opacity` de la traza no toca el relleno: tiene que ir en el
    color o la última cartera dibujada tapa a todas las anteriores. */
@@ -950,7 +946,8 @@ function Posicion({ d, cartera, recargar, extras, bench, sim, setSim }) {
     api(`/api/carteras/${encodeURIComponent(cartera)}/realizado`).then(setCrudo); }, [cartera, n]);
   // Un solo embudo: los KPIs, el calendario y el panel de cerradas cuelgan de
   // `real`, así que el toggle se aplica una vez acá y llega a los tres.
-  const hayFci = (crudo?.trades || []).some((t) => t.tipo === "fci");
+  const fciTrades = (crudo?.trades || []).filter((t) => t.tipo === "fci");
+  const hayFci = fciTrades.length > 0;
   const real = crudo && !conFci ? quitarFci(crudo) : crudo;
   const cerrado = real?.n ? real.total_usd : null;
 
@@ -1055,7 +1052,7 @@ function Posicion({ d, cartera, recargar, extras, bench, sim, setSim }) {
                    (a, f) => ({ ...a, [f.ticker]: (a[f.ticker] || 0) + f.qty }), {})} />
 
       {real && <PnlRealizado real={real} cartera={cartera} recargar={() => setN((x) => x + 1)}
-                             hayFci={hayFci} conFci={conFci}
+                             fciTrades={fciTrades} hayFci={hayFci} conFci={conFci}
                              setConFci={(v) => { setConFci(v); guardarPref(v); }} />}
 
       {ev && <RuedasTicker ev={ev} />}
@@ -1295,15 +1292,15 @@ function AltaDividendo({ cartera, recargar }) {
   );
 }
 
-function PnlRealizado({ real, cartera, recargar, hayFci, conFci, setConFci }) {
+function PnlRealizado({ real, cartera, recargar, fciTrades, hayFci, conFci, setConFci }) {
   const [abierto, setAbierto] = useState(false);
   const [detalle, setDetalle] = useState(false);
   const trades = real.trades || [];
   // Un FCI viaja con la marca de su lote: es un resultado ya cerrado como
   // cualquier otro —suma al neto de arriba— pero se mira aparte, porque no es
   // una operación sino el saldo de cientos de suscripciones y rescates.
-  const esFci = (t) => t.lote === LOTE_FCI;
-  const fci = trades.filter(esFci);
+  const esFci = (t) => t.tipo === "fci";
+  const fci = fciTrades || [];
   const fciUsd = fci.reduce((s, t) => s + t.pnl_usd, 0);
   const porTicker = Object.values(trades.reduce((acc, t) => {
     const x = acc[t.ticker] || (acc[t.ticker] = { ticker: t.ticker, n: 0, usd: 0,
@@ -1455,7 +1452,10 @@ function PnlRealizado({ real, cartera, recargar, hayFci, conFci, setConFci }) {
               que costó—, y cada movimiento se pasó a dólares con el MEP de <b>su</b> fecha,
               no con el de hoy. Por eso un fondo puede ganar en pesos y perder en dólares.
               Lo que todavía tenés no está acá: eso es tenencia y vive en la posición.
-              El <b>{usd(fciUsd)}</b> de subtotal ya está sumado en el neto de arriba.
+              {conFci
+                ? <>El <b>{usd(fciUsd)}</b> de subtotal <b>está sumado</b> en el neto de arriba.</>
+                : <>El <b>{usd(fciUsd)}</b> de subtotal <b>no</b> está contando en el neto de
+                   arriba: lo apagaste con el interruptor «con FCI». Acá se sigue viendo igual.</>}
             </div>
           ) : (
           <div className="pie">
