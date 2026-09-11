@@ -1730,6 +1730,32 @@ def test_la_carpeta_del_usuario_no_se_arma_con_lo_que_venga():
             pass
 
 
+def test_la_fecha_de_alta_no_se_pisa_al_volver_a_entrar():
+    """El perfil anota el alta una vez y el último ingreso siempre.
+
+    Si `alta` se reescribiera en cada ingreso, la lista de altas diría que todos
+    se dieron de alta la última vez que entraron, que es justo lo que no sirve.
+    """
+    store = require("core.io", "store")
+
+    with datos_aparte():
+        store.como("777")
+        store.anotar({"email": "a@b.com", "nombre": "Aa"})
+        primera = store.altas()[0]
+
+        store.anotar({"email": "a@b.com", "nombre": "Aa"})
+        segunda = store.altas()[0]
+
+        assert segunda["alta"] == primera["alta"], "el alta es la primera vez, no la última"
+        assert segunda["visto"] >= primera["visto"]
+        assert len(store.altas()) == 1, "un usuario, una fila"
+
+        store.como("888")
+        store.anotar({"email": "c@d.com", "nombre": "Cc"})
+        assert [u["email"] for u in store.altas()] == ["a@b.com", "c@d.com"], \
+            "la lista va del más viejo al más nuevo"
+
+
 def test_el_state_del_ingreso_lo_firmamos_nosotros():
     """La vuelta de Google sólo vale si el `state` salió de acá.
 

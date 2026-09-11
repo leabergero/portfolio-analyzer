@@ -26,6 +26,7 @@ import contextvars
 import io
 import json
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 
 _DATA = Path(__file__).resolve().parents[2] / "data"
@@ -77,6 +78,40 @@ def _carteras() -> Path:
 
 def _realizado() -> Path:
     return REALIZADO if _usuario.get() is None else _dir() / "realized.json"
+
+
+def _perfil() -> Path:
+    return _dir() / "perfil.json"
+
+
+def anotar(usuario: dict) -> None:
+    """Deja constancia de quién es el dueño de esta carpeta.
+
+    La app no necesita el email para funcionar —la carpeta la nombra el `sub` de
+    Google— pero sin él la lista de altas son veinte dígitos sin cara. Se guarda
+    dentro de la carpeta del usuario, con los mismos permisos 600 que sus
+    carteras, y no en un registro central: así borrar a alguien sigue siendo
+    borrar un directorio.
+
+    `alta` se escribe una sola vez; `visto` en cada ingreso.
+    """
+    if quien() is None:
+        return                     # en local no hay a quién anotar
+    antes = _leer(_perfil())
+    ahora = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    _escribir(_perfil(), {**antes,
+                          "sub": quien(),
+                          "email": usuario.get("email", ""),
+                          "nombre": usuario.get("nombre", ""),
+                          "alta": antes.get("alta") or ahora,
+                          "visto": ahora})
+
+
+def altas() -> list:
+    """Todos los que entraron alguna vez, del más viejo al más nuevo."""
+    perfiles = [_leer(d / "perfil.json") for d in (_DATA / "usuarios").glob("*") if d.is_dir()]
+    return sorted([p for p in perfiles if p],
+                  key=lambda p: (p.get("alta", ""), p.get("sub", "")))
 
 
 def _plazas() -> Path:

@@ -47,6 +47,7 @@ def entrar_google():
     # sola vez y se puede borrar; borrada, no vuelve.
     store.como(usuarios.carpeta(usuario))
     store.sembrar()
+    store.anotar(usuario)
 
     r = redirect(destino)
     r.set_cookie(usuarios.COOKIE, usuarios.emitir(usuario),
