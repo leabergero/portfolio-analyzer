@@ -6,19 +6,25 @@ entre sí: no hay razón para que el usuario espere la suma de todos los tiempos
 Se lanzan juntos y el frontend va mostrando cada panel a medida que termina, en
 vez de una pantalla en blanco hasta que esté todo.
 
-Los resultados quedan en memoria por `run_id`. No se persisten a propósito: la
-caché de precios y la de `.info` ya evitan el trabajo caro, así que rehacer un
-análisis es barato, y guardar resultados obligaría a invalidarlos cuando cambian
-los precios — más complejidad que beneficio.
+Los resultados quedan en memoria por `run_id`, y una corrida se reusa mientras
+nada de lo que se analiza haya cambiado: ver `_huella`. Volver a la pantalla no
+es pedir otro análisis, y en la web cada recálculo era media pantalla de espera.
+
+No se persisten a disco a propósito. Son de esta vuelta y de este proceso; la
+caché de precios, que sí vive en disco, es la que evita el trabajo de verdad.
 """
 
 import contextvars
+import hashlib
+import json
 import threading
 import time
 import traceback
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 
+from core import mercado
+from core.data.sources import TTL_SPOT_H
 from core.io import store
 from core.models import (blacklitterman, capm, composicion, markowitz,
                          momentum, montecarlo, portfolio, regimenes, risk,
@@ -69,6 +75,54 @@ _pool = ThreadPoolExecutor(max_workers=6, thread_name_prefix="modelo")
 # una sesión larga.
 _MAX_CORRIDAS = 20
 
+# ── Volver a Análisis no es pedir otro análisis ───────────────────────────────
+# Cada vez que la pantalla se monta lanza el lote, así que ir a Comparación y
+# volver rehacía los catorce modelos. En la máquina de su dueño se nota poco; en
+# la web es media pantalla de espera por cada ida y vuelta.
+#
+# Mientras no cambie NADA de lo que se está analizando, el resultado tampoco
+# cambia: se devuelve la corrida que ya existe. El techo es el mismo que el de
+# los precios —yfinance se vuelve a preguntar cada dos horas—, así que recalcular
+# antes daría exactamente los mismos números con otra espera.
+#
+# Lo que "no cambie nada" quiere decir, y por qué cada cosa está en la huella:
+#
+#   · el usuario, porque en la web hay muchos a la vez y todos tienen una
+#     cartera llamada «Modelo» — sin esto uno vería el análisis de otro;
+#   · la plaza, porque la misma cartera mirada desde Europa da otros números;
+#   · las posiciones ya simuladas, que es lo que los modelos reciben de verdad.
+_TTL_CORRIDA_S = TTL_SPOT_H * 3600
+
+
+def _huella(nombre_cartera, posiciones, elegidos) -> str:
+    crudo = json.dumps([store.quien(), mercado.actual(), nombre_cartera,
+                        sorted(elegidos), posiciones],
+                       sort_keys=True, default=str)
+    return hashlib.sha1(crudo.encode()).hexdigest()[:16]
+
+
+def _reusable(huella: str):
+    """El `run_id` de una corrida que sirve tal cual, o None.
+
+    Una que todavía corre también sirve: son los mismos modelos sobre los mismos
+    datos, y mandar el segundo lote sólo los haría pelear por el procesador.
+
+    La que fracasó entera no se reusa. Eso no es un resultado, es el entorno
+    caído —sin red, sin fuente de precios— y dejarlo pegado dos horas convierte
+    un tropiezo de un minuto en una tarde sin análisis.
+    """
+    ahora = time.time()
+    with _lock:
+        candidatas = [(c["inicio"], rid, c) for rid, c in _corridas.items()
+                      if c.get("huella") == huella
+                      and ahora - c["inicio"] < _TTL_CORRIDA_S]
+        for _, rid, c in sorted(candidatas, reverse=True):
+            modelos = c["modelos"].values()
+            if all(m["estado"] == "error" for m in modelos):
+                continue
+            return rid
+    return None
+
 
 def _guardar(run_id, modelo, estado, dato=None):
     with _lock:
@@ -92,15 +146,24 @@ def _ejecutar(run_id, modelo, fn, posiciones, cartera):
         _guardar(run_id, modelo, "error", {"error": f"{type(e).__name__}: {e}"})
 
 
-def lanzar(nombre_cartera: str, posiciones: list, modelos: list = None) -> str:
-    """Dispara todos los modelos y devuelve el identificador de la corrida."""
+def lanzar(nombre_cartera: str, posiciones: list, modelos: list = None,
+           forzar: bool = False) -> str:
+    """Dispara todos los modelos y devuelve el identificador de la corrida.
+
+    Si ya hay una corrida viva sobre exactamente lo mismo, devuelve esa: volver
+    a la pantalla no es pedir otro análisis. `forzar` es el botón de recalcular.
+    """
     elegidos = [m for m in (modelos or MODELOS) if m in MODELOS]
+    huella = _huella(nombre_cartera, posiciones, elegidos)
+    if not forzar and (previa := _reusable(huella)) is not None:
+        return previa
+
     run_id = uuid.uuid4().hex[:12]
 
     with _lock:
         _corridas[run_id] = {
             "cartera": nombre_cartera, "estado": "corriendo",
-            "inicio": time.time(),
+            "inicio": time.time(), "huella": huella,
             "modelos": {m: {"estado": "en cola", "resultado": None} for m in elegidos},
         }
         # Descarta las más viejas.
@@ -152,6 +215,8 @@ def estado(run_id: str):
         return {
             "run_id": run_id, "cartera": c["cartera"], "estado": c["estado"],
             "duracion": c.get("duracion"),
+            # Desde cuándo son estos números, para poder decirlo en pantalla.
+            "edad_s": round(time.time() - c["inicio"]),
             "transcurrido": round(time.time() - c["inicio"], 2),
             "modelos": {m: {"estado": d["estado"], "nombre": MODELOS[m][0],
                             "segundos": d.get("t")}

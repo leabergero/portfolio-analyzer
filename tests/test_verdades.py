@@ -867,6 +867,208 @@ def test_fci_cada_1000_cuotapartes():
         "Un CEDEAR no se toca: la escala /1000 es sólo de los FCI."
 
 
+def test_el_resultado_de_un_fci_no_entra_al_flujo_de_la_evolucion():
+    """Un FCI no puede inventar aportes y retiros que nunca hubo.
+
+    Su registro resume años de suscripciones y rescates en cantidad 1 con los
+    importes totales como precios. Para el P&L realizado eso es exacto; para la
+    reconstrucción día a día se lee como si hubieras puesto y sacado todo ese
+    dinero en dos fechas sueltas. Con COCORMA —el barrido diario de liquidez—
+    eran 23.554 dólares de aporte y 23.728 de retiro falsos: el capital movido
+    se inflaba un 36 % y la TIR anual pasaba de −4,29 % a −1,33 %.
+
+    Sigue contando en el resultado realizado, que es donde vive. Lo que no puede
+    es entrar a la curva como si fuera una operación.
+    """
+    import pandas as pd
+
+    sources = require("core.data", "sources")
+    portfolio = require("core.models", "portfolio")
+
+    fechas = pd.date_range("2026-01-01", periods=40, freq="B")
+    serie = pd.Series([100.0 + i for i in range(40)], index=fechas)
+    # El fondo TIENE serie de cuotaparte, como COCORMA, que es lo que lo hacía
+    # peligroso: los que no la tienen ya quedaban fuera solos.
+    cuotaparte = pd.Series([0.0075 + i * 1e-5 for i in range(40)], index=fechas)
+    pb, pa = sources.precios_base, portfolio.precios_actuales
+    sources.precios_base = lambda t, **k: serie if t == "AAA" else cuotaparte
+    portfolio.precios_actuales = lambda pos, **k: {"AAA": float(serie.iloc[-1])}
+    try:
+        pos = [{"ticker": "AAA", "qty": 10, "buy_price": 100.0, "buy_date": "2026-01-01",
+                "currency": "USD", "commissions": 0.0}]
+        fondo = {"ticker": "FONDO", "buy_date": "2026-01-02", "sell_date": "2026-02-20",
+                 "buy_price": 50000.0, "sell_price": 50500.0, "qty": 1, "buy_comm": 0.0,
+                 "sell_comm": 0.0, "moneda": "USD", "pnl": 500.0}
+
+        solo = portfolio.evolucion(pos, [])
+        marcado = portfolio.evolucion(pos, [dict(fondo, tipo="fci")])
+        crudo = portfolio.evolucion(pos, [fondo])
+    finally:
+        sources.precios_base, portfolio.precios_actuales = pb, pa
+
+    assert marcado["aportado_usd"] == solo["aportado_usd"], \
+        "El resultado de un FCI no es plata que entró a la cartera ese día."
+    assert marcado["retirado_usd"] == solo["retirado_usd"], \
+        "Ni plata que salió: es el saldo de cientos de movimientos repartidos en años."
+    assert marcado["resultado_usd"] == solo["resultado_usd"], \
+        "La curva de la cartera no se mueve por un fondo que no puede valuar."
+    assert "FONDO" in marcado["sin_serie"], \
+        "Y se dice en pantalla: queda fuera de la curva, no desaparece sin aviso."
+
+    # El contraste: sin la marca, el mismo registro contamina el flujo. Es
+    # exactamente lo que pasaba antes, y lo que este test existe para impedir.
+    assert crudo["aportado_usd"] > solo["aportado_usd"] + 40000, \
+        "Sin la marca el importe entra como aporte: si esto deja de pasar, la marca sobra."
+
+
+def test_dos_usuarios_no_comparten_una_corrida_de_analisis():
+    """Volver a la pantalla reusa el análisis hecho, pero sólo el propio.
+
+    Los resultados viven en memoria por proceso y la web atiende a todos en el
+    mismo intérprete. Si la huella no mirara de quién es la cartera, dos personas
+    con una cartera llamada «Modelo» —el nombre que trae la app— se verían los
+    números del otro. La plaza va por el mismo motivo: la misma cartera medida
+    desde Europa no da lo mismo.
+    """
+    huella = require("api.jobs", "_huella")
+    from core import mercado
+    from core.io import store
+
+    pos = [{"ticker": "AAPL", "qty": 10, "buy_price": 100.0, "buy_date": "2026-01-02"}]
+    modelos = ["posicion", "riesgo"]
+
+    store.como(None); mercado.poner("AR")
+    try:
+        base = huella("Modelo", pos, modelos)
+        assert huella("Modelo", pos, modelos) == base, \
+            "Lo mismo dos veces tiene que reusarse: si no, volver a la pantalla recalcula."
+        assert huella("Modelo", pos, list(reversed(modelos))) == base, \
+            "El orden en que se piden los modelos no cambia el resultado."
+
+        mercado.poner("EU")
+        assert huella("Modelo", pos, modelos) != base, \
+            "Otra plaza es otro número: no puede servirse el análisis en dólares."
+        mercado.poner("AR")
+
+        store.como("otro-usuario")
+        assert huella("Modelo", pos, modelos) != base, \
+            "La cartera «Modelo» de otra persona no es esta cartera."
+        store.como(None)
+
+        otras = [{**pos[0], "qty": 11}]
+        assert huella("Modelo", otras, modelos) != base, \
+            "Si cambió la cartera —o la simulación que se le puso encima— hay que recalcular."
+        assert huella("Otra", pos, modelos) != base, "Otra cartera, otra corrida."
+    finally:
+        store.como(None); mercado.poner("AR")
+
+
+def test_un_nan_no_puede_salir_al_json_del_analisis():
+    """Un hueco en la serie de un papel no puede dejar ciega a toda la sección.
+
+    NaN no existe en JSON: si uno se cuela, `JSON.parse` del navegador tira y el
+    análisis entero deja de verse —los catorce modelos, no sólo ese papel—. Pasó
+    al importar un FCI: COCORMA tiene un único precio en su vida, así que en las
+    30 ruedas de la ventana `pct_change` daba NaN y la respuesta dejaba de ser
+    JSON válido.
+    """
+    import json
+    import numpy as np
+    import pandas as pd
+
+    redondear, acumulado = require("core.models.portfolio",
+                                   "redondear", "acumulado_visible")
+
+    assert redondear(np.nan) is None, "Un NaN tiene que salir como null."
+    assert redondear(np.inf) is None and redondear(-np.inf) is None, \
+        "Un infinito tampoco es JSON: dividir por un precio en cero lo produce."
+    assert redondear(1.239) == 1.24, "Un número normal se sigue redondeando igual."
+
+    # Comprado dentro de la ventana: no hay precio en las ruedas anteriores.
+    nuevo = pd.Series([np.nan, np.nan, 100.0, 110.0])
+    assert acumulado(nuevo) == 10.0, \
+        "Se mide desde el primer precio que existe, no desde el hueco."
+    assert acumulado(pd.Series([np.nan, np.nan, 100.0])) is None, \
+        "Con un solo precio no hay variación que informar."
+    assert acumulado(pd.Series([0.0, 50.0])) is None, \
+        "Partir de cero da infinito: eso tampoco entra al JSON."
+
+    # La prueba que importa: esto es lo que hace el navegador al recibirlo.
+    payload = {"var_pct": [redondear(v) for v in nuevo], "acum_pct": acumulado(nuevo)}
+    texto = json.dumps(payload)
+    assert "NaN" not in texto and "Infinity" not in texto
+    json.loads(texto, parse_constant=lambda c: (_ for _ in ()).throw(
+        AssertionError(f"El navegador no puede leer «{c}»: el análisis se cae entero.")))
+
+
+def test_el_resultado_de_un_fci_se_mide_al_mep_de_cada_fecha():
+    """Un FCI en pesos puede ganar en pesos y perder en dólares.
+
+    Convertir el neto al MEP de hoy no es una aproximación, es otro número: con
+    los movimientos reales de COCOSPPA daba +141 dólares por ese camino y −170
+    apareando cada movimiento con el MEP de su fecha. Hasta el signo cambia.
+
+    Acá el fondo rinde 50 % en pesos mientras el MEP se duplica: en dólares es
+    una pérdida, y eso es lo que tiene que llegar a operaciones cerradas.
+    """
+    cocos = require("core.broker.cocos", "_resultados_realizados")
+    from core.broker import cocos as mod
+
+    mep_por_fecha = {"2025-01-10": 1000.0, "2026-01-10": 2000.0}
+    original = mod.mep.a_usd
+    mod.mep.a_usd = lambda importe, fecha, *a, **k: importe / mep_por_fecha[fecha]
+    try:
+        # Como los entrega el broker: del más nuevo al más viejo.
+        r = cocos([
+            # El broker informa las cuotapartes de un rescate en negativo: así
+            # llegan de verdad, y en signo el apareo no cierra nunca.
+            {"movementType": "REDEMPTION", "ticker": "COCOSPPA", "fecha": "2026-01-10",
+             "currency": "ARS", "amount": 150000.0, "quantity": {"executed": -100.0}},
+            {"movementType": "SUBSCRIPTION", "ticker": "COCOSPPA", "fecha": "2026-01-10",
+             "currency": "ARS", "amount": 200000.0, "quantity": {"executed": 100.0}},
+            {"movementType": "SUBSCRIPTION", "ticker": "COCOSPPA", "fecha": "2025-01-10",
+             "currency": "ARS", "amount": 100000.0, "quantity": {"executed": 100.0}},
+        ])
+    finally:
+        mod.mep.a_usd = original
+
+    assert len(r["trades"]) == 1, "Un registro por fondo, no uno por movimiento."
+    t = r["trades"][0]
+    assert casi(t["buy_price"], 100.0, 1e-6), \
+        "El costo tiene que ser el de las cuotapartes rescatadas, al MEP del día que se compraron."
+    assert casi(t["sell_price"], 75.0, 1e-6), \
+        "El ingreso va al MEP del día del rescate, no al de hoy."
+    assert casi(t["pnl"], -25.0, 1e-6), \
+        "Ganó 50 % en pesos con el MEP al doble: en dólares perdió."
+    assert t["moneda"] == "USD", \
+        "El registro ya viene convertido: marcarlo en pesos lo haría convertir dos veces."
+    assert t["qty"] == 1 and casi(r["total_usd"], -25.0, 1e-6)
+
+
+def test_lo_que_no_rescataste_de_un_fci_no_es_resultado_cerrado():
+    """La suscripción que sigue viva es tenencia, no P&L: iría contada dos veces.
+
+    Se importa por su propio botón, como lote de la cartera. Si además entrara
+    acá, el mismo dinero figuraría abierto y cerrado a la vez.
+    """
+    cocos = require("core.broker.cocos", "_resultados_realizados")
+
+    r = cocos([
+        {"movementType": "SUBSCRIPTION", "ticker": "COCOAUSD", "fecha": "2026-01-10",
+         "currency": "USD", "amount": 300.0, "quantity": {"executed": 100.0}},
+        {"movementType": "REDEMPTION", "ticker": "COCOAUSD", "fecha": "2026-01-05",
+         "currency": "USD", "amount": 120.0, "quantity": {"executed": -100.0}},
+        {"movementType": "SUBSCRIPTION", "ticker": "COCOAUSD", "fecha": "2026-01-01",
+         "currency": "USD", "amount": 100.0, "quantity": {"executed": 100.0}},
+    ])
+
+    t = r["trades"][0]
+    assert casi(t["pnl"], 20.0, 1e-6), \
+        "Cerró el primer lote (100 → 120). El de 300 sigue abierto y no es resultado."
+    assert casi(t["buy_price"], 100.0, 1e-6), \
+        "FIFO: se cierra contra las cuotapartes más viejas, no contra las últimas."
+
+
 def test_un_fci_no_es_un_bono_ni_cotiza_en_dolares():
     """Un lote de FCI importado del broker no puede entrar con source="cocos".
 

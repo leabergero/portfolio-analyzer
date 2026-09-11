@@ -232,6 +232,31 @@ def valuar(posiciones, precios=None, previos=None, fechas=None, vivo=False) -> d
     }
 
 
+# ── Un NaN deja ciega a toda la sección ───────────────────────────────────────
+# Un ticker comprado dentro de la ventana no cotiza en las ruedas anteriores —y
+# un FCI recién importado tiene un solo precio en toda su vida—, así que ahí
+# `pct_change` devuelve NaN. El problema no es el hueco: es que NaN no existe en
+# JSON, el navegador no puede parsear la respuesta y se cae el análisis entero,
+# no sólo ese papel. Sale como null, que el gráfico dibuja como lo que es.
+
+def redondear(v, dec=2):
+    """El número redondeado, o None si no es finito."""
+    v = float(v)
+    return round(v, dec) if np.isfinite(v) else None
+
+
+def acumulado_visible(serie):
+    """Variación punta a punta de lo que realmente tiene precio.
+
+    Arrancar en un hueco da NaN aunque el resto de la serie esté sana: se mide
+    desde el primer precio que existe, y si no hay dos, no hay variación.
+    """
+    vivos = serie.dropna()
+    if len(vivos) < 2 or not float(vivos.iloc[0]):
+        return None
+    return redondear((float(vivos.iloc[-1]) / float(vivos.iloc[0]) - 1) * 100)
+
+
 def pnl_realizado(trades) -> dict:
     """Convierte a dólares los trades cerrados, con el MEP de cada pata.
 
@@ -496,6 +521,20 @@ def evolucion(posiciones, trades=None, n_ruedas: int = 30) -> dict:
             # No se vendió nada: entró plata y se queda en la cartera.
             dividendos.append((t["sell_date"], ingreso))
             continue
+        # El resultado de un FCI es el saldo de cientos de suscripciones y
+        # rescates repartidos en años, resumido en un registro con cantidad 1 y
+        # los importes totales como precios. Para el P&L eso es exacto; para una
+        # reconstrucción día a día es veneno, porque se lee como si hubieras
+        # puesto y sacado todo ese dinero en dos fechas sueltas. COCORMA, el
+        # barrido de liquidez, metía así 23.554 dólares de aporte y 23.728 de
+        # retiro que nunca existieron como movimiento: inflaba el capital movido
+        # un 36 % y corría la TIR tres puntos, de −4,29 % a −1,33 %.
+        #
+        # Sale por el mismo camino que todo lo que no se puede valuar, y por eso
+        # la pantalla lo nombra: está en el resultado realizado, no en la curva.
+        if t.get("tipo") == "fci":
+            sin_serie.add(ticker)
+            continue
         tramos.append((ticker, t["qty"], t["buy_date"], t["sell_date"], costo, ingreso))
 
     if not tramos:
@@ -666,8 +705,8 @@ def evolucion(posiciones, trades=None, n_ruedas: int = 30) -> dict:
             "fechas": [str(f.date()) for f in var.index],
             "tickers": [{
                 "ticker": t,
-                "var_pct": [round(float(v), 2) for v in var[t]],
-                "acum_pct": round((float(ult[t].iloc[-1]) / float(ult[t].iloc[0]) - 1) * 100, 2),
+                "var_pct": [redondear(v) for v in var[t]],
+                "acum_pct": acumulado_visible(ult[t]),
             } for t in orden if t in var.columns],
         },
     }

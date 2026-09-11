@@ -426,6 +426,48 @@ footer a:hover{text-decoration:underline}
   animation:lab-brillo 3s ease-in-out infinite}
 @keyframes lab-brillo{0%,60%{left:-60%}100%{left:120%}}
 
+/* TGL-01 · switch neón: la pastilla se enciende y la bola se desliza con un
+   rebote corto. Decide si el resultado de los FCI cuenta en el realizado —no es
+   una operación sino el saldo de cientos de suscripciones y rescates, y todavía
+   está en discusión si va—. Del picker se conserva la forma (pastilla, bola con
+   halo, etiqueta que se tiñe al encender) en tamaño de cabecera de panel; los
+   colores salen de la paleta. */
+.lab-interruptor{display:inline-flex;align-items:center;gap:8px;cursor:pointer;
+  user-select:none;font-size:12px;color:var(--texto-3)}
+.lab-interruptor input{position:absolute;opacity:0;width:0;height:0}
+.lab-interruptor .via{width:38px;height:20px;border-radius:10px;flex:none;position:relative;
+  background:var(--panel-2);border:1px solid var(--borde);transition:.35s}
+.lab-interruptor .bola{position:absolute;top:2px;left:2px;width:14px;height:14px;
+  border-radius:50%;background:var(--texto-3);
+  transition:.35s cubic-bezier(.6,-.3,.3,1.4)}
+.lab-interruptor input:checked + .via{background:var(--acento-suave);
+  border-color:var(--acento);box-shadow:inset 0 0 12px -4px var(--acento)}
+.lab-interruptor input:checked + .via .bola{left:20px;background:var(--acento);
+  box-shadow:0 0 10px var(--acento)}
+.lab-interruptor input:checked ~ span:last-child{color:var(--acento)}
+.lab-interruptor input:focus-visible + .via{outline:2px solid var(--acento);outline-offset:2px}
+
+/* BTN-03 · el botón lleva puesto el estado de lo que dispara: el punto gira
+   mientras corre y queda en verde mientras los números son de recién. Es el
+   recálculo del análisis, la única acción de la pantalla que tarda de verdad
+   —catorce modelos—, así que el botón que la pide es el lugar natural para
+   contar en qué anda. Del picker se conserva la forma (el punto que gira, los
+   tres estados) y los colores salen de la paleta; a diferencia del demo, acá el
+   estado es el real de la corrida y no un temporizador. */
+.lab-estados{display:inline-flex;align-items:center;justify-content:center;gap:7px;
+  padding:4px 12px;border-radius:6px;cursor:pointer;font:inherit;font-size:11.5px;
+  border:1px solid var(--borde);background:transparent;color:var(--acento);
+  transition:color .3s,border-color .3s,background .3s}
+.lab-estados:hover:not(:disabled){background:var(--acento-suave);border-color:var(--acento)}
+.lab-estados .punto{width:11px;height:11px;border:2px solid currentColor;
+  border-top-color:transparent;border-radius:50%;display:none;flex:none}
+.lab-estados.corriendo .punto{display:block;animation:lab-gira .7s linear infinite}
+.lab-estados.corriendo{color:var(--texto-3);border-color:var(--borde-suave);cursor:default}
+.lab-estados.corriendo:hover{background:transparent}
+.lab-estados.listo{color:var(--positivo);border-color:var(--positivo);
+  background:var(--acento-suave)}
+@keyframes lab-gira{to{transform:rotate(360deg)}}
+
 /* BTN-05 · relleno que barre al pasar por encima. Las dos puertas del CSV,
    importar y exportar, que son la misma operación en dos sentidos y ahora se
    ven como tal. El z-index:0 del botón es lo que mantiene al relleno adentro. */

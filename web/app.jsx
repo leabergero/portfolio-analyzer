@@ -141,6 +141,49 @@ const usd = (n, dec = 2) =>
 const pct = (n, dec = 2) => (n == null ? "—" : Number(n).toFixed(dec) + " %");
 const num = (n, dec = 2) => (n == null ? "—" : Number(n).toFixed(dec));
 const signo = (n) => (n == null ? "" : n > 0 ? "pos" : n < 0 ? "neg" : "");
+const hace = (s) => (s < 3600 ? `${Math.round(s / 60)} min` : `${(s / 3600).toFixed(1)} h`);
+
+/* El resultado de los FCI suma al realizado como cualquier operación cerrada,
+   pero no es del mismo tipo: es el saldo de cientos de suscripciones y rescates
+   de un fondo, sin serie de precios y sin operación que mirar. Mientras se
+   decide si cuenta o no, el toggle deja ver los dos números sin tocar los datos.
+
+   Se recalcula acá y no en el servidor: los registros ya vienen con su resultado
+   abierto en activo y tipo de cambio, así que restarlos es una suma —y el número
+   cambia en el momento, sin volver a pedir nada. */
+const redondo = (n) => Math.round(n * 100) / 100;
+
+function quitarFci(real) {
+  const fci = (real.trades || []).filter((t) => t.tipo === "fci");
+  if (!fci.length) return real;
+  const suma = (campo) => fci.reduce((s, t) => s + (t[campo] || 0), 0);
+  const origen = { ...(real.total_origen || {}) };
+  for (const t of fci) {
+    if (t.pnl_origen != null) {
+      origen[t.moneda] = redondo((origen[t.moneda] || 0) - t.pnl_origen);
+      if (!origen[t.moneda]) delete origen[t.moneda];
+    }
+  }
+  return { ...real,
+    trades: real.trades.filter((t) => t.tipo !== "fci"),
+    n: real.n - fci.length,
+    total_usd: redondo(real.total_usd - suma("pnl_usd")),
+    total_activo_usd: redondo(real.total_activo_usd - suma("pnl_activo_usd")),
+    total_fx_usd: redondo(real.total_fx_usd - suma("pnl_fx_usd")),
+    total_origen: origen };
+}
+
+/* Lo elige el usuario y es de este navegador, no del dato: si el almacenamiento
+   no está disponible —una ventana privada— se sigue con los FCI incluidos. */
+const FCI_KEY = "pa:fci-en-cerradas";
+const leerPref = () => { try { return localStorage.getItem(FCI_KEY) !== "0"; }
+                         catch { return true; } };
+const guardarPref = (v) => { try { localStorage.setItem(FCI_KEY, v ? "1" : "0"); }
+                             catch { /* sin almacenamiento: vale sólo esta sesión */ } };
+
+// El lote con el que el importador de Cocos marca el resultado de los FCI
+// (`cocos.LOTE_RESULTADOS_FCI`). Es lo que los distingue del resto de lo cerrado.
+const LOTE_FCI = "cocos-fci";
 
 /* El mismo color con transparencia. Las bandas de un abanico se pisan entre
    ellas, y el `opacity` de la traza no toca el relleno: tiene que ir en el
@@ -656,11 +699,15 @@ function Analisis({ cartera, recargar, sim, setSim }) {
   // La simulación es parte de qué se está analizando: cambiarla es relanzar.
   const simKey = simul.cabecera(sim);
 
-  const lanzar = useCallback(() => {
+  const lanzar = useCallback((forzar = false) => {
     if (!cartera) return;
-    setEstado(null); setRun(null);
+    // Recalcular no vacía la pantalla: los números de antes se quedan a la vista
+    // mientras se rehacen, y el botón es el que cuenta que está trabajando.
+    setEstado((e) => (forzar && e ? { ...e, estado: "corriendo" } : null));
+    setRun(null);
     api(`/api/analisis/${encodeURIComponent(cartera)}`,
-        { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })
+        { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ forzar }) })
       .then((d) => d.run_id && setRun(d.run_id))
       .catch(() => setTimeout(lanzar, 2000));
   }, [cartera]);
@@ -744,6 +791,27 @@ function Analisis({ cartera, recargar, sim, setSim }) {
             </select>
           </span>)}
       </div>
+      {/* De cuándo son estos números. Volver a esta pantalla reusa el análisis
+          que ya está hecho —los precios se vuelven a pedir cada dos horas, así
+          que recalcular antes da lo mismo con más espera—, y acá está el botón
+          para el que quiera pedirlo igual. */}
+      {(() => {
+        const corriendo = estado.estado !== "terminado";
+        const fresco = !corriendo && estado.edad_s < 90;
+        return (
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap",
+                        margin: "-2px 0 10px", fontSize: 12, color: "var(--texto-3)" }}>
+            <span>{corriendo ? "Rehaciendo los modelos…"
+                   : fresco ? `Recién calculado · en ${num(estado.duracion, 1)} s`
+                   : `Calculado hace ${hace(estado.edad_s)} · en ${num(estado.duracion, 1)} s`}</span>
+            <button className={"lab-estados" + (corriendo ? " corriendo" : fresco ? " listo" : "")}
+                    disabled={corriendo} onClick={() => lanzar(true)}
+                    title="Vuelve a correr los catorce modelos y a pedir precios frescos.">
+              <i className="punto" />
+              <span>{corriendo ? "recalculando" : "recalcular"}</span>
+            </button>
+          </div>);
+      })()}
       <Panel key={simKey} tab={tab} R={R} M={M} cartera={cartera} bench={bench}
              recargar={recargar} sim={sim} setSim={setSim} />
     </>
@@ -862,7 +930,7 @@ function AltaRapida({ cartera, recargar }) {
 
 function Posicion({ d, cartera, recargar, extras, bench, sim, setSim }) {
   const filas = d.posiciones || [];
-  const [real, setReal] = useState(null);
+  const [crudo, setCrudo] = useState(null);
   const r = extras?.riesgo;
   // Correlaciones y evolución vienen con el lote de modelos, no de un pedido
   // aparte: pedirlos por separado los ponía a competir con los once por el mismo
@@ -871,8 +939,13 @@ function Posicion({ d, cartera, recargar, extras, bench, sim, setSim }) {
   const ev = extras?.evolucion;
   // Lo cerrado se venía guardando y neteando sin que se viera en ningún lado.
   const [n, setN] = useState(0);
-  useEffect(() => { setReal(null);
-    api(`/api/carteras/${encodeURIComponent(cartera)}/realizado`).then(setReal); }, [cartera, n]);
+  const [conFci, setConFci] = useState(leerPref);
+  useEffect(() => { setCrudo(null);
+    api(`/api/carteras/${encodeURIComponent(cartera)}/realizado`).then(setCrudo); }, [cartera, n]);
+  // Un solo embudo: los KPIs, el calendario y el panel de cerradas cuelgan de
+  // `real`, así que el toggle se aplica una vez acá y llega a los tres.
+  const hayFci = (crudo?.trades || []).some((t) => t.tipo === "fci");
+  const real = crudo && !conFci ? quitarFci(crudo) : crudo;
   const cerrado = real?.n ? real.total_usd : null;
 
   return (
@@ -962,7 +1035,9 @@ function Posicion({ d, cartera, recargar, extras, bench, sim, setSim }) {
                  tenencias={filas.reduce(
                    (a, f) => ({ ...a, [f.ticker]: (a[f.ticker] || 0) + f.qty }), {})} />
 
-      {real && <PnlRealizado real={real} cartera={cartera} recargar={() => setN((x) => x + 1)} />}
+      {real && <PnlRealizado real={real} cartera={cartera} recargar={() => setN((x) => x + 1)}
+                             hayFci={hayFci} conFci={conFci}
+                             setConFci={(v) => { setConFci(v); guardarPref(v); }} />}
 
       {ev && <RuedasTicker ev={ev} />}
 
@@ -1201,14 +1276,20 @@ function AltaDividendo({ cartera, recargar }) {
   );
 }
 
-function PnlRealizado({ real, cartera, recargar }) {
+function PnlRealizado({ real, cartera, recargar, hayFci, conFci, setConFci }) {
   const [abierto, setAbierto] = useState(false);
   const [detalle, setDetalle] = useState(false);
   const trades = real.trades || [];
+  // Un FCI viaja con la marca de su lote: es un resultado ya cerrado como
+  // cualquier otro —suma al neto de arriba— pero se mira aparte, porque no es
+  // una operación sino el saldo de cientos de suscripciones y rescates.
+  const esFci = (t) => t.lote === LOTE_FCI;
+  const fci = trades.filter(esFci);
+  const fciUsd = fci.reduce((s, t) => s + t.pnl_usd, 0);
   const porTicker = Object.values(trades.reduce((acc, t) => {
     const x = acc[t.ticker] || (acc[t.ticker] = { ticker: t.ticker, n: 0, usd: 0,
                                                   origen: 0, activo: 0, fx: 0,
-                                                  moneda: t.moneda });
+                                                  moneda: t.moneda, fci: esFci(t) });
     x.n += 1; x.usd += t.pnl_usd; x.origen += t.pnl_origen || 0;
     x.activo += t.pnl_activo_usd || 0; x.fx += t.pnl_fx_usd || 0;
     return acc;
@@ -1225,6 +1306,14 @@ function PnlRealizado({ real, cartera, recargar }) {
           Posiciones cerradas
         </span>
         <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 14 }}>
+          {hayFci && (
+            <label className="lab-interruptor" onClick={(e) => e.stopPropagation()}
+                   title="Los FCI no son operaciones: son el saldo de cientos de suscripciones y rescates. Mirá el número con y sin.">
+              <input type="checkbox" checked={conFci}
+                     onChange={(e) => setConFci(e.target.checked)} />
+              <span className="via"><span className="bola" /></span>
+              <span>con FCI</span>
+            </label>)}
           <span style={{ fontSize: 12.5, color: "var(--texto-3)" }}>
             {real.n} operaciones</span>
           <span className={"mono " + signo(real.total_usd)} style={{ fontSize: 16, fontWeight: 700 }}>
@@ -1248,13 +1337,37 @@ function PnlRealizado({ real, cartera, recargar }) {
         <>
           <div style={{ display: "flex", gap: 8, margin: "10px 0 4px" }}>
             <div className="modos">
-              {[[false, "Por activo"], [true, `Las ${real.n} operaciones`]].map(([k, txt]) => (
+              {[[false, "Por activo"], [true, `Las ${real.n} operaciones`],
+                ...(fci.length ? [["fci", `FCI (${fci.length})`]] : [])].map(([k, txt]) => (
                 <button key={String(k)} className={"modo" + (detalle === k ? " on" : "")}
                         onClick={() => setDetalle(k)}>{txt}</button>))}
             </div>
           </div>
           <div className="tabla-wrap"><table>
-            {detalle ? (
+            {detalle === "fci" ? (
+              <>
+                <thead><tr><th>Fondo</th><th>Desde</th><th>Hasta</th>
+                  <th className="n">Suscripto</th><th className="n">Rescatado</th>
+                  <th className="n">Rescates</th>
+                  <th className="n">Resultado en dólares</th></tr></thead>
+                <tbody>{[...fci].sort((a, b) => b.pnl_usd - a.pnl_usd).map((t, i) => (
+                  <tr key={i}>
+                    <td className="mono"><b>{t.ticker}</b></td>
+                    <td className="mono">{t.buy_date}</td>
+                    <td className="mono">{t.sell_date}</td>
+                    <td className="n">{usd(t.buy_price)}</td>
+                    <td className="n">{usd(t.sell_price)}</td>
+                    <td className="n">{t.n_ops || "—"}</td>
+                    <td className={"n " + signo(t.pnl_usd)}>{usd(t.pnl_usd)}</td>
+                  </tr>))}
+                  <tr style={{ fontWeight: 700 }}>
+                    <td>SUBTOTAL FCI</td><td colSpan={4} />
+                    <td className="n">{fci.reduce((s, t) => s + (t.n_ops || 0), 0)}</td>
+                    <td className={"n " + signo(fciUsd)}>{usd(fciUsd)}</td>
+                  </tr>
+                </tbody>
+              </>
+            ) : detalle ? (
               <>
                 <thead><tr><th>Ticker</th><th>Compra</th><th>Venta</th><th className="n">Cantidad</th>
                   <th className="n">Precio compra</th><th className="n">Precio venta</th>
@@ -1295,7 +1408,8 @@ function PnlRealizado({ real, cartera, recargar }) {
                   <th className="n">Resultado en dólares</th></tr></thead>
                 <tbody>{porTicker.map((x) => (
                   <tr key={x.ticker}>
-                    <td className="mono">{x.ticker}</td>
+                    <td className="mono">{x.ticker}{x.fci &&
+                      <span className="chip" style={{ marginLeft: 6, minWidth: 0 }}>fci</span>}</td>
                     <td className="n">{x.n}</td>
                     <td className={"n " + signo(x.origen)}>{num(x.origen, 2)} {x.moneda}</td>
                     <td className={"n " + signo(x.activo)}>{usd(x.activo)}</td>
@@ -1315,6 +1429,16 @@ function PnlRealizado({ real, cartera, recargar }) {
               </>
             )}
           </table></div>
+          {detalle === "fci" ? (
+            <div className="pie">
+              Esto no son operaciones: es el saldo de todas tus suscripciones y rescates,
+              uno por fondo. Entra sólo lo que <b>ya rescataste</b> —apareado FIFO contra lo
+              que costó—, y cada movimiento se pasó a dólares con el MEP de <b>su</b> fecha,
+              no con el de hoy. Por eso un fondo puede ganar en pesos y perder en dólares.
+              Lo que todavía tenés no está acá: eso es tenencia y vive en la posición.
+              El <b>{usd(fciUsd)}</b> de subtotal ya está sumado en el neto de arriba.
+            </div>
+          ) : (
           <div className="pie">
             <b>En su moneda</b> es lo que muestra el broker, que no sabe de MEP. El resultado
             en dólares se abre en dos: <b>resultado inversión</b> es lo que dejó el activo, y{" "}
@@ -1324,8 +1448,8 @@ function PnlRealizado({ real, cartera, recargar }) {
             resultado de tipo de cambio: no hubo exposición. Neteo FIFO contra las compras más viejas; los splits se
             prorratean sobre lo que había abierto. {ganadores} de {porTicker.length} tickers
             cerraron en verde.
-          </div>
-          <AltaDividendo cartera={cartera} recargar={recargar} />
+          </div>)}
+          {detalle !== "fci" && <AltaDividendo cartera={cartera} recargar={recargar} />}
         </>
       )}
     </div>
@@ -4817,6 +4941,7 @@ function MiCocos() {
   const [tenFci, setTenFci] = useState(null);     // participaciones como lotes
   const [destino, setDestino] = useState("");     // cartera a la que se importan
   const [importando, setImportando] = useState(null);
+  const [impRes, setImpRes] = useState(null);     // importación del resultado cerrado
 
   const traerMovs = (offset = 0) => {
     setCargandoMovs(true);
@@ -4830,13 +4955,16 @@ function MiCocos() {
 
   const cargar = () => {
     setErr(null); setD(null); setMovs([]); setCat(null); setFci(null);
-    setTenFci(null); setImportando(null);
+    setTenFci(null); setImportando(null); setImpRes(null);
     api("/api/cocos/resumen").then((r) => {
       if (r.error) { setErr(r.error); return; }
       setD(r);
       if (!r.conectado) return;
       traerMovs(0);
-      api("/api/cocos/fci").then(setFci);
+      api("/api/cocos/fci").then((f) => {
+        setFci(f);
+        if (f.cartera) setDestino((prev) => prev || f.cartera);
+      });
       api("/api/cocos/fci/tenencias").then((t) => {
         setTenFci(t);
         if (t.cartera) setDestino(t.cartera);
@@ -4850,6 +4978,14 @@ function MiCocos() {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ cartera: destino }),
     }).then((r) => setImportando(r));
+  };
+
+  const importarResultadoFci = () => {
+    setImpRes({ estado: "yendo" });
+    api("/api/cocos/fci/resultados/importar", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cartera: destino }),
+    }).then((r) => setImpRes(r));
   };
   useEffect(() => { cargar(); }, []);
 
@@ -4997,7 +5133,7 @@ function MiCocos() {
                   <th>FCI</th><th>Moneda</th>
                   <th className="n">Suscripto</th><th className="n">Rescatado</th>
                   <th className="n">Tenencia hoy</th><th className="n">Resultado</th><th className="n">Rend.</th>
-                  <th className="n">Período</th>
+                  <th className="n">Cerrado USD</th><th className="n">Período</th>
                 </tr></thead>
                 <tbody>{fci.fci.map((f) => {
                   const mon = (n) => f.moneda === "ARS" ? ars(n, 0) : num(n) + " " + (f.moneda || "");
@@ -5010,14 +5146,23 @@ function MiCocos() {
                       <td className="n">{f.valor_actual ? mon(f.valor_actual) : "—"}</td>
                       <td className={"n " + signo(f.resultado)}>{mon(f.resultado)}</td>
                       <td className={"n " + signo(f.resultado_pct)}>{f.resultado_pct == null ? "—" : pct(f.resultado_pct)}</td>
+                      <td className={"n " + signo(f.resultado_usd)}>{f.resultado_usd == null ? "—" : usd(f.resultado_usd)}</td>
                       <td className="mono" style={{ fontSize: 11 }}>{f.desde}<br />{f.hasta}</td>
                     </tr>);
                 })}</tbody>
+                {fci.total_usd != null && <tfoot><tr>
+                  <td colSpan={6}><b>Resultado cerrado, en dólares</b></td>
+                  <td className={"n " + signo(fci.total_usd)}><b>{usd(fci.total_usd)}</b></td>
+                  <td />
+                </tr></tfoot>}
               </table></div>
               <div className="pie">
                 Resultado = tenencia de hoy + lo rescatado − lo suscripto (lo que sacaste más lo
                 que aún tenés, contra lo que pusiste). En los de barrido diario (COCORMA) el capital
                 rota muchas veces, así que mirá el <b>resultado en $</b> más que el %.
+                {" "}<b>Cerrado USD</b> es otra cosa: sólo lo que ya rescataste, apareado FIFO
+                contra lo que costó, y con cada movimiento pasado a dólares al MEP de
+                <b> su</b> fecha. Por eso un fondo puede ganar en pesos y perder en dólares.
                 {fci.cortado && <> · Historial recortado a los {fci.total_movs} movimientos más recientes.</>}
               </div>
             </>}
@@ -5028,7 +5173,7 @@ function MiCocos() {
                         display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
             <span style={{ fontSize: 13 }}>
               {(tenFci.lotes || []).length
-                ? <>Llevar {tenFci.lotes.map((l) => l.ticker).join(" y ")} a la cartera</>
+                ? <>Llevar los FCI de Cocos a la cartera</>
                 : <>No te queda ningún FCI: sincronizá para sacarlos de la cartera</>}
             </span>
             <select value={destino} onChange={(e) => setDestino(e.target.value)}
@@ -5049,6 +5194,38 @@ function MiCocos() {
               <span style={{ fontSize: 12, color: "var(--texto-3)" }}>Nada que sincronizar.</span>}
             {importando?.error && <span className="mal" style={{ fontSize: 12 }}>{importando.error}</span>}
           </div>)}
+        {/* Y el resultado de lo ya rescatado, que va a operaciones cerradas. */}
+        {fci && !fci.error && (fci.trades || []).length > 0 && (
+          <div style={{ borderTop: "1px solid var(--borde)", marginTop: 12, paddingTop: 12,
+                        display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 13 }}>
+              Llevar el resultado cerrado de los FCI
+              (<b className={signo(fci.total_usd)}>{usd(fci.total_usd)}</b> en {fci.trades.length}
+              {fci.trades.length === 1 ? " fondo" : " fondos"}) a operaciones cerradas de
+            </span>
+            <select value={destino} onChange={(e) => setDestino(e.target.value)}
+                    disabled={!!fci.cartera}>
+              <option value="">elegí una…</option>
+              {(fci.carteras || []).map((n) => <option key={n} value={n}>{n}</option>)}
+            </select>
+            <button className="btn" disabled={!destino || impRes?.estado === "yendo"}
+                    onClick={importarResultadoFci}>
+              {impRes?.estado === "yendo" ? "Importando…" : "Importar resultados"}
+            </button>
+            {impRes?.ok && <span className="ok" style={{ fontSize: 12 }}>
+              Listo: {impRes.agregados} en {impRes.cartera}
+              {impRes.reemplazados ? ` (pisó ${impRes.reemplazados})` : ""}.
+            </span>}
+            {impRes?.error && <span className="mal" style={{ fontSize: 12 }}>{impRes.error}</span>}
+          </div>)}
+        {fci && !fci.error && (fci.trades || []).length > 0 && (
+          <div className="pie">
+            Un registro por fondo, no uno por rescate: el barrido diario son cientos de
+            movimientos de centavos y el total dice lo mismo mejor. Reimportar pisa lo de
+            la vez anterior —no duplica—, así que podés sincronizar cuando quieras. Lo que
+            todavía tenés no entra acá: eso es tenencia, y va por el botón de arriba.
+          </div>)}
+
         {tenFci && !tenFci.error && ((tenFci.lotes || []).length > 0 || tenFci.cartera) && (
           <div className="pie">
             Va sólo la tenencia y su resultado. Un FCI no tiene serie de precios, así que

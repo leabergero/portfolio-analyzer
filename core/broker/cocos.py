@@ -718,8 +718,96 @@ def fci_tracking():
         })
         salida.append(f)
 
+    cerradas = _resultados_realizados(movs)
+    for f in salida:
+        f["resultado_usd"] = (cerradas["por_fondo"].get(f["ticker"]) or {}).get("pnl")
+
     salida.sort(key=lambda x: x["valor_actual"], reverse=True)
-    return {"fci": salida, "cortado": hist["cortado"], "total_movs": len(movs)}
+    return {"fci": salida, "cortado": hist["cortado"], "total_movs": len(movs),
+            "trades": cerradas["trades"], "total_usd": cerradas["total_usd"],
+            "cuenta": _est().get("cuenta")}
+
+
+# ── El resultado de los FCI, como operaciones cerradas ────────────────────────
+# Suscribir es comprar y rescatar es vender, así que el resultado realizado sale
+# del mismo apareo FIFO que usa el importador de CSV: lo que todavía tenés no
+# entra, y lo que rescataste entra contra el costo de las cuotapartes más viejas.
+#
+# Dos cosas que no se pueden saltear:
+#
+#   1. **Cada movimiento se pasa a dólares con el MEP de SU fecha.** Convertir
+#      el neto al MEP de hoy no es una aproximación, es otro número: COCOSPPA da
+#      +$217.815 en pesos y −170 dólares, porque las suscripciones se hicieron
+#      con un MEP y los rescates con otro bastante más alto. Hasta el signo
+#      cambia.
+#
+#   2. **Sale un registro por fondo, no uno por movimiento.** El barrido diario
+#      de COCORMA son 239 rescates de centavos; volcados uno a uno inundan las
+#      operaciones cerradas sin decir nada que el total no diga mejor.
+
+LOTE_RESULTADOS_FCI = "cocos-fci"
+
+
+def _resultados_realizados(movs: list) -> dict:
+    """Aparea suscripciones contra rescates y devuelve un cerrado por fondo."""
+    from core.io.csv_yahoo import _netear_fifo
+
+    # Los movimientos llegan del más nuevo al más viejo; `orden` tiene que
+    # crecer con el tiempo para desempatar bien dos operaciones del mismo día.
+    ops = {}
+    for orden, m in enumerate(reversed(movs)):
+        tipo = m.get("movementType")
+        if tipo not in ("SUBSCRIPTION", "REDEMPTION"):
+            continue
+        tk, fecha = m.get("ticker"), m.get("fecha")
+        # En un rescate el broker informa las cuotapartes en negativo. La
+        # dirección ya la dice el tipo de movimiento: en signo, acá sólo
+        # dejaría precios negativos y un apareo que no cierra nunca.
+        cuotapartes = abs((m.get("quantity") or {}).get("executed") or 0)
+        importe = abs(m.get("amount") or 0)
+        if not tk or not cuotapartes or not importe:
+            continue
+        usd = (importe if (m.get("currency") or "ARS").upper() != "ARS"
+               else mep.a_usd(importe, fecha))
+        if not usd:
+            continue
+        # El precio se saca del importe, no del `price` del movimiento: así da
+        # igual en qué escala venga la cuotaparte.
+        compras, ventas = ops.setdefault(tk, ([], []))
+        (compras if tipo == "SUBSCRIPTION" else ventas).append(
+            {"fecha": fecha, "orden": orden, "precio": usd / cuotapartes,
+             "qty": cuotapartes, "comision": 0.0})
+
+    trades, por_fondo, total = [], {}, 0.0
+    for tk, (compras, ventas) in ops.items():
+        if not ventas:
+            continue
+        _, cerrados = _netear_fifo(compras, ventas)
+        if not cerrados:
+            continue
+        costo = sum(c["qty"] * c["buy_price"] for c in cerrados)
+        ingreso = sum(c["qty"] * c["sell_price"] for c in cerrados)
+        pnl = ingreso - costo
+        # Cantidad 1 y los importes como precios: el registro representa el
+        # resultado del fondo, no una cuotaparte. `moneda` va explícita porque
+        # acá ya está convertido y nadie tiene que volver a convertirlo.
+        trades.append({
+            "ticker": tk,
+            "buy_date": min(c["buy_date"] for c in cerrados),
+            "sell_date": max(c["sell_date"] for c in cerrados),
+            "buy_price": round(costo, 4), "sell_price": round(ingreso, 4),
+            "qty": 1, "buy_comm": 0.0, "sell_comm": 0.0,
+            "moneda": "USD", "pnl": round(pnl, 4), "n_ops": len(cerrados),
+            # Marca lo que este registro es: un resultado agregado, no una
+            # operación. La evolución mira esto para no leer el saldo de dos
+            # años de barrido como un aporte y un retiro de golpe.
+            "tipo": "fci",
+        })
+        por_fondo[tk] = {"pnl": round(pnl, 4), "n_ops": len(cerrados)}
+        total += pnl
+
+    trades.sort(key=lambda t: t["pnl"], reverse=True)
+    return {"trades": trades, "por_fondo": por_fondo, "total_usd": round(total, 4)}
 
 
 # ── Participaciones en FCI, como lotes de cartera ─────────────────────────────

@@ -358,7 +358,39 @@ def cocos_movimientos():
 
 @bp.get("/cocos/fci")
 def cocos_fci():
-    return jsonify(cocos.fci_tracking())
+    """El seguimiento por fondo y, con él, el resultado ya cerrado en dólares."""
+    t = cocos.fci_tracking()
+    if t.get("error"):
+        return jsonify(t)
+    return jsonify({**t, "cartera": store.cartera_de_cuenta(t.get("cuenta")),
+                    "carteras": store.nombres()})
+
+
+@bp.post("/cocos/fci/resultados/importar")
+def cocos_fci_resultados_importar():
+    """Lleva el resultado de los FCI a las operaciones cerradas de una cartera.
+
+    Un registro por fondo, marcado con su lote: volver a importar pisa lo que
+    dejó la vez anterior y no duplica nada.
+    """
+    cartera = (request.json or {}).get("cartera", "").strip()
+    if cartera not in store.nombres():
+        return jsonify({"error": "Esa cartera no existe."}), 400
+
+    t = cocos.fci_tracking()
+    if t.get("error"):
+        return jsonify(t), 502
+
+    previa = store.cartera_de_cuenta(t.get("cuenta"))
+    if previa and previa != cartera:
+        return jsonify({"error": f"Esta cuenta ya está asociada a «{previa}». "
+                                 "Desasociala antes de importarla en otra."}), 409
+
+    r = store.agregar_realizado(cartera, t["trades"], lote=cocos.LOTE_RESULTADOS_FCI)
+    if t.get("cuenta"):
+        store.asociar_cuenta(t["cuenta"], cartera)
+    return jsonify({"ok": True, "cartera": cartera, "total_usd": t["total_usd"],
+                    "tickers": [x["ticker"] for x in t["trades"]], **r})
 
 
 @bp.get("/cocos/fci/tenencias")

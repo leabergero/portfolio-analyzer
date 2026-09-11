@@ -43,8 +43,10 @@ def lanzar(nombre):
     pos = _posiciones(nombre)
     if not pos:
         return _falta(nombre)
-    modelos = (request.json or {}).get("modelos")
-    return jsonify({"run_id": jobs.lanzar(nombre, pos, modelos),
+    c = request.json or {}
+    # `forzar` es el botón de recalcular: sin él se reusa la corrida que ya hay.
+    return jsonify({"run_id": jobs.lanzar(nombre, pos, c.get("modelos"),
+                                          forzar=bool(c.get("forzar"))),
                     "modelos": list(jobs.MODELOS)})
 
 
