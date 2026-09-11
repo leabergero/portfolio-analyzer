@@ -928,6 +928,8 @@ function AltaRapida({ cartera, recargar }) {
   );
 }
 
+const claveLote = (x) => `${x.ticker}|${x.buy_date}|${x.qty}`;
+
 function Posicion({ d, cartera, recargar, extras, bench, sim, setSim }) {
   const filas = d.posiciones || [];
   const [crudo, setCrudo] = useState(null);
@@ -937,6 +939,10 @@ function Posicion({ d, cartera, recargar, extras, bench, sim, setSim }) {
   // procesador, y en el servidor sumaban veinte segundos a cada apertura.
   const corr = extras?.correlaciones;
   const ev = extras?.evolucion;
+  // Cuánto lleva cada lote sin volver a lo que costó. Sale de la evolución, que
+  // es la que tiene las series; los lotes sin serie —un FCI— no están y van "—".
+  const twu = Object.fromEntries(((ev && !ev.error && ev.bajo_agua) || [])
+    .map((x) => [claveLote(x), x]));
   // Lo cerrado se venía guardando y neteando sin que se viera en ningún lado.
   const [n, setN] = useState(0);
   const [conFci, setConFci] = useState(leerPref);
@@ -997,6 +1003,7 @@ function Posicion({ d, cartera, recargar, extras, bench, sim, setSim }) {
             <th>Ticker</th><th>Compra</th><th className="n">Cantidad</th>
             <th className="n">Precio compra</th><th className="n">Precio hoy</th>
             <th className="n">Valor</th><th className="n">Resultado</th><th className="n">%</th>
+            <th className="n" title="Time under water: días corridos que lleva el lote sin volver a lo que costó.">TWU</th>
           </tr></thead>
           <tbody>{filas.map((f, i) => (
             <tr key={i}>
@@ -1018,13 +1025,25 @@ function Posicion({ d, cartera, recargar, extras, bench, sim, setSim }) {
               <td className="n">{usd(f.valor_usd)}</td>
               <td className={"n " + signo(f.pnl_usd)}>{usd(f.pnl_usd)}</td>
               <td className={"n " + signo(f.pnl_pct)}>{pct(f.pnl_pct, 1)}</td>
+              <td className="n">{(() => {
+                const t = twu[claveLote(f)];
+                if (!t) return "—";
+                if (!t.dias && !t.desde) return <span style={{ color: "var(--texto-3)" }}>—</span>;
+                // Un lote que cayó hoy lleva cero días corridos, y eso no es
+                // "nunca estuvo abajo": se dice "hoy".
+                return <span className="neg" title={`En pérdida desde el ${t.desde}`}>
+                  {t.dias ? `${t.dias} d` : "hoy"}</span>;
+              })()}</td>
             </tr>))}
           </tbody>
         </table></div>
         <div className="pie">
           Cada lote se valuó con el precio de hoy, y su costo con el tipo de cambio del
           día en que lo compraste. Convertir una compra vieja al cambio de hoy mediría el
-          tipo de cambio, no el rendimiento del activo.
+          tipo de cambio, no el rendimiento del activo. <b>TWU</b> —time under water— son
+          los días corridos que el lote lleva sin volver a lo que te costó: un −8 % de esta
+          semana y uno que viene de hace dos años no son la misma posición, y el porcentaje
+          solo no los distingue. Se mide contra tu costo, comisiones incluidas.
         </div>
       </div>
 

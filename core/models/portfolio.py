@@ -603,6 +603,40 @@ def evolucion(posiciones, trades=None, n_ruedas: int = 30) -> dict:
     previos = resultado.index[resultado.index.to_period("M") < mes]
     ref = float(resultado.loc[previos[-1]]) if len(previos) else 0.0
 
+    # ── Cuánto tiempo lleva cada lote bajo el agua ───────────────────────────
+    # Time under water: desde cuándo el precio no vuelve a lo que pagaste. Un
+    # −8 % no dice lo mismo si es de esta semana que si viene de hace dos años,
+    # y el porcentaje de resultado solo no distingue las dos cosas.
+    #
+    # Se mide contra el costo del lote —lo pagado por unidad, comisiones
+    # incluidas— y no contra un máximo previo: en una tenencia lo que importa es
+    # si recuperaste lo tuyo. Sale de las series que esta función ya bajó, así
+    # que no cuesta una sola consulta más.
+    bajo_agua = []
+    for ticker, qty, desde, hasta, costo, _ingreso in tramos:
+        if hasta is not None or not qty or ticker not in px.columns:
+            continue                                    # sólo lo que sigue abierto
+        serie = px[ticker].loc[pd.Timestamp(desde):].dropna()
+        if serie.empty or not costo:
+            continue
+        perdida = serie < (costo / qty)
+        # La racha en curso: hacia atrás desde la última rueda, mientras siga abajo.
+        racha = 0
+        for abajo in reversed(perdida.to_numpy()):
+            if not abajo:
+                break
+            racha += 1
+        dias = ((serie.index[-1] - serie.index[-racha]).days if racha else 0)
+        # La cantidad va en la salida porque es lo que distingue dos lotes del
+        # mismo papel comprados el mismo día: tienen precios distintos y por
+        # eso salen del agua en momentos distintos.
+        bajo_agua.append({
+            "ticker": ticker, "buy_date": str(desde), "qty": qty,
+            # Días corridos de la racha, y desde cuándo empezó. Con una sola
+            # rueda en rojo la resta da cero: es "hoy", no "nunca".
+            "dias": dias, "desde": str(serie.index[-racha].date()) if racha else None,
+        })
+
     ult = px.tail(n_ruedas + 1)
     var = ult.pct_change().iloc[1:] * 100.0
     hoy = cant.iloc[-1]
@@ -695,6 +729,7 @@ def evolucion(posiciones, trades=None, n_ruedas: int = 30) -> dict:
         "valor_hoy_usd": round(float(tenencias.iloc[-1]), 2),
         "cerradas": sum(1 for x in tramos if x[3]),
         "sin_serie": sorted(sin_serie),
+        "bajo_agua": bajo_agua,
         "resultado_serie": [round(float(v), 2) for v in resultado],
         "valor_usd": [round(float(v), 2) for v in tenencias],
         # Cuánto capital había puesto en cada rueda: es la línea contra la que

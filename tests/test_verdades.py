@@ -867,6 +867,53 @@ def test_fci_cada_1000_cuotapartes():
         "Un CEDEAR no se toca: la escala /1000 es sólo de los FCI."
 
 
+def test_el_tiempo_bajo_el_agua_cuenta_la_racha_en_curso():
+    """TWU: días corridos que el lote lleva SIN volver a lo que costó.
+
+    Es la racha que sigue abierta, no el total histórico: un papel que estuvo
+    seis meses en rojo y se recuperó no arrastra esos meses para siempre. Y se
+    mide contra el costo de cada lote, así que dos compras del mismo papel el
+    mismo día a precios distintos salen del agua en momentos distintos —el caso
+    real de ADBED.BA en MAMI: 261 días un lote y 255 el otro—.
+    """
+    import pandas as pd
+
+    sources = require("core.data", "sources")
+    portfolio = require("core.models", "portfolio")
+
+    fechas = pd.date_range("2026-01-01", periods=20, freq="B")
+    # Arranca en 100, se hunde, se recupera, y vuelve a caer las últimas cinco.
+    precios = ([100.0] + [90.0] * 8 + [120.0] * 6 + [95.0] * 5)
+    serie = pd.Series(precios, index=fechas)
+    pb, pa = sources.precios_base, portfolio.precios_actuales
+    sources.precios_base = lambda t, **k: serie
+    portfolio.precios_actuales = lambda pos, **k: {"AAA": float(serie.iloc[-1])}
+    try:
+        pos = [
+            {"ticker": "AAA", "qty": 10, "buy_price": 100.0, "buy_date": "2026-01-01",
+             "currency": "USD", "commissions": 0.0},
+            # Mismo papel y mismo día, pero más barato: este nunca se hunde.
+            {"ticker": "AAA", "qty": 7, "buy_price": 80.0, "buy_date": "2026-01-01",
+             "currency": "USD", "commissions": 0.0},
+        ]
+        agua = {x["qty"]: x for x in portfolio.evolucion(pos, [])["bajo_agua"]}
+    finally:
+        sources.precios_base, portfolio.precios_actuales = pb, pa
+
+    caro, barato = agua[10], agua[7]
+    # La racha son las últimas cinco ruedas: de la 15ª a la 20ª rueda hábil.
+    assert caro["desde"] == str(fechas[-5].date()), \
+        "La racha arranca en la primera rueda de la caída actual, no en la primera de todas."
+    assert caro["dias"] == (fechas[-1] - fechas[-5]).days, \
+        "Se cuentan días corridos entre esas dos fechas."
+    assert caro["dias"] < 15, \
+        "Los ocho días que estuvo en rojo y recuperó no cuentan: esa racha se cerró."
+    assert barato["dias"] == 0 and barato["desde"] is None, \
+        "A 80 nunca estuvo bajo el agua: 95 le sigue quedando arriba."
+    assert caro["qty"] != barato["qty"], \
+        "Dos lotes del mismo día tienen que poder distinguirse, o la tabla cruza mal."
+
+
 def test_el_resultado_de_un_fci_no_entra_al_flujo_de_la_evolucion():
     """Un FCI no puede inventar aportes y retiros que nunca hubo.
 
