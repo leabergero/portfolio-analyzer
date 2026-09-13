@@ -938,6 +938,83 @@ def test_comprar_en_pesos_y_vender_en_dolares_es_una_sola_operacion():
         "Se vendió entero: no puede quedar nada abierto."
 
 
+def test_dividendo_en_acciones_de_cocos_reparte_el_costo():
+    """Las acciones que el broker entrega sin cobrarlas entran al FIFO.
+
+    COME en MAMI: 12.917 compradas, 16.072 recibidas como dividendo en acciones
+    el 2025-08-14 y 28.989 vendidas. Sin repartirlas, la venta apareaba sólo
+    contra las compradas y el resto se perdía: −1.547 USD en vez de −997.
+    """
+    cocos = require("core.broker", "cocos")
+    movs = [  # del más nuevo al más viejo
+        {"movementType": "SELL", "ticker": "COME", "fecha": "2026-04-21",
+         "currency": "ARS", "amount": 1405816.35, "quantity": {"executed": -28989}},
+        {"movementType": "DIVIDEND", "ticker": "COME", "fecha": "2025-08-14",
+         "currency": "ARS", "amount": -19.45, "quantity": {"executed": 16072}},
+        {"movementType": "DIVIDEND", "ticker": None, "fecha": "2025-08-14",
+         "currency": "ARS", "amount": 37.94, "quantity": {}},
+        {"movementType": "BUY", "ticker": "COME", "fecha": "2025-05-14",
+         "currency": "ARS", "amount": -2266914.25, "quantity": {"executed": 12917}},
+    ]
+    orig = cocos._historial_completo, cocos.posiciones, cocos.mep.a_usd
+    cocos._historial_completo = lambda: {"movimientos": movs, "cortado": False}
+    cocos.posiciones = lambda: []
+    cocos.mep.a_usd = lambda importe, fecha, *a, **k: importe / 1000.0
+    try:
+        r = cocos.operaciones()
+    finally:
+        cocos._historial_completo, cocos.posiciones, cocos.mep.a_usd = orig
+
+    assert not r["abiertos"], "Se vendió todo: no queda nada abierto."
+    assert casi(sum(c["qty"] for c in r["cerrados"]), 28989, 1e-6), \
+        "Cierran las 28.989, no sólo las 12.917 compradas."
+    assert casi(sum(c["pnl"] for c in r["cerrados"]), 1405.81635 - 2266.91425, 1e-3), \
+        "El costo total no cambia con el dividendo en acciones: ingreso − costo."
+
+
+def test_una_venta_no_cierra_contra_una_compra_posterior():
+    """Si falta la compra, el FIFO no la toma prestada del futuro.
+
+    NVDA en LEANDRO: la venta del 2024-07-04 cerraba contra la compra del
+    2024-07-16, y la operación quedaba con fecha de compra después de la venta.
+    """
+    _netear_fifo = require("core.io.csv_yahoo", "_netear_fifo")
+    abiertos, cerrados = _netear_fifo(
+        [{"fecha": "2024-07-16", "orden": 2, "precio": 5.0, "qty": 10, "comision": 0.0}],
+        [{"fecha": "2024-07-04", "orden": 1, "precio": 6.0, "qty": 10, "comision": 0.0}])
+    assert not cerrados, "No hay compra previa: la venta no cierra nada."
+    assert len(abiertos) == 1 and casi(abiertos[0]["qty"], 10), "La compra posterior queda abierta."
+
+
+def test_el_vencimiento_de_una_letra_cierra_la_posicion():
+    """Cocos informa el vencimiento en dos patas: títulos que salen y plata que entra.
+
+    S15G5 en LEANDRO: 342.350 compradas por $497.609,72 el 2025-08-12 y
+    amortizadas por $502.549,25 el 2025-08-18. Sin juntarlas quedaba abierta.
+    """
+    cocos = require("core.broker", "cocos")
+    movs = [
+        {"movementType": "PROFIT", "ticker": None, "fecha": "2025-08-18", "currency": "ARS",
+         "amount": 502549.25, "quantity": {}, "issuer": {"ticker": "S15G5"}},
+        {"movementType": "PROFIT", "ticker": "S15G5", "fecha": "2025-08-18", "currency": None,
+         "amount": None, "quantity": {"executed": -342350}, "issuer": {"ticker": "S15G5"}},
+        {"movementType": "BUY", "ticker": "S15G5", "fecha": "2025-08-12", "currency": "ARS",
+         "amount": -497609.72, "quantity": {"executed": 342350}},
+    ]
+    orig = cocos._historial_completo, cocos.posiciones, cocos.mep.a_usd
+    cocos._historial_completo = lambda: {"movimientos": movs, "cortado": False}
+    cocos.posiciones = lambda: []
+    cocos.mep.a_usd = lambda importe, fecha, *a, **k: importe / 1000.0
+    try:
+        r = cocos.operaciones()
+    finally:
+        cocos._historial_completo, cocos.posiciones, cocos.mep.a_usd = orig
+
+    assert not r["abiertos"], "La letra venció: no queda abierta."
+    assert len(r["cerrados"]) == 1 and casi(r["cerrados"][0]["pnl"], 4.93953, 1e-4), \
+        "(502.549,25 − 497.609,72) al MEP de 1.000."
+
+
 def test_el_tiempo_bajo_el_agua_cuenta_la_racha_en_curso():
     """TWU: días corridos que el lote lleva SIN volver a lo que costó.
 

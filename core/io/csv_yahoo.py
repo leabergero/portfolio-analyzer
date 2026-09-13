@@ -133,6 +133,11 @@ def _netear_fifo(compras: list, ventas: list, entregas: list = None):
         pendiente = venta["qty"]
         while pendiente > 1e-9 and i < len(compras):
             lote = compras[i]
+            if lote["fecha"] > venta["fecha"]:
+                # Una venta no puede cerrar contra una compra posterior: si falta
+                # la compra, el sobrante se ignora como dice abajo. Sin esto NVDA
+                # vendió el 2024-07-04 contra lo comprado el 2024-07-16.
+                break
             if lote["resta"] <= 1e-9:
                 i += 1
                 continue

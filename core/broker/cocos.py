@@ -228,6 +228,9 @@ def conectar(api_key: str, forzar_login: bool = False, codigo_2fa: str = "") -> 
                 if time.time() > sesion.get("token_expiration", 0) - 60:
                     _c().connected = True
                     _c()._refresh_access_token()
+                    # pyCocos cambia el token pero no la cabecera: sin esto cada
+                    # llamada seguía mandando el vencido y daba "jwt expired".
+                    _aplicar(_jwt_actual())
                     _guardar_sesion(api_key)
                     detalle = "sesión renovada"
                 else:
@@ -399,6 +402,7 @@ def _renovar(jwt: dict) -> dict:
         _c().connected = True
         _c()._refresh_access_token()
         nuevo = _jwt_actual()
+        _aplicar(nuevo)                 # pyCocos no actualiza la cabecera solo
         _renovados[clave] = (nuevo, ahora)
         return nuevo
 
@@ -899,10 +903,34 @@ def operaciones(conocidos=None):
     movs = hist["movimientos"]
     con_d = _con_especie_d(movs, conocidos)
 
-    ops = {}
+    # Un bono o letra que vence viene en dos patas del mismo día: los títulos
+    # que salen (PROFIT con ticker y cantidad negativa) y la plata que entra
+    # (PROFIT sin ticker, con `issuer`). Juntas son una venta: S15G5 en LEANDRO
+    # quedaba abierta para siempre y sin su resultado.
+    cobros = {((m.get("issuer") or {}).get("ticker"), m.get("fecha")): m
+              for m in movs if m.get("movementType") == "PROFIT" and not m.get("ticker")}
+
+    ops, entregas = {}, {}
     for orden, m in enumerate(reversed(movs)):
         tipo = m.get("movementType")
+        if tipo == "PROFIT" and ((m.get("quantity") or {}).get("executed") or 0) < 0:
+            cobro = cobros.get((m.get("ticker"), m.get("fecha")))
+            if cobro:
+                m = {**m, "amount": cobro.get("amount"), "currency": cobro.get("currency")}
+                tipo = "SELL"
         if tipo not in ("BUY", "SELL"):
+            # Papeles que entran sin pagarlos. El broker anota como DIVIDEND con
+            # cantidad tanto el dividendo en acciones (COME: 16.072 sobre 12.917
+            # el 2025-08-14) como el split (NVDA 10×1: 216 sobre 24 el
+            # 2024-06-11). Sin repartirlos, la venta de todo aparea sólo contra
+            # lo comprado: COME daba −1.547 USD en vez de −997. Los cobros en
+            # efectivo vienen sin cantidad o en EXT. Una transferencia de
+            # títulos (OTHERS) no entra: trae su costo de otro lado.
+            instrumento = (m.get("ticker") or "").upper().strip()
+            cantidad = (m.get("quantity") or {}).get("executed") or 0
+            if tipo == "DIVIDEND" and cantidad > 0 and instrumento not in ("", "EXT"):
+                entregas.setdefault(instrumento, []).append(
+                    {"fecha": m.get("fecha"), "orden": orden, "qty": cantidad})
             continue
         # Tal como lo informa el broker: siempre el instrumento, nunca la especie
         # —AL30 en las dos patas del rulo, GLD y no GLDD—. Pasarlo por
@@ -931,7 +959,7 @@ def operaciones(conocidos=None):
         else:
             ticker = (d_ticker(instrumento) if instrumento in con_d else instrumento) + ".BA"
             fuente = ""
-        quedan, cierres = _netear_fifo(compras, ventas)
+        quedan, cierres = _netear_fifo(compras, ventas, entregas.get(instrumento))
         for c in quedan:
             abiertos.append({
                 "ticker": ticker, "buy_date": c["fecha"],
