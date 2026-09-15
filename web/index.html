@@ -284,6 +284,11 @@ tr:hover .eliminar{opacity:.5;pointer-events:auto}
 .eliminar:hover{opacity:1;color:var(--negativo)}
 .eliminar.arm{opacity:1;color:var(--negativo);font-weight:700}
 .eliminar:focus-visible{opacity:1;outline:2px solid var(--acento);outline-offset:1px}
+/* Corregir el importe de un dividendo: el mismo botón fantasma, del lado
+   izquierdo de la celda para no tapar el número, que va alineado a la derecha. */
+td:has(> .editar){position:relative}
+.eliminar.editar{right:auto;left:1px}
+.eliminar.editar:hover{color:var(--acento)}
 
 /* ── Componentes traídos de la librería UX-UI ───────────────────────────────
    Estuvieron detrás de ?lab=1 hasta que se aprobaron; el prefijo `lab-` quedó

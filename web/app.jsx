@@ -204,6 +204,9 @@ const dec = (v) => {
    separadores. Sin esto, un campo de texto acepta letras. */
 const soloNum = (v) => String(v).replace(/[^\d.,-]/g, "");
 
+// Lo que está en evaluación se ve sólo con ?lab=1. Se borra al aprobarse.
+const LAB = new URLSearchParams(location.search).has("lab");
+
 /* Lee la paleta del CSS para que los gráficos sigan el tema. */
 function colores() {
   const c = getComputedStyle(document.documentElement);
@@ -1317,6 +1320,23 @@ function PnlRealizado({ real, cartera, recargar, fciTrades, hayFci, conFci, setC
   };
   const [abierto, setAbierto] = useState(false);
   const [detalle, setDetalle] = useState(false);
+  // Dividendo en edición: su clave y el importe neto que se está escribiendo.
+  const [editando, setEditando] = useState(null);
+  const [yahoo, setYahoo] = useState(null);
+  const guardarImporte = async (t) => {
+    const r = await api(`/api/carteras/${encodeURIComponent(cartera)}/realizado`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ filtro: JSON.parse(claveTrade(t)), importe: dec(editando.valor) }) });
+    if (r.error) { alert(r.error); return; }
+    setEditando(null); recargar();
+  };
+  const traerYahoo = async () => {
+    setYahoo({ yendo: true });
+    const r = await api(`/api/carteras/${encodeURIComponent(cartera)}/dividendos/yahoo`,
+                        { method: "POST" });
+    setYahoo(r);
+    if (r.agregados) recargar();
+  };
   const trades = real.trades || [];
   // Un FCI viaja con la marca de su lote: es un resultado ya cerrado como
   // cualquier otro —suma al neto de arriba— pero se mira aparte, porque no es
@@ -1430,8 +1450,10 @@ function PnlRealizado({ real, cartera, recargar, fciTrades, hayFci, conFci, setC
                   <th className="n">Resultado USD</th></tr></thead>
                 <tbody>{[...detalladas].sort((a, b) => (a.sell_date < b.sell_date ? 1 : -1)).map((t, i) => (
                   <tr key={i}>
-                    <td className="mono">{t.ticker}{t.tipo === "dividendo" &&
-                      <span className="chip ok" style={{ marginLeft: 6, minWidth: 0 }}>div</span>}
+                    <td className="mono">{t.ticker}{t.tipo === "dividendo" && (LAB && t.estimado
+                      ? <span className="chip ojo" style={{ marginLeft: 6, minWidth: 0, whiteSpace: "nowrap" }}
+                              title={`${t.notes}. Corregí el importe con lo que cobraste.`}>div est.</span>
+                      : <span className="chip ok" style={{ marginLeft: 6, minWidth: 0 }}>div</span>)}
                       <button className={"eliminar" + (porBorrar === claveTrade(t) ? " arm" : "")}
                               onMouseLeave={() => porBorrar === claveTrade(t) && setPorBorrar(null)}
                               onClick={() => borrar(t)}
@@ -1454,7 +1476,18 @@ function PnlRealizado({ real, cartera, recargar, fciTrades, hayFci, conFci, setC
                           {num((t.mep_venta / t.mep_compra - 1) * 100, 1)} %
                         </div></> : "—"}</td>
                     <td className={"n " + signo(t.pnl_origen)}>
-                      {num(t.pnl_origen, 2)} {t.moneda}</td>
+                      {LAB && t.tipo === "dividendo" && editando?.clave === claveTrade(t) ? (
+                        <input type="text" inputMode="decimal" autoFocus value={editando.valor}
+                               style={{ width: 90, textAlign: "right" }} aria-label="Importe neto cobrado"
+                               onChange={(e) => setEditando({ ...editando, valor: soloNum(e.target.value) })}
+                               onKeyDown={(e) => { if (e.key === "Enter") guardarImporte(t);
+                                                   if (e.key === "Escape") setEditando(null); }}
+                               onBlur={() => setEditando(null)} />
+                      ) : <>{num(t.pnl_origen, 2)} {t.moneda}</>}
+                      {LAB && t.tipo === "dividendo" && editando?.clave !== claveTrade(t) && (
+                        <button className="eliminar editar" title="Corregir el importe neto cobrado"
+                                onClick={() => setEditando({ clave: claveTrade(t),
+                                                             valor: String(t.pnl_origen ?? "") })}>✎</button>)}</td>
                     <td className={"n " + signo(t.pnl_activo_usd)}>{usd(t.pnl_activo_usd)}</td>
                     <td className={"n " + (t.pnl_fx_usd ? "fx " + signo(t.pnl_fx_usd) : "")}>
                       {t.pnl_fx_usd ? usd(t.pnl_fx_usd) : "—"}</td>
@@ -1514,6 +1547,29 @@ function PnlRealizado({ real, cartera, recargar, fciTrades, hayFci, conFci, setC
             prorratean sobre lo que había abierto. {ganadores} de {porTicker.length} tickers
             cerraron en verde.
           </div>)}
+          {detalle !== "fci" && LAB && (
+            <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginTop: 10 }}>
+              <button className="btn" onClick={traerYahoo} disabled={yahoo?.yendo}>
+                {yahoo?.yendo ? "Buscando dividendos…" : "Traer dividendos de Yahoo"}</button>
+              {yahoo && !yahoo.yendo && (
+                <span className="pie" style={{ margin: 0 }}>
+                  {yahoo.error ? yahoo.error
+                    : yahoo.agregados
+                    ? <>{yahoo.agregados} {yahoo.agregados === 1 ? "dividendo nuevo" : "dividendos nuevos"}:{" "}
+                        {Object.entries(yahoo.por_moneda).map(([m, v]) => `${num(v, 2)} ${m}`).join(" · ")} netos.</>
+                    : "No hay dividendos nuevos: los que tocaban ya están cargados."}
+                </span>)}
+            </div>)}
+          {detalle !== "fci" && LAB && (
+            <div className="pie">
+              Yahoo da el dividendo <b>bruto</b> por papel y su fecha ex-dividendo; lo cobra cada
+              lote que tenías ese día —comprado antes, vendido ese día o después—. Se descuenta la
+              retención que configuraste en <b>Carteras</b> para acciones o CEDEARs, y queda
+              marcado <b>est.</b> hasta que lo corrijas con ✎ por lo que de verdad te acreditaron.
+              No se repite lo que ya está cargado: un cobro del mismo papel dentro del mes
+              siguiente al ex-dividendo se toma como el mismo pago. Los bonos no están: Yahoo no
+              tiene su renta.
+            </div>)}
           {detalle !== "fci" && <AltaDividendo cartera={cartera} recargar={recargar} />}
         </>
       )}
@@ -4578,6 +4634,8 @@ function Carteras({ carteras, recargar, cartera, setCartera }) {
   // cosa y eso manda: es el único dato de la cartera que sus posiciones no
   // pueden contar.
   const [plazaFija, setPlazaFija] = useState("");
+  const [ret, setRet] = useState({});
+  const [registro, setRegistro] = useState(null);
   const meta = carteras.find((x) => x.nombre === sel);
   const plazaActiva = plazaFija || meta?.mercado || "AR";
 
@@ -4585,6 +4643,8 @@ function Carteras({ carteras, recargar, cartera, setCartera }) {
     setSel(n); setMsg(null);
     const m = carteras.find((x) => x.nombre === n);
     setPlazaFija(m?.mercado_fijado ? m.mercado : "");
+    setRet(LAB ? await api(`/api/carteras/${encodeURIComponent(n)}/retenciones`) : {});
+    setRegistro(null);
     setFilas(await api(`/api/carteras/${encodeURIComponent(n)}`));
   };
   const guardar = async () => {
@@ -4595,6 +4655,12 @@ function Carteras({ carteras, recargar, cartera, setCartera }) {
     const p = await api(`/api/carteras/${encodeURIComponent(sel)}/mercado`, {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ mercado: plazaFija || null }) });
+    if (LAB) {
+      const rr = await api(`/api/carteras/${encodeURIComponent(sel)}/retenciones`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(ret) });
+      if (rr.error) { setMsg({ mal: rr.error }); return; }
+    }
     setMsg({ ok: `Guardadas ${r.guardadas} posiciones · se mide desde `
                  + `${MERCADOS[p.mercado || plazaActiva].nombre}`
                  + `${p.mercado_fijado ? "" : " (deducido de los activos)"}.` });
@@ -4703,6 +4769,61 @@ function Carteras({ carteras, recargar, cartera, setCartera }) {
             {" "}Manda la moneda de todos los números, la tasa libre de riesgo y el
             índice con el que abre.
           </div>
+          {LAB && (<>
+            <div className="tabla-wrap" style={{ maxWidth: 520, margin: "10px 0 2px" }}><table>
+              <thead><tr><th>Retención</th><th className="n">Acciones</th>
+                <th className="n">CEDEARs</th><th className="n">Bonos</th></tr></thead>
+              <tbody>{[["dividendos", "Dividendos y renta"], ["ventas", "Resultado de venta"]].map(([c, t]) => (
+                <tr key={c}><td>{t}</td>
+                  {["acciones", "cedears", "bonos"].map((k) => (
+                    <td key={k} className="n">
+                      <input type="text" inputMode="decimal" placeholder="0" aria-label={`${t} · ${k}`}
+                             value={ret[c]?.[k] ?? ""} style={{ width: 56, textAlign: "right" }}
+                             onChange={(e) => setRet({ ...ret, [c]: { ...ret[c], [k]: soloNum(e.target.value) } })} />
+                      {" "}%</td>))}
+                </tr>))}</tbody>
+            </table></div>
+            <div className="pie" style={{ marginBottom: 12 }}>
+              Lo que te descuentan sobre lo que cobrás y sobre lo que ganás al vender, según
+              el tipo de papel. En blanco es cero. Depende del país de la empresa y de dónde
+              vivís —un CEDEAR de EE.UU. no retiene lo mismo que uno de Brasil—, así que no
+              trae valores sugeridos: poné los de tu resumen. Se guarda con la cartera.
+            </div>
+            {/* Control: lo que de verdad se retuvo en cada cobro. Se pide al abrirlo,
+                porque los cargados a mano buscan su bruto en Yahoo. */}
+            <details style={{ marginBottom: 12 }}
+                     onToggle={(e) => e.currentTarget.open && !registro &&
+                       api(`/api/carteras/${encodeURIComponent(sel)}/retenciones/registro`).then(setRegistro)}>
+              <summary style={{ cursor: "pointer", fontSize: 13 }}>Registro de retenciones</summary>
+              {!registro ? <div className="cargando">Buscando los brutos…</div>
+                : registro.error ? <div className="aviso mal">{registro.error}</div>
+                : registro.length === 0 ? <div className="vacio">Esta cartera no tiene dividendos cobrados.</div>
+                : <div className="tabla-wrap" style={{ maxWidth: 620 }}><table>
+                    <thead><tr><th>Fecha</th><th>Ticker</th><th className="n">Bruto</th>
+                      <th className="n">Retención aplicada</th><th className="n">%</th></tr></thead>
+                    {[["acciones", "Acciones"], ["cedears", "CEDEARs"], ["bonos", "Bonos"]].map(([k, t]) => {
+                      const filas = registro.filter((f) => f.clase === k);
+                      return filas.length > 0 && (
+                        <tbody key={k}>
+                          <tr><td colSpan={5} style={{ fontWeight: 600, background: "var(--panel-2)" }}>
+                            {t} <span style={{ color: "var(--texto-3)", fontWeight: 400 }}>({filas.length})</span></td></tr>
+                          {filas.map((f, i) => (
+                            <tr key={i}>
+                              <td className="mono">{f.fecha}</td><td className="mono">{f.ticker}</td>
+                              <td className="n">{f.bruto == null ? "—" : `${num(f.bruto, 2)} ${f.moneda}`}</td>
+                              <td className="n">{f.retencion == null ? "—" : `${num(Math.abs(f.retencion) < 0.005 ? 0 : f.retencion, 2)} ${f.moneda}`}</td>
+                              <td className="n">{f.retencion_pct == null ? "—" : pct(Math.abs(f.retencion_pct) < 0.05 ? 0 : f.retencion_pct, 1)}</td>
+                            </tr>))}
+                        </tbody>);
+                    })}
+                  </table></div>}
+              <div className="pie">
+                Bruto según Yahoo por la cantidad del cobro; retención es lo que falta hasta lo
+                registrado como cobrado. <b>0 %</b> quiere decir que ese dividendo está anotado al
+                bruto: corregilo en Posiciones cerradas con ✎.
+              </div>
+            </details>
+          </>)}
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "8px 0 12px" }}>
             <button className="btn primario" onClick={guardar}>Guardar</button>
             <button className="btn" onClick={() => setFilas((f) => [...f, {

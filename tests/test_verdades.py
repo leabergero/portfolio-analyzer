@@ -2587,6 +2587,31 @@ def test_resultado_del_dia_por_lote():
     assert d["pnl_dia"] == 11.0
 
 
+def test_dividendos_estimados_por_lote():
+    """Cobra el lote que tenía el papel al ex-dividendo —comprado antes, vendido
+    ese día o después—, neto de la retención de su tipo, y no se repite lo que
+    ya está cargado: un cobro a mano dentro del mes siguiente es el mismo pago."""
+    from core.models import dividendos
+
+    lotes = [
+        {"ticker": "KOD.BA", "buy_date": "2025-01-10", "sell_date": None, "qty": 10, "clase": "cedears"},
+        {"ticker": "KOD.BA", "buy_date": "2025-06-01", "sell_date": "2025-09-15", "qty": 5, "clase": "cedears"},
+        {"ticker": "KOD.BA", "buy_date": "2025-12-01", "sell_date": None, "qty": 99, "clase": "cedears"},
+        {"ticker": "GGAL.BA", "buy_date": "2025-01-01", "sell_date": None, "qty": 100, "clase": "acciones"},
+    ]
+    pagos = {"KOD.BA": {"2025-06-13": 0.1, "2025-09-15": 0.1, "2025-12-01": 0.1, "2026-12-01": 0.1},
+             "GGAL.BA": {"2025-08-04": 8.0}}
+    ya = [{"ticker": "GGAL.BA", "tipo": "dividendo", "sell_date": "2025-08-11"}]
+    r = {(x["ticker"], x["sell_date"]): x for x in dividendos.estimar(
+        lotes, pagos, {"cedears": 30}, ya, hoy="2026-01-01")}
+
+    assert set(r) == {("KOD.BA", "2025-06-13"), ("KOD.BA", "2025-09-15"), ("KOD.BA", "2025-12-01")}
+    assert r[("KOD.BA", "2025-06-13")]["qty"] == 15      # los dos lotes: el segundo entró el 1/6
+    assert r[("KOD.BA", "2025-09-15")]["qty"] == 15      # vendido el mismo ex-dividendo: cobra
+    assert r[("KOD.BA", "2025-12-01")]["qty"] == 10      # comprado el ex-dividendo: no cobra
+    assert abs(r[("KOD.BA", "2025-06-13")]["pnl"] - 15 * 0.07) < 1e-9
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

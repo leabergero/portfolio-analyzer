@@ -138,6 +138,32 @@ def fijar_plaza(nombre: str, clave) -> None:
         del datos[nombre]
     _escribir(_plazas(), datos)
 
+def _retenciones() -> Path:
+    return _dir() / "retenciones.json"
+
+
+# Qué se retiene y sobre qué: el cobro de dividendos o renta, y el resultado de
+# una venta, cada uno por tipo de papel. En porcentaje; lo que falta es cero.
+RETENCION_CONCEPTOS = ("dividendos", "ventas")
+RETENCION_TIPOS = ("acciones", "cedears", "bonos")
+
+
+def retenciones(nombre: str) -> dict:
+    """Las retenciones que el usuario configuró para esa cartera, en %."""
+    return _leer(_retenciones()).get(nombre) or {}
+
+
+def fijar_retenciones(nombre: str, datos) -> None:
+    """Guarda las retenciones de una cartera. Vacías, se borran."""
+    todas = _leer(_retenciones())
+    if datos:
+        todas[nombre] = datos
+    elif nombre not in todas:
+        return
+    else:
+        del todas[nombre]
+    _escribir(_retenciones(), todas)
+
 _CAMPOS = ("ticker", "buy_date", "buy_price", "qty",
            "commissions", "source", "currency", "asset_type", "notes")
 
@@ -220,12 +246,14 @@ def borrar(nombre: str) -> bool:
     del datos[nombre]
     _escribir(_carteras(), datos)
     fijar_plaza(nombre, None)
+    fijar_retenciones(nombre, None)
     return True
 
 
 def duplicar(origen: str, destino: str) -> int:
     n = guardar(destino, cargar(origen))
     fijar_plaza(destino, plaza(origen))
+    fijar_retenciones(destino, retenciones(origen))
     return n
 
 
@@ -402,6 +430,22 @@ def quitar_realizado(nombre: str, filtro: dict) -> int:
     datos[nombre] = quedan
     _escribir(_realizado(), datos)
     return len(existentes) - len(quedan)
+
+
+def editar_dividendo(nombre: str, filtro: dict, importe: float) -> int:
+    """Corrige el importe neto cobrado de un dividendo. Deja de ser estimado."""
+    datos = _leer(_realizado())
+    n = 0
+    for t in datos.get(nombre, []):
+        if t.get("tipo") == "dividendo" and \
+                all(str(t.get(k, "")) == str(v) for k, v in filtro.items()):
+            qty = float(t.get("qty") or 1)
+            t.update(sell_price=round(importe / qty, 6), pnl=round(importe, 4),
+                     estimado=False, editado=True)
+            n += 1
+    if n:
+        _escribir(_realizado(), datos)
+    return n
 
 
 # ── Qué cartera es cada comitente ─────────────────────────────────────────────

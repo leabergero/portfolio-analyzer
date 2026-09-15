@@ -53,6 +53,40 @@ def fijar_mercado(nombre):
                     "mercado_fijado": bool(clave)})
 
 
+@bp.route("/<nombre>/retenciones", methods=["GET", "POST"])
+def retenciones(nombre):
+    """Lo que se retiene sobre dividendos y ventas, por tipo de papel, en %.
+
+    Se guarda lo que el usuario dice que le retienen: no hay valores por
+    defecto, porque dependen del país de la empresa y de dónde vive quien cobra.
+    """
+    if request.method == "GET":
+        return jsonify(store.retenciones(nombre))
+    cuerpo = request.json or {}
+    limpio = {}
+    for concepto in store.RETENCION_CONCEPTOS:
+        for tipo in store.RETENCION_TIPOS:
+            v = (cuerpo.get(concepto) or {}).get(tipo)
+            if v in (None, ""):
+                continue
+            try:
+                v = float(str(v).replace(",", "."))
+            except ValueError:
+                return jsonify({"error": f"La retención de {concepto} en {tipo} tiene que ser un número."}), 400
+            if not 0 <= v <= 100:
+                return jsonify({"error": f"La retención de {concepto} en {tipo} va entre 0 y 100 %."}), 400
+            limpio.setdefault(concepto, {})[tipo] = v
+    store.fijar_retenciones(nombre, limpio)
+    return jsonify({"ok": True, "retenciones": limpio})
+
+
+@bp.get("/<nombre>/retenciones/registro")
+def registro_retenciones(nombre):
+    """Los dividendos cobrados con su bruto y la retención aplicada, para control."""
+    from core.models import dividendos
+    return jsonify(dividendos.registro(store.cargar_realizado(nombre)))
+
+
 @bp.delete("/<nombre>")
 def borrar(nombre):
     return jsonify({"ok": store.borrar(nombre),
@@ -168,6 +202,38 @@ def borrar_realizado(nombre):
     c = request.json or {}
     quitados = store.quitar_realizado(nombre, c)
     return jsonify({"ok": True, "quitados": quitados})
+
+
+@bp.patch("/<nombre>/realizado")
+def editar_realizado(nombre):
+    """Corrige el importe neto de un dividendo: lo estimado se reemplaza por lo cobrado."""
+    c = request.json or {}
+    filtro = c.get("filtro") or {}
+    try:
+        importe = float(str(c.get("importe")).replace(",", "."))
+    except ValueError:
+        return jsonify({"error": "El importe tiene que ser un número."}), 400
+    if not filtro or importe < 0:
+        return jsonify({"error": "Falta qué dividendo corregir, o el importe es negativo."}), 400
+    if not store.editar_dividendo(nombre, filtro, importe):
+        return jsonify({"error": "No se encontró ese dividendo."}), 404
+    return jsonify({"ok": True})
+
+
+@bp.post("/<nombre>/dividendos/yahoo")
+def dividendos_yahoo(nombre):
+    """Trae de yfinance los dividendos que cobraron los lotes de ESTA cartera.
+
+    Bruto de Yahoo menos la retención configurada para el tipo de papel. No
+    repite los que ya están cargados, a mano o de antes.
+    """
+    from core.models import dividendos
+    nuevos = dividendos.proponer(store.cargar(nombre), store.cargar_realizado(nombre),
+                                 store.retenciones(nombre).get("dividendos") or {})
+    r = store.agregar_realizado(nombre, nuevos) if nuevos else {"agregados": 0}
+    return jsonify({"ok": True, "agregados": r["agregados"],
+                    "por_moneda": {m: round(sum(t["pnl"] for t in nuevos if t["moneda"] == m), 2)
+                                   for m in {t["moneda"] for t in nuevos}}})
 
 
 @bp.post("/<nombre>/importar-yahoo")
