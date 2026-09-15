@@ -487,8 +487,6 @@ function BarraMovil({ modo, setModo, tema, setTema, carteras, cartera, setCarter
                       onClick={() => elegir(k)}>{t}</button>
             ))}
             <div className="menu-m-pie">
-              {tema !== "auto" && (
-                <button className="btn auto" onClick={() => setTema("auto")}>auto</button>)}
               <label className="lab-dianoche" title={esOscuro ? "Pasar a claro" : "Pasar a oscuro"}>
                 <input type="checkbox" checked={!esOscuro} aria-label="Tema claro"
                        onChange={() => setTema(esOscuro ? "light" : "dark")} />
@@ -504,8 +502,8 @@ function BarraMovil({ modo, setModo, tema, setTema, carteras, cartera, setCarter
 
 function Barra({ modo, setModo, tema, setTema, carteras, cartera, setCartera, yo,
                  mercado }) {
-  // El switch es binario y el tema tiene tres estados: "auto" se resuelve
-  // mirando qué prefiere el sistema, y queda un enlace para volver a él.
+  // El switch es binario y el tema tiene tres estados: "auto" —mientras no se
+  // tocó— se resuelve mirando qué prefiere el sistema.
   const sistemaOscuro = window.matchMedia?.("(prefers-color-scheme: dark)").matches;
   const esOscuro = tema === "dark" || (tema === "auto" && sistemaOscuro);
   const locales = MERCADOS[mercado].locales;
@@ -531,9 +529,6 @@ function Barra({ modo, setModo, tema, setTema, carteras, cartera, setCartera, yo
       )}
       <div className="der">
         {yo?.email && <Usuario yo={yo} />}
-        {tema !== "auto" && (
-          <button className="btn auto" onClick={() => setTema("auto")}
-                  title="Seguir el tema del sistema">auto</button>)}
         <label className="lab-dianoche" title={esOscuro ? "Pasar a claro" : "Pasar a oscuro"}>
           <input type="checkbox" checked={!esOscuro} aria-label="Tema claro"
                  onChange={() => setTema(esOscuro ? "light" : "dark")} />
