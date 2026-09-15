@@ -208,6 +208,11 @@ th{text-align:left;font-size:10.5px;letter-spacing:.08em;text-transform:uppercas
    white-space:nowrap;background:var(--panel-2)}
 td{padding:7px 10px;border-bottom:1px solid var(--borde-suave)}
 tr:last-child td{border-bottom:0}
+/* Tenencias suma las dos columnas del día sin pedir scroll: se achica el aire
+   entre columnas y el chip del ticker no guarda el ancho de escala de veredicto.
+   Medido: 931 px en el peor caso, contra 942 px de la tabla con dos columnas menos. */
+.tenencias th,.tenencias td{padding-left:5px;padding-right:5px}
+.tenencias .chip{min-width:0;padding:2px 6px}
 td.n,th.n{text-align:right;font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums;white-space:nowrap}
 .pos{color:var(--positivo)} .neg{color:var(--negativo)}
 /* El resultado por tipo de cambio se lee de un vistazo: no alcanza el signo. */

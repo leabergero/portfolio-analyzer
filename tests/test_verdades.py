@@ -2565,6 +2565,28 @@ def test_variacion_del_dia_sobrevive_al_cierre_del_mercado():
         f"la rueda mostrada es la última operada, no hoy: salió {fechas['_ultima']}"
 
 
+def test_resultado_del_dia_por_lote():
+    """Cada fila de Tenencias trae lo que ganó en la rueda y su %, y la suma de
+    las filas es el KPI. Un lote comprado en la rueda misma no estaba al cierre
+    anterior: su día se mide contra lo que costó, no contra ese cierre."""
+    from core.models import portfolio
+
+    posiciones = [
+        {"ticker": "AAA", "qty": 10, "buy_price": 5, "currency": "USD", "buy_date": "2024-01-02"},
+        {"ticker": "AAA", "qty": 2, "buy_price": 10.5, "currency": "USD", "buy_date": "2026-09-14"},
+        {"ticker": "BBB", "qty": 4, "buy_price": 20, "currency": "USD", "buy_date": "2024-01-02"},
+    ]
+    d = portfolio.valuar(posiciones, precios={"AAA": 11.0, "BBB": 50.0},
+                         previos={"AAA": 10.0},
+                         fechas={"AAA": ("2026-09-11", "2026-09-14")})
+    viejo, nuevo, sin_previo = d["posiciones"]
+
+    assert (viejo["pnl_dia_usd"], viejo["pnl_dia_pct"]) == (10.0, 10.0)
+    assert nuevo["pnl_dia_usd"] == 1.0                      # 2 × (11 − 10,5)
+    assert "pnl_dia_usd" not in sin_previo
+    assert d["pnl_dia"] == 11.0
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

@@ -950,6 +950,10 @@ function Posicion({ d, cartera, recargar, extras, bench, sim, setSim }) {
   const hayFci = fciTrades.length > 0;
   const real = crudo && !conFci ? quitarFci(crudo) : crudo;
   const cerrado = real?.n ? real.total_usd : null;
+  // Con el mercado cerrado la última rueda no es la de hoy: la columna lo dice.
+  const hoy = diaEtiqueta(d.dia_fecha) === "hoy" ? "Hoy" : "Día";
+  const dia = d.dia_fecha
+    ? `Resultado de la rueda del ${d.dia_fecha} contra el cierre anterior` : undefined;
 
   return (
     <>
@@ -995,11 +999,13 @@ function Posicion({ d, cartera, recargar, extras, bench, sim, setSim }) {
           <a className="btn" style={{ marginLeft: "auto", textDecoration: "none", fontSize: 12.5 }}
              href={`/api/reporte/${encodeURIComponent(d.cartera_nombre || "")}`}>Descargar PDF</a>
         </h3>
-        <div className="tabla-wrap"><table>
+        <div className="tabla-wrap"><table className="tenencias">
           <thead><tr>
-            <th>Ticker</th><th>Compra</th><th className="n">Cantidad</th>
+            <th>Ticker</th><th>Compra</th><th className="n" title="Cantidad">Cant.</th>
             <th className="n">Precio compra</th><th className="n">Precio hoy</th>
-            <th className="n">Valor</th><th className="n">Resultado</th><th className="n">%</th>
+            <th className="n">Valor</th>
+            <th className="n" title={dia}>{hoy}</th><th className="n" title={dia}>{hoy} %</th>
+            <th className="n">Resultado</th><th className="n">%</th>
             <th className="n" title="Time under water: días corridos que lleva el lote sin volver a lo que costó.">TWU</th>
           </tr></thead>
           <tbody>{filas.map((f, i) => (
@@ -1020,6 +1026,8 @@ function Posicion({ d, cartera, recargar, extras, bench, sim, setSim }) {
                         style={{ color: "var(--alerta)", cursor: "help" }}> *</span>)}</>
               )}</td>
               <td className="n">{usd(f.valor_usd)}</td>
+              <td className={"n " + signo(f.pnl_dia_usd)}>{usd(f.pnl_dia_usd)}</td>
+              <td className={"n " + signo(f.pnl_dia_pct)}>{pct(f.pnl_dia_pct, 1)}</td>
               <td className={"n " + signo(f.pnl_usd)}>{usd(f.pnl_usd)}</td>
               <td className={"n " + signo(f.pnl_pct)}>{pct(f.pnl_pct, 1)}</td>
               <td className="n">{(() => {
@@ -1037,7 +1045,10 @@ function Posicion({ d, cartera, recargar, extras, bench, sim, setSim }) {
         <div className="pie">
           Cada lote se valuó con el precio de hoy, y su costo con el tipo de cambio del
           día en que lo compraste. Convertir una compra vieja al cambio de hoy mediría el
-          tipo de cambio, no el rendimiento del activo. <b>TWU</b> —time under water— son
+          tipo de cambio, no el rendimiento del activo. <b>{hoy}</b> es lo que el lote ganó
+          o perdió en la última rueda contra el cierre anterior —si lo compraste en esa
+          misma rueda, contra lo que te costó—; los que no tienen cierre previo, como un
+          FCI, van «—». <b>TWU</b> —time under water— son
           los días corridos que el lote lleva sin volver a lo que te costó: un −8 % de esta
           semana y uno que viene de hace dos años no son la misma posición, y el porcentaje
           solo no los distingue. Se mide contra tu costo, comisiones incluidas.

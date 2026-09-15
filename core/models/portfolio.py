@@ -202,8 +202,15 @@ def valuar(posiciones, precios=None, previos=None, fechas=None, vivo=False) -> d
         previo = previos.get(t)
         if valor is not None and previo and not estimado:
             fila["precio_previo_usd"] = round(previo, 4)
+            # Un lote comprado en la misma rueda no estaba en la cartera al
+            # cierre anterior: lo que ganó hoy se mide contra lo que costó.
+            ultima = ((fechas or {}).get(t) or (None, None))[1]
+            base = costo if costo and ultima and str(p.get("buy_date", "")) >= ultima \
+                else qty * previo
+            fila["pnl_dia_usd"] = round(valor - base, 2)
+            fila["pnl_dia_pct"] = round((valor / base - 1) * 100, 2)
             hoy_comp += valor
-            ayer_comp += qty * previo
+            ayer_comp += base
 
         if valor is not None and costo is not None:
             fila["pnl_usd"] = round(valor - costo, 2)
