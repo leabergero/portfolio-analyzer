@@ -123,7 +123,20 @@ TTL_FRESCO_H = 2.0
 # explícita porque el server de producción corre en UTC: con la hora de la
 # máquina, las 18 caían 15:00 ART y la rueda se daba por cerrada dos horas antes.
 CIERRE_BYMA_H = 18
+APERTURA_BYMA_H = 11  # BYMA abre a las 11 ART.
 TZ_BYMA = ZoneInfo("America/Argentina/Buenos_Aires")
+
+# Cada cuánto se repregunta un ticker mientras el mercado está abierto. Sin
+# esto, "alcanza con la rueda de ayer" (ver `_suficiente`) es cierto apenas
+# abre y sigue siendo cierto a las cuatro de la tarde: el primer pedido del
+# día congela el precio hasta el cierre. Entre APERTURA_BYMA_H y CIERRE_BYMA_H
+# reusa el mismo flag "fresco:" que ya escribe cada fetch exitoso.
+TTL_INTRADIA_H = 1.0
+
+
+def _mercado_abierto() -> bool:
+    ahora = datetime.now(TZ_BYMA)
+    return ahora.weekday() < 5 and APERTURA_BYMA_H <= ahora.hour < CIERRE_BYMA_H
 
 
 def precios(ticker: str, desde: str = None, hasta: str = None,
@@ -141,18 +154,20 @@ def precios(ticker: str, desde: str = None, hasta: str = None,
     if not refrescar:
         cacheado = cache.leer_precios(ticker, desde, hasta)
         if _suficiente(cacheado, hasta):
-            return cacheado
+            if not _mercado_abierto() or cache.leer_respuesta(
+                    f"fresco:{ticker}", TTL_INTRADIA_H) is True:
+                return cacheado
         # Le falta la última rueda, pero si ya se intentó hace poco no se vuelve
         # a salir. Un feriado de BYMA deja a los ~60 tickers "atrasados" sin que
         # exista el dato que falta, y sin esto cada request los reintenta todos.
-        if not cacheado.empty and cache.leer_respuesta(
+        elif not cacheado.empty and cache.leer_respuesta(
                 f"fresco:{ticker}", TTL_FRESCO_H) is True:
             return cacheado
         # Un ticker que ya dio vacío no se vuelve a preguntar por unas horas.
         # Sin esto, cada panel reintenta yfinance y BYMA por los mismos tickers
         # muertos —un FCI, un CEDEAR de otra plaza— y paga ~9 segundos por cada
         # uno, en cada pedido. Es la espera más cara de la app y no aporta nada.
-        if cache.leer_respuesta(f"sin-serie:{ticker}", TTL_SIN_SERIE_H) is True:
+        elif cache.leer_respuesta(f"sin-serie:{ticker}", TTL_SIN_SERIE_H) is True:
             return pd.DataFrame()
 
     usar_cocos = source == "cocos" or (source is None and is_cocos_only(ticker))
@@ -271,7 +286,8 @@ def info(ticker: str, ttl_horas: float = 24 * 7):
     la pantalla de composición tardaba 12 segundos, casi todos gastados en
     volver a preguntar lo mismo.
     """
-    clave = f"yf:info:{ticker.upper()}"
+    # v2: suma `country`, que decide si un papel de BYMA es CEDEAR.
+    clave = f"yf:info2:{ticker.upper()}"
     guardado = cache.leer_respuesta(clave, ttl_horas, default="__falta__")
     if guardado != "__falta__":
         return guardado or {}
@@ -284,7 +300,7 @@ def info(ticker: str, ttl_horas: float = 24 * 7):
         # sentido guardarlos ni arrastrarlos.
         datos = {k: crudo.get(k) for k in
                  ("quoteType", "sector", "industry", "category",
-                  "longName", "shortName", "currency", "marketCap")
+                  "longName", "shortName", "currency", "marketCap", "country")
                  if crudo.get(k) is not None}
     except Exception:
         datos = {}
