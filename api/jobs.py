@@ -24,7 +24,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 
 from core import mercado
-from core.data.sources import TTL_SPOT_H
+from core.data.sources import TTL_SPOT_H, spot_forzable
 from core.io import store
 from core.models import (blacklitterman, capm, composicion, markowitz,
                          momentum, montecarlo, portfolio, regimenes, risk,
@@ -182,10 +182,20 @@ def lanzar(nombre_cartera: str, posiciones: list, modelos: list = None,
     # y como la excepción se la queda el Future y nadie la miraba, esos modelos
     # se quedaban en "corriendo" para siempre. La pantalla mostraba "1 de 11
     # modelos listos" y ahí se quedaba.
+    # "posicion" es el único que pide precio en vivo (ver `MODELOS`), así que es
+    # el único al que le sirve un `forzar`: los demás miden sobre cierres, que
+    # ya tienen su propio TTL. Saltar el TTL de 2 h del spot en cada recalculo
+    # sería un burst a yfinance en un día movido; `spot_forzable` es el freno
+    # de 15 minutos entre dos pedidos de precio fresco.
+    fn_posicion = None
+    if forzar and "posicion" in elegidos and spot_forzable():
+        fn_posicion = lambda p, c: portfolio.valuar(p, vivo=True, forzar=True)
+
     for m in elegidos:
         _guardar(run_id, m, "corriendo")
+        fn = fn_posicion if m == "posicion" and fn_posicion else MODELOS[m][1]
         fut = _pool.submit(contextvars.copy_context().run,
-                           _ejecutar, run_id, m, MODELOS[m][1], posiciones,
+                           _ejecutar, run_id, m, fn, posiciones,
                            nombre_cartera)
         # Red de seguridad: `_ejecutar` atrapa lo que falle DENTRO del modelo,
         # pero lo que falle antes de entrar —como el contexto de arriba— sólo

@@ -2546,8 +2546,8 @@ def test_variacion_del_dia_sobrevive_al_cierre_del_mercado():
     o_base, o_spot, o_nueva = (sources.precios_base, sources.spot_base,
                                sources.spot_rueda_nueva)
     sources.precios_base = lambda t, **k: cierres
-    sources.spot_base = lambda t, s=None: 11.0      # el viernes, otra vez
-    sources.spot_rueda_nueva = lambda t, s=None, h=None: False
+    sources.spot_base = lambda t, s=None, f=False: 11.0      # el viernes, otra vez
+    sources.spot_rueda_nueva = lambda t, s=None, h=None, f=False: False
     try:
         previos, fechas = {}, {}
         pr = portfolio.precios_actuales(
@@ -2563,6 +2563,27 @@ def test_variacion_del_dia_sobrevive_al_cierre_del_mercado():
         f"el previo es el cierre ANTERIOR al último, no el mismo: salió {previos['AAA']}"
     assert fechas["_ultima"] == "2026-09-11", \
         f"la rueda mostrada es la última operada, no hoy: salió {fechas['_ultima']}"
+
+
+def test_recalcular_seguido_no_hace_burst_a_yfinance():
+    """El botón "recalcular" puede pedir precio fresco, pero no en cada click.
+
+    Bug que se quiso evitar: un día de mercado movido, clickear "recalcular"
+    seguido reabriría yfinance para toda la cartera sin límite. El primer
+    click dentro de la ventana consume el permiso; el segundo, hasta que
+    pasen 15 minutos, tiene que verlo ocupado.
+    """
+    from core.data import cache, sources
+
+    guardado = {}
+    original_leer, original_guardar = cache.leer_respuesta, cache.guardar_respuesta
+    cache.leer_respuesta = lambda clave, ttl_horas=24, default=None: guardado.get(clave, default)
+    cache.guardar_respuesta = lambda clave, valor, ttl_horas=24: guardado.__setitem__(clave, valor)
+    try:
+        assert sources.spot_forzable() is True, "el primer click tiene que poder pedir precio fresco"
+        assert sources.spot_forzable() is False, "el segundo click, antes de los 15 min, tiene que quedar frenado"
+    finally:
+        cache.leer_respuesta, cache.guardar_respuesta = original_leer, original_guardar
 
 
 def test_resultado_del_dia_por_lote():

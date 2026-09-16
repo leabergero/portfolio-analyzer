@@ -65,7 +65,7 @@ def concentracion(pesos) -> dict:
 # ── Valuación ─────────────────────────────────────────────────────────────────
 
 def precios_actuales(posiciones, hasta=None, previos=None, fechas=None,
-                     vivo=False) -> dict:
+                     vivo=False, forzar=False) -> dict:
     """{ticker: precio en la moneda de medición}. Un pedido por ticker.
 
     Con `vivo`, el precio de arriba es el último negociado y en `previos` queda
@@ -100,10 +100,10 @@ def precios_actuales(posiciones, hasta=None, previos=None, fechas=None,
         # que el KPI restara un cierre contra sí mismo y mostrara 0,00 en vez
         # del movimiento de la última rueda operada.
         puntos = [(f.date(), float(v)) for f, v in s.items()]
-        ahora = sources.spot_base(t, origen)
+        ahora = sources.spot_base(t, origen, forzar)
         if ahora and puntos[-1][0] == hoy:
             puntos[-1] = (hoy, ahora)          # rueda en curso: vale más que su vela
-        elif ahora and sources.spot_rueda_nueva(t, origen, hasta):
+        elif ahora and sources.spot_rueda_nueva(t, origen, hasta, forzar):
             puntos.append((hoy, ahora))
         if len(puntos) < 2:
             continue
@@ -120,7 +120,8 @@ def precios_actuales(posiciones, hasta=None, previos=None, fechas=None,
     return salida
 
 
-def valuar(posiciones, precios=None, previos=None, fechas=None, vivo=False) -> dict:
+def valuar(posiciones, precios=None, previos=None, fechas=None, vivo=False,
+          forzar=False) -> dict:
     """Valúa la cartera lote por lote, en dólares.
 
     El costo de cada lote se convierte con el MEP de **su** fecha de compra;
@@ -130,7 +131,8 @@ def valuar(posiciones, precios=None, previos=None, fechas=None, vivo=False) -> d
     if precios is None:
         previos = {} if previos is None else previos
         fechas = {} if fechas is None else fechas
-        precios = precios_actuales(posiciones, previos=previos, fechas=fechas, vivo=vivo)
+        precios = precios_actuales(posiciones, previos=previos, fechas=fechas,
+                                   vivo=vivo, forzar=forzar)
     previos = previos or {}
     serie_mep = mep_mod.serie()
 

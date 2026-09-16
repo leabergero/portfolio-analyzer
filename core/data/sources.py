@@ -199,7 +199,7 @@ def precios(ticker: str, desde: str = None, hasta: str = None,
     return spot
 
 
-def _spot_yfinance(ticker: str, ttl_horas: float = 1.0) -> pd.DataFrame:
+def _spot_yfinance(ticker: str, ttl_horas: float = 1.0, forzar: bool = False) -> pd.DataFrame:
     """Último precio suelto, para lo que no tiene ni una rueda de historia.
 
     Un CEDEAR recién listado —DELLD.BA, septiembre de 2026— no devuelve nada ni
@@ -217,7 +217,7 @@ def _spot_yfinance(ticker: str, ttl_horas: float = 1.0) -> pd.DataFrame:
     que el papel empiece a tener historia de verdad.
     """
     clave = f"yf:spot:{ticker.upper()}"
-    precio = cache.leer_respuesta(clave, ttl_horas, default="__falta__")
+    precio = "__falta__" if forzar else cache.leer_respuesta(clave, ttl_horas, default="__falta__")
     if precio == "__falta__":
         try:
             from core.data import yahoo
@@ -425,8 +425,28 @@ def a_moneda_de_medicion(s: pd.Series, ticker: str, source: str = None) -> pd.Se
 # se movió la cartera hoy, no para operar.
 TTL_SPOT_H = 2.0
 
+# Piso entre dos recálculos que piden precios frescos. El botón "recalcular"
+# puede saltarse el TTL de arriba para traer la cotización de este segundo,
+# pero clickearlo seguido en un día movido no puede convertirse en un burst a
+# yfinance: 15 minutos es el freno.
+TTL_FORZAR_SPOT_MIN = 15
 
-def spot_rueda_nueva(ticker: str, source: str = None, hasta: str = None) -> bool:
+
+def spot_forzable() -> bool:
+    """¿Pasaron los 15 minutos desde el último recálculo con precios frescos?
+
+    Se consume solo: si devuelve True, ya quedó marcado para los próximos 15
+    minutos. Se llama una vez por click de "recalcular", no por ticker — todos
+    los papeles de esa cartera comparten el mismo permiso.
+    """
+    libre = cache.leer_respuesta("yf:spot:forzado", TTL_FORZAR_SPOT_MIN / 60) is None
+    if libre:
+        cache.guardar_respuesta("yf:spot:forzado", True)
+    return libre
+
+
+def spot_rueda_nueva(ticker: str, source: str = None, hasta: str = None,
+                     forzar: bool = False) -> bool:
     """¿El spot trae una rueda que la serie de cierres todavía no tiene?
 
     Con el mercado cerrado —un finde, un feriado, la madrugada— yfinance sigue
@@ -443,7 +463,7 @@ def spot_rueda_nueva(ticker: str, source: str = None, hasta: str = None) -> bool
     """
     if source == SOURCE_FCI:
         return False
-    spot = _spot_yfinance(ticker, TTL_SPOT_H)
+    spot = _spot_yfinance(ticker, TTL_SPOT_H, forzar)
     df = precios(ticker, hasta=hasta, source=source)
     if spot.empty or df.empty or "Close" not in df.columns:
         return False
@@ -453,7 +473,7 @@ def spot_rueda_nueva(ticker: str, source: str = None, hasta: str = None) -> bool
     return abs(float(spot["Close"].iloc[-1]) - float(cierres.iloc[-1])) > 1e-9
 
 
-def spot_base(ticker: str, source: str = None) -> float | None:
+def spot_base(ticker: str, source: str = None, forzar: bool = False) -> float | None:
     """Último precio negociado, en la moneda de medición.
 
     Sólo para mostrar: la variación del día y la valuación de la tenencia. NO
@@ -463,7 +483,7 @@ def spot_base(ticker: str, source: str = None) -> float | None:
     """
     if source == SOURCE_FCI:
         return None
-    df = _spot_yfinance(ticker, TTL_SPOT_H)
+    df = _spot_yfinance(ticker, TTL_SPOT_H, forzar)
     if df.empty:
         return None
     s = a_moneda_de_medicion(df["Close"], ticker, source)
