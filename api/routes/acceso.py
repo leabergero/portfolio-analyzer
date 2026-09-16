@@ -50,9 +50,14 @@ def entrar_google():
     store.anotar(usuario)
 
     r = redirect(destino)
+    # domain=".quantcentral.eu" solo en producción (HTTPS): es lo que deja que
+    # neural.quantcentral.eu lea esta misma cookie y traiga las carteras del
+    # usuario sin un login propio. En local (http://127.0.0.1) no se fija
+    # domain — el navegador rechaza Domain sobre una IP.
     r.set_cookie(usuarios.COOKIE, usuarios.emitir(usuario),
                  max_age=usuarios.MES, httponly=True, samesite="Lax",
-                 secure=request.is_secure, path="/")
+                 secure=request.is_secure, path="/",
+                 domain=".quantcentral.eu" if request.is_secure else None)
     return r
 
 
@@ -70,5 +75,6 @@ def yo():
 @bp.post("/salir")
 def salir():
     r = jsonify({"ok": True})
-    r.delete_cookie(usuarios.COOKIE, path="/")
+    r.delete_cookie(usuarios.COOKIE, path="/",
+                    domain=".quantcentral.eu" if request.is_secure else None)
     return r
