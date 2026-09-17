@@ -188,7 +188,7 @@ def lanzar(nombre_cartera: str, posiciones: list, modelos: list = None,
     # sería un burst a yfinance en un día movido; `spot_forzable` es el freno
     # de 15 minutos entre dos pedidos de precio fresco.
     fn_posicion = None
-    if forzar and "posicion" in elegidos and spot_forzable():
+    if forzar and "posicion" in elegidos and spot_forzable(nombre_cartera):
         fn_posicion = lambda p, c: portfolio.valuar(p, vivo=True, forzar=True)
 
     for m in elegidos:

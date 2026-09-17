@@ -2580,8 +2580,24 @@ def test_recalcular_seguido_no_hace_burst_a_yfinance():
     cache.leer_respuesta = lambda clave, ttl_horas=24, default=None: guardado.get(clave, default)
     cache.guardar_respuesta = lambda clave, valor, ttl_horas=24: guardado.__setitem__(clave, valor)
     try:
-        assert sources.spot_forzable() is True, "el primer click tiene que poder pedir precio fresco"
-        assert sources.spot_forzable() is False, "el segundo click, antes de los 15 min, tiene que quedar frenado"
+        assert sources.spot_forzable("MAMI") is True, "el primer click tiene que poder pedir precio fresco"
+        assert sources.spot_forzable("MAMI") is False, "el segundo click, antes de los 15 min, tiene que quedar frenado"
+        # Bug real: el candado era un solo string sin la cartera, así que
+        # recalcular KARIN consumía el único permiso del proceso y la próxima
+        # cartera que se recalculara —MAMI, LEANDRO, la que fuera— se quedaba
+        # sin cotización fresca aunque el usuario nunca la hubiera tocado antes.
+        assert sources.spot_forzable("KARIN") is True, \
+            "otra cartera no puede quedar frenada por el candado de MAMI"
+
+        # Y tampoco puede cruzar de usuario: dos cuentas con una cartera del
+        # mismo nombre no pueden compartir el candado de la otra.
+        from core.io import store
+        token = store._usuario.set("otro_usuario")
+        try:
+            assert sources.spot_forzable("MAMI") is True, \
+                "la MAMI de otro usuario no puede quedar frenada por la de este"
+        finally:
+            store._usuario.reset(token)
     finally:
         cache.leer_respuesta, cache.guardar_respuesta = original_leer, original_guardar
 

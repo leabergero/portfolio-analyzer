@@ -432,16 +432,25 @@ TTL_SPOT_H = 2.0
 TTL_FORZAR_SPOT_MIN = 15
 
 
-def spot_forzable() -> bool:
+def spot_forzable(cartera: str) -> bool:
     """¿Pasaron los 15 minutos desde el último recálculo con precios frescos?
 
     Se consume solo: si devuelve True, ya quedó marcado para los próximos 15
     minutos. Se llama una vez por click de "recalcular", no por ticker — todos
     los papeles de esa cartera comparten el mismo permiso.
+
+    El permiso es por usuario y por cartera, no global: sin el usuario en la
+    clave, dos cuentas con una cartera de igual nombre —dos "MAMI" distintas—
+    compartirían el candado. Sin la cartera, recalcular KARIN consumía el único
+    permiso del usuario y el siguiente click en MAMI quedaba sin cotización
+    fresca aunque nadie la hubiera tocado antes.
     """
-    libre = cache.leer_respuesta("yf:spot:forzado", TTL_FORZAR_SPOT_MIN / 60) is None
+    from core.io import store
+
+    clave = f"yf:spot:forzado:{store.quien()}:{cartera}"
+    libre = cache.leer_respuesta(clave, TTL_FORZAR_SPOT_MIN / 60) is None
     if libre:
-        cache.guardar_respuesta("yf:spot:forzado", True)
+        cache.guardar_respuesta(clave, True)
     return libre
 
 
