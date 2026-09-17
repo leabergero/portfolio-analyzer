@@ -139,6 +139,25 @@ def _mercado_abierto() -> bool:
     return ahora.weekday() < 5 and APERTURA_BYMA_H <= ahora.hour < CIERRE_BYMA_H
 
 
+def _horas_desde_cierre() -> float:
+    """Cuánto pasó desde que cerró la última rueda hábil.
+
+    Con el mercado cerrado, un pedido de mitad de rueda —el último antes de
+    las 18— queda marcado "fresco" para siempre: `not _mercado_abierto()`
+    daba por bueno ESE precio aunque nunca se hubiera vuelto a pedir después
+    del cierre real. El cierre quedaba congelado en lo que fuera el último
+    precio operado en ese momento —a veces el mínimo o el máximo del día, no
+    el cierre— y ahí se quedaba hasta que otra rueda lo desplazara.
+    """
+    ahora = datetime.now(TZ_BYMA)
+    cierre = ahora.replace(hour=CIERRE_BYMA_H, minute=0, second=0, microsecond=0)
+    if ahora < cierre:
+        cierre -= timedelta(days=1)
+    while cierre.weekday() >= 5:
+        cierre -= timedelta(days=1)
+    return (ahora - cierre).total_seconds() / 3600
+
+
 def precios(ticker: str, desde: str = None, hasta: str = None,
             source: str = None, refrescar: bool = False) -> pd.DataFrame:
     """Serie histórica del ticker, en su moneda de cotización.
@@ -154,8 +173,8 @@ def precios(ticker: str, desde: str = None, hasta: str = None,
     if not refrescar:
         cacheado = cache.leer_precios(ticker, desde, hasta)
         if _suficiente(cacheado, hasta):
-            if not _mercado_abierto() or cache.leer_respuesta(
-                    f"fresco:{ticker}", TTL_INTRADIA_H) is True:
+            limite = TTL_INTRADIA_H if _mercado_abierto() else _horas_desde_cierre()
+            if cache.leer_respuesta(f"fresco:{ticker}", limite) is True:
                 return cacheado
         # Le falta la última rueda, pero si ya se intentó hace poco no se vuelve
         # a salir. Un feriado de BYMA deja a los ~60 tickers "atrasados" sin que

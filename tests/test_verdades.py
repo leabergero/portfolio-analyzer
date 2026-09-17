@@ -2649,6 +2649,60 @@ def test_dividendos_estimados_por_lote():
     assert abs(r[("KOD.BA", "2025-06-13")]["pnl"] - 15 * 0.07) < 1e-9
 
 
+def test_cierre_de_mitad_de_rueda_no_queda_congelado():
+    """El último cierre cacheado tiene que ser el de la rueda cerrada, no un
+    eco de mitad de sesión.
+
+    Bug real (MAMI, 2026-09-17): con el mercado cerrado, `precios()` daba por
+    buena la caché con solo mirar `not _mercado_abierto()` — sin chequear que
+    ese dato se hubiera pedido DESPUÉS del cierre. Un pedido de las 14 h que
+    trajo el precio operado en ese momento (a veces el mínimo o el máximo del
+    día, no el cierre real de las 17) quedaba marcado "fresco" para siempre,
+    porque una vez cerrado el mercado la condición siempre era verdadera. La
+    app mostraba ADBED.BA a 5,89 cuando Yahoo, con el cierre confirmado de esa
+    rueda, tenía 5,97.
+    """
+    import pandas as pd
+
+    from core.data import cache, sources
+
+    EDAD_FLAG_H = 5.0   # el flag "fresco" se escribió hace 5 h: antes del cierre real
+    from datetime import date as _date
+
+    original_leer, original_guardar = cache.leer_respuesta, cache.guardar_respuesta
+    original_abierto, original_horas = sources._mercado_abierto, sources._horas_desde_cierre
+    original_leer_precios, original_yf = cache.leer_precios, sources._de_yfinance
+    original_rueda = sources._ultima_rueda
+    sources._ultima_rueda = lambda hasta: _date(2026, 9, 16)  # independiente del reloj real
+    # Un `leer_respuesta` de verdad devuelve el valor solo si `ttl_horas` cubre
+    # la antigüedad real del dato. Acá la antigüedad está fija en 5 h para
+    # simular el pedido de mitad de rueda; lo que varía es el `ttl_horas` con
+    # el que cada rama de `precios()` pregunta.
+    cache.leer_respuesta = (lambda clave, ttl_horas=24, default=None:
+                            True if clave == "fresco:ADBED.BA" and ttl_horas >= EDAD_FLAG_H else default)
+    cache.guardar_respuesta = lambda clave, valor, ttl_horas=24: None
+    sources._mercado_abierto = lambda: False       # mercado ya cerró por hoy
+    sources._horas_desde_cierre = lambda: 2.0      # el cierre real fue hace 2 h
+
+    cacheado = pd.DataFrame({"Close": [5.89]},
+                            index=pd.DatetimeIndex(["2026-09-16"], name="fecha"))
+    fresco = pd.DataFrame({"Close": [5.97]},
+                          index=pd.DatetimeIndex(["2026-09-16"], name="fecha"))
+    cache.leer_precios = lambda *a, **k: cacheado
+    sources._de_yfinance = lambda *a, **k: fresco
+
+    try:
+        with_ttl = sources.precios("ADBED.BA", desde="2026-01-01", hasta="2026-09-17")
+    finally:
+        (cache.leer_respuesta, cache.guardar_respuesta) = original_leer, original_guardar
+        (sources._mercado_abierto, sources._horas_desde_cierre) = original_abierto, original_horas
+        (cache.leer_precios, sources._de_yfinance) = original_leer_precios, original_yf
+        sources._ultima_rueda = original_rueda
+
+    assert abs(float(with_ttl["Close"].iloc[-1]) - 5.97) < 1e-9, \
+        f"con la caché vencida contra el cierre real tiene que pedir de nuevo y traer 5.97, salió {with_ttl['Close'].iloc[-1]}"
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]
