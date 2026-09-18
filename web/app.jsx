@@ -3966,8 +3966,10 @@ function BlackLitterman({ bl, actual }) {
 function Regimenes({ d, cartera }) {
   const c = colores();
   const [activos, setActivos] = useState(null);
+  const [posiciones, setPosiciones] = useState(null);
   const [sel, setSel] = useState("__cartera__");
   useEffect(() => { api(`/api/riesgo/${encodeURIComponent(cartera)}/por-activo`).then(setActivos); }, [cartera]);
+  useEffect(() => { api(`/api/posicion/${encodeURIComponent(cartera)}`).then((r) => setPosiciones(r.posiciones || [])); }, [cartera]);
   const t = d.linea_tiempo || [];
   const franjas = [];
   let inicio = null;
@@ -3979,6 +3981,8 @@ function Regimenes({ d, cartera }) {
       inicio = null;
     }
   });
+  const aperturas = sel === "__cartera__" ? [] :
+    (posiciones || []).filter((p) => p.ticker === sel).map((p) => p.buy_date);
   return (
     <>
       <div className="kpis">
@@ -4030,7 +4034,10 @@ function Regimenes({ d, cartera }) {
                       type: "line", x0: e.fecha, x1: e.fecha, yref: "paper", y0: 0, y1: 1,
                       opacity: 0.3,
                       line: { color: e.alcance === "AR" ? c.series[3] : c.series[4],
-                              width: 0.7, dash: "dot" } }))],
+                              width: 0.7, dash: "dot" } })),
+                      ...aperturas.map((f) => ({
+                        type: "line", x0: f, x1: f, yref: "paper", y0: 0, y1: 1,
+                        opacity: 0.6, line: { color: "#f59e0b", width: 1.5 } }))],
                     yaxis: { title: sel === "__cartera__" ? "Volatilidad anual" : "Retorno diario",
                              ticksuffix: " %" },
                     yaxis2: { title: "VIX", overlaying: "y", side: "right", showgrid: false } }} />
