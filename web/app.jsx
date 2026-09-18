@@ -2010,7 +2010,7 @@ function FronteraEficiente({ d }) {
   const xMax = Math.max(...xs) * 1.08;
   const yMin = Math.min(...ys, 0), yMax = Math.max(...ys) * 1.06;
 
-  const L = 58, R = 606, T = 20, B = 258, W = 620, H = 300;
+  const L = 58, R = 606, T = 20, B = 338, W = 620, H = 380;
   const x = (v) => L + (v / xMax) * (R - L);
   const y = (v) => B - ((v - yMin) / (yMax - yMin)) * (B - T);
   const aVol = (px) => ((px - L) / (R - L)) * xMax;
@@ -2152,15 +2152,6 @@ function FronteraEficiente({ d }) {
           <span key={nombre}><u style={{ background: color, borderRadius: "50%" }} />{nombre}</span>))}
         <span><u className="uact" />activo suelto</span>
         <span><u className="unube" />carteras posibles</span>
-      </div>
-      <div className="pie">
-        La curva llena es lo mejor alcanzable para cada nivel de riesgo, y la nube gris son
-        carteras armadas al azar con tus mismos activos: ninguna queda por encima de la curva.
-        La punteada gris es la rama de abajo, donde para el mismo riesgo existe otra cartera
-        con más retorno. La recta ámbar es la <b>CAL</b>: mezclando la tasa libre con la
-        cartera tangente se llega a cualquier punto sobre ella, y todos son mejores que la
-        curva a igual riesgo. Pasá el mouse por el gráfico para ver si un punto cualquiera
-        es alcanzable.
       </div>
     </div>
   );
