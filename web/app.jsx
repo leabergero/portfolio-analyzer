@@ -426,8 +426,8 @@ function Usuario({ yo, compacto }) {
 // broker y la cuenta espejo no le dicen nada a un europeo.
 const MODOS = [["analisis", "Análisis"], ["comparacion", "Comparación"],
                ["carteras", "Carteras"], ["mercado", "Dólar MEP"],
-               ["conectores", "Conectores"], ["cocos", "Cocos"]];
-const MODOS_LOCALES = ["mercado", "conectores", "cocos"];
+               ["conectores", "Conectores"], ["cocos", "Cocos"], ["inviu", "InvIU"]];
+const MODOS_LOCALES = ["mercado", "conectores", "cocos", "inviu"];
 
 /* La barra de la app no entra en un teléfono: los seis modos miden 517 px de
    ancho y la pantalla tiene 393. Acá van en un panel que se abre, y arriba
@@ -947,6 +947,24 @@ function Posicion({ d, cartera, recargar, extras, bench, sim, setSim }) {
   const fciTrades = (crudo?.trades || []).filter((t) => t.tipo === "fci");
   const hayFci = fciTrades.length > 0;
   const real = crudo && !conFci ? quitarFci(crudo) : crudo;
+  // Cauciones ya están adentro de "Resultado realizado" (son cerrados como
+  // cualquier otro) — esto es solo para verlas aparte sin ir a buscarlas.
+  const caucionTrades = (crudo?.trades || []).filter((t) => t.tipo === "caucion");
+  const caucionTotal = caucionTrades.length
+    ? caucionTrades.reduce((s, t) => s + t.pnl, 0) : null;
+  // La posición de caución es de la cuenta de InvIU, no de esta cartera en
+  // particular —por eso se pide aparte, no sale de `crudo`— pero importa
+  // verla acá mismo: es una deuda u otra inversión que hay que tener
+  // presente al mirar la posición general, no solo dentro de la pestaña InvIU.
+  const [caucionAbierta, setCaucionAbierta] = useState(null);
+  useEffect(() => {
+    let vivo = true;
+    api("/api/inviu/estado").then((e) => {
+      if (!vivo || !e.conectado) return;
+      api("/api/inviu/caucion").then((c) => vivo && setCaucionAbierta(c));
+    });
+    return () => { vivo = false; };
+  }, []);
   const cerrado = real?.n ? real.total_usd : null;
   // Con el mercado cerrado la última rueda no es la de hoy: la columna lo dice.
   const hoy = diaEtiqueta(d.dia_fecha) === "hoy" ? "Hoy" : "Día";
@@ -975,8 +993,38 @@ function Posicion({ d, cartera, recargar, extras, bench, sim, setSim }) {
         {cerrado != null && (
           <Kpi etiqueta="Resultado total" valor={usd(d.pnl + cerrado)}
                tono={signo(d.pnl + cerrado)} sub="abierto + cerrado" />)}
+        {caucionTotal != null && (
+          <Kpi etiqueta="Resultado cauciones" valor={usd(caucionTotal)} tono={signo(caucionTotal)}
+               sub="carry trade tomadora + colocadora, ya incluido en el realizado" />)}
         <Kpi etiqueta="Posiciones" valor={filas.length} sub={`${new Set(filas.map(f=>f.ticker)).size} activos`} />
       </div>
+
+      {/* Mismo recuadro que en la pestaña InvIU: solo el lado que sigue
+          vigente hoy — una deuda (tomadora) o una inversión (colocadora) que
+          no hay que perder de vista aunque se esté mirando otra cartera. */}
+      {caucionAbierta && !caucionAbierta.error &&
+       (caucionAbierta.tomadora || caucionAbierta.colocadora) && (
+        <div className="kpis">
+          {caucionAbierta.tomadora && (
+            <Kpi etiqueta="Caución tomadora (deuda de corto plazo)"
+                 valor={caucionAbierta.tomadora.moneda === "ARS"
+                   ? ars(caucionAbierta.tomadora.monto, 0) : usd(caucionAbierta.tomadora.monto, 0)}
+                 tono="neg recuadro"
+                 sub={`desde ${caucionAbierta.tomadora.desde} · vence ${caucionAbierta.tomadora.vence}` +
+                   (caucionAbierta.tomadora.tasa_tna != null
+                     ? ` · ${num(caucionAbierta.tomadora.tasa_tna, 1)}% (TNA)` : "")} />
+          )}
+          {caucionAbierta.colocadora && (
+            <Kpi etiqueta="Caución colocadora (plata prestada por vos)"
+                 valor={caucionAbierta.colocadora.moneda === "ARS"
+                   ? ars(caucionAbierta.colocadora.monto, 0) : usd(caucionAbierta.colocadora.monto, 0)}
+                 tono="pos recuadro"
+                 sub={`desde ${caucionAbierta.colocadora.desde} · vence ${caucionAbierta.colocadora.vence}` +
+                   (caucionAbierta.colocadora.tasa_tna != null
+                     ? ` · ${num(caucionAbierta.colocadora.tasa_tna, 1)}% (TNA)` : "")} />
+          )}
+        </div>
+      )}
       {ev && !ev.error && (<>
         <div className="fila f2">
           <ValorCartera ev={ev} mep={d.mep_hoy} />
@@ -1071,7 +1119,7 @@ function Posicion({ d, cartera, recargar, extras, bench, sim, setSim }) {
       {extras?.composicion
         ? (extras.composicion.error
             ? <div className="aviso mal">{extras.composicion.error}</div>
-            : <Composicion d={extras.composicion} />)
+            : <Composicion d={extras.composicion} cartera={cartera} />)
         : <div className="cargando">Clasificando los activos…</div>}
 
       {/* 4 · Se mueven juntos o no */}
@@ -1344,10 +1392,17 @@ function PnlRealizado({ real, cartera, recargar, fciTrades, hayFci, conFci, setC
   const esFci = (t) => t.tipo === "fci";
   const fci = fciTrades || [];
   const fciUsd = fci.reduce((s, t) => s + t.pnl_usd, 0);
+  // Las cauciones ya están en `trades` como dos cerrados más —el neto de cada
+  // lado, no uno por rollover— así que no hacen falta pasarlas aparte como a
+  // los FCI: se filtran acá mismo por su `tipo`.
+  const esCaucion = (t) => t.tipo === "caucion";
+  const caucion = trades.filter(esCaucion);
+  const caucionUsd = caucion.reduce((s, t) => s + t.pnl_usd, 0);
   const porTicker = Object.values(trades.reduce((acc, t) => {
     const x = acc[t.ticker] || (acc[t.ticker] = { ticker: t.ticker, n: 0, usd: 0,
                                                   origen: 0, activo: 0, fx: 0,
-                                                  moneda: t.moneda, fci: esFci(t) });
+                                                  moneda: t.moneda, fci: esFci(t),
+                                                  caucion: esCaucion(t) });
     x.n += 1; x.usd += t.pnl_usd; x.origen += t.pnl_origen || 0;
     x.activo += t.pnl_activo_usd || 0; x.fx += t.pnl_fx_usd || 0;
     return acc;
@@ -1398,7 +1453,9 @@ function PnlRealizado({ real, cartera, recargar, fciTrades, hayFci, conFci, setC
           <div style={{ display: "flex", gap: 8, margin: "10px 0 4px" }}>
             <div className="modos">
               {[[false, "Por activo"], [true, `Las ${real.n} operaciones`],
-                ...(fci.length ? [["fci", `FCI (${fci.length})`]] : [])].map(([k, txt]) => (
+                ...(fci.length ? [["fci", `FCI (${fci.length})`]] : []),
+                ...(caucion.length ? [["caucion", `Cauciones (${caucion.length})`]] : [])
+              ].map(([k, txt]) => (
                 <button key={String(k)} className={"modo" + (detalle === k ? " on" : "")}
                         onClick={() => setDetalle(k)}>{txt}</button>))}
             </div>
@@ -1436,6 +1493,23 @@ function PnlRealizado({ real, cartera, recargar, fciTrades, hayFci, conFci, setC
                     <td>SUBTOTAL FCI</td><td colSpan={4} />
                     <td className="n">{fci.reduce((s, t) => s + (t.n_ops || 0), 0)}</td>
                     <td className={"n " + signo(fciUsd)}>{usd(fciUsd)}</td>
+                  </tr>
+                </tbody>
+              </>
+            ) : detalle === "caucion" ? (
+              <>
+                <thead><tr><th>Lado</th><th>Desde</th><th>Hasta</th>
+                  <th className="n">Resultado en dólares</th></tr></thead>
+                <tbody>{[...caucion].sort((a, b) => b.pnl_usd - a.pnl_usd).map((t, i) => (
+                  <tr key={i}>
+                    <td className="mono"><b>{t.ticker === "CAUCIONT" ? "Tomadora" : "Colocadora"}</b></td>
+                    <td className="mono">{t.buy_date}</td>
+                    <td className="mono">{t.sell_date}</td>
+                    <td className={"n " + signo(t.pnl_usd)}>{usd(t.pnl_usd)}</td>
+                  </tr>))}
+                  <tr style={{ fontWeight: 700 }}>
+                    <td>SUBTOTAL CAUCIONES</td><td colSpan={2} />
+                    <td className={"n " + signo(caucionUsd)}>{usd(caucionUsd)}</td>
                   </tr>
                 </tbody>
               </>
@@ -1504,7 +1578,9 @@ function PnlRealizado({ real, cartera, recargar, fciTrades, hayFci, conFci, setC
                 <tbody>{porTicker.map((x) => (
                   <tr key={x.ticker}>
                     <td className="mono">{x.ticker}{x.fci &&
-                      <span className="chip" style={{ marginLeft: 6, minWidth: 0 }}>fci</span>}</td>
+                      <span className="chip" style={{ marginLeft: 6, minWidth: 0 }}>fci</span>}
+                      {x.caucion &&
+                      <span className="chip" style={{ marginLeft: 6, minWidth: 0 }}>caución</span>}</td>
                     <td className="n">{x.n}</td>
                     <td className={"n " + signo(x.origen)}>{num(x.origen, 2)} {x.moneda}</td>
                     <td className={"n " + signo(x.activo)}>{usd(x.activo)}</td>
@@ -1535,6 +1611,14 @@ function PnlRealizado({ real, cartera, recargar, fciTrades, hayFci, conFci, setC
                 ? <>El <b>{usd(fciUsd)}</b> de subtotal <b>está sumado</b> en el neto de arriba.</>
                 : <>El <b>{usd(fciUsd)}</b> de subtotal <b>no</b> está contando en el neto de
                    arriba: lo apagaste con el interruptor «con FCI». Acá se sigue viendo igual.</>}
+            </div>
+          ) : detalle === "caucion" ? (
+            <div className="pie">
+              Interés cobrado (colocadora) contra interés pagado (tomadora), en todo el
+              historial de InvIU — no es una operación por rollover, son cientos, así que cada
+              lado entra como un único cerrado agregado. Convertido a dólares con el MEP de{" "}
+              <b>cada fecha</b>. El <b>{usd(caucionUsd)}</b> de subtotal ya está sumado en el
+              neto de arriba, como cualquier otro cerrado.
             </div>
           ) : (
           <div className="pie">
@@ -2211,22 +2295,29 @@ function Radar({ ejes, series, alto = 250 }) {
   );
 }
 
-/* Las cuatro carteras del optimizador, sobre los ejes que las distinguen. */
+/* Las carteras del optimizador, sobre los ejes que las distinguen. Black-
+   Litterman es opcional: sin `bl` (o con error) se dibujan igual las otras
+   tres — antes, al armar las 4 series siempre, un valor `undefined` de BL
+   entraba al Math.min/max compartido de cada eje, daba NaN, y esa NaN
+   contaminaba las CUATRO series (el radar entero quedaba en blanco, no solo
+   la cuarta). */
 function RadarCarteras({ mk, bl }) {
   const c = colores();
   const T = mk.tickers || [];
   const hhi = (w) => w.reduce((a, x) => a + (x / 100) ** 2, 0);
   const rota = (w) => w.reduce((a, x, i) => a + Math.abs(x - mk.actual.pesos[i]), 0) / 200;
 
-  const pesosBl = T.map((t) => bl.pesos_bl_pct?.[t] ?? 0);
   const C = [
     ["Actual", c.marcaActual, mk.actual.ret_pct, mk.actual.vol_pct, mk.actual.sharpe, mk.actual.pesos],
     ["Mín. varianza", c.series[2], mk.min_varianza.ret_pct, mk.min_varianza.vol_pct,
      mk.min_varianza.sharpe, mk.min_varianza.pesos],
     ["Máx. Sharpe", c.marcaOptima, mk.max_sharpe.ret_pct, mk.max_sharpe.vol_pct,
      mk.max_sharpe.sharpe, mk.max_sharpe.pesos],
-    ["Black-Litterman", c.series[4], bl.ret_bl_pct, bl.vol_bl_pct, bl.sharpe_bl, pesosBl],
   ];
+  if (bl && bl.ret_bl_pct != null) {
+    const pesosBl = T.map((t) => bl.pesos_bl_pct?.[t] ?? 0);
+    C.push(["Black-Litterman", c.series[4], bl.ret_bl_pct, bl.vol_bl_pct, bl.sharpe_bl, pesosBl]);
+  }
   const ejes = [
     { et: "Retorno", mas: true, fmt: (v) => pct(v, 1) },
     { et: "Estabilidad", mas: false, fmt: (v) => pct(v, 1) + " de volatilidad" },
@@ -2536,8 +2627,17 @@ function RuedasTicker({ ev }) {
 }
 
 /* ── Composición ── */
-function Composicion({ d }) {
+function Composicion({ d, cartera }) {
   const c = colores();
+  // La TIR es propia de renta fija, no del resto de los cortes de arriba —
+  // por eso se pide aparte. `/api/tir` ya combina el catálogo propio
+  // (exacto, calcado del flujo de fondos real) con bonistas.com como
+  // respaldo para lo que ese catálogo no tiene.
+  const [tirs, setTirs] = useState(null);
+  useEffect(() => {
+    setTirs(null);
+    api(`/api/tir/${encodeURIComponent(cartera)}`).then((r) => { if (!r.error) setTirs(r); });
+  }, [cartera]);
   const dona = (items, titulo) => ({
     datos: [{ type: "pie", hole: 0.5, labels: items.map((x) => x.etiqueta),
               values: items.map((x) => x.pct), textinfo: "label+percent",
@@ -2582,17 +2682,21 @@ function Composicion({ d }) {
         <h3>Detalle por activo</h3>
         <div className="tabla-wrap"><table>
           <thead><tr><th>Ticker</th><th>Nombre</th><th>Tipo</th><th>Sector</th>
-                     <th>Industria</th><th className="n">Valor</th></tr></thead>
+                     <th>Industria</th><th className="n">TIR</th><th className="n">Valor</th></tr></thead>
           <tbody>{(d.detalle || []).map((x) => (
             <tr key={x.ticker}>
               <td className="mono">{x.ticker}</td><td>{x.nombre || "—"}</td>
               <td>{x.tipo}</td><td>{x.sector}</td><td>{x.industria}</td>
+              <td className="n">{tirs?.[x.ticker] != null ? pct(tirs[x.ticker], 1) : "—"}</td>
               <td className="n">{usd(x.valor_usd)}</td>
             </tr>))}</tbody>
         </table></div>
         <div className="pie">
           Un ETF no tiene sector: es una canasta, no una empresa. En esos casos se muestra
-          la categoría del fondo, que es el dato equivalente.
+          la categoría del fondo, que es el dato equivalente. La <b>TIR</b> solo sale para
+          renta fija — el resto de los activos queda en «—». Sale del flujo de fondos propio
+          cuando el bono está en el catálogo interno, y de bonistas.com (24hs) cuando no —
+          las dos son tasas de mercado, nominales.
         </div>
       </div>
     </>
@@ -3811,11 +3915,15 @@ function ObjetivosYBL({ cartera, extras, d, bench }) {
        : bl.error ? <div className="aviso mal">{bl.error}</div>
        : <BlackLitterman bl={bl} actual={d.actual} />}
 
-      {bl && bl !== "cargando" && !bl.error && (
-        <>
-          <Seccion titulo="Las cuatro carteras, lado a lado" />
-          <RadarCarteras mk={d} bl={bl} />
-        </>)}
+      {d && !d.error && (() => {
+        const blOk = bl && bl !== "cargando" && !bl.error && bl.ret_bl_pct != null ? bl : null;
+        return (
+          <>
+            <Seccion titulo={blOk ? "Las cuatro carteras, lado a lado" : "Las tres carteras, lado a lado"} />
+            <RadarCarteras mk={d} bl={blOk} />
+          </>
+        );
+      })()}
     </>
   );
 }
@@ -5059,6 +5167,91 @@ function Cocos({ f, brk, recargar }) {
   );
 }
 
+/* InvIU no tiene formulario de contraseña acá: el login exige un reCAPTCHA
+   real de Google, que solo un navegador de verdad puede resolver. El botón
+   abre un Chrome aparte con la página oficial de InvIU — la contraseña y el
+   código que llega por mail se tipean ahí, nunca en esta app — y esta
+   pantalla sondea el estado hasta que se resuelve. */
+function Inviu({ f, brk, recargar }) {
+  const [msg, setMsg] = useState(null);
+  const [yendo, setYendo] = useState(false);
+  const pollRef = useRef(null);
+
+  // La sesión de InvIU hoy vive en `vault.py`, global al proceso — no por
+  // usuario, como el sobre firmado de Cocos. Conectarla en la web mezclaría
+  // la cuenta de un usuario con la de cualquier otro logueado en ese momento,
+  // así que ni se ofrece el botón hasta que exista un camino tan aislado como
+  // el de Cocos.
+  if (brk?.modo === "web") return (
+    <div className="panel">
+      <Ficha f={f} />
+      <div className="aviso ojo">
+        InvIU todavía no está disponible en la versión web: guarda la sesión del broker
+        en el servidor, y acá varias personas comparten el mismo servidor. Conectala desde
+        tu instalación local — las carteras que ya importaste de ahí sí se ven bien acá.
+      </div>
+    </div>
+  );
+
+  useEffect(() => () => clearInterval(pollRef.current), []);
+
+  const empezarPoll = () => {
+    clearInterval(pollRef.current);
+    pollRef.current = setInterval(async () => {
+      const e = await api("/api/inviu/estado");
+      if (e.detalle !== "esperando login en el navegador") {
+        clearInterval(pollRef.current);
+        setYendo(false);
+        recargar();
+      }
+    }, 2000);
+  };
+
+  const conectar = async () => {
+    setYendo(true); setMsg(null);
+    const r = await post("/api/inviu/conectar", {});
+    if (r.conectado) { setYendo(false); recargar(); return; }
+    if (r.error) { setYendo(false); setMsg(["mal", r.error]); return; }
+    setMsg(["ojo", "Se abrió una ventana de Chrome con la página de InvIU — " +
+                   "logueate ahí con tu usuario, tu contraseña y el código que " +
+                   "te llega por mail. Esta pantalla lo detecta sola."]);
+    empezarPoll();
+  };
+
+  const salir = async () => { await post("/api/inviu/desconectar"); setMsg(null); recargar(); };
+  const borrar = async () => {
+    if (!confirm("¿Borrar la sesión de InvIU guardada?")) return;
+    await post("/api/inviu/borrar"); setMsg(null); recargar();
+  };
+
+  return (
+    <div className="panel">
+      <Ficha f={f} />
+      {f.conectado ? (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <button className="btn peligro" onClick={salir}>Desconectar</button>
+          <button className="btn peligro" onClick={borrar}>Borrar sesión</button>
+          <span className="pie" style={{ margin: 0 }}>
+            {f.cuenta ? `Cuenta ${f.cuenta}.` : "Sesión activa."} Se reconecta sola
+            mientras la sesión no venza; no hace falta volver a loguearse cada vez.
+          </span>
+        </div>
+      ) : (
+        <div style={{ display: "grid", gap: 7 }}>
+          <button className="btn primario" disabled={yendo} onClick={conectar}>
+            {yendo ? "Esperando login en el navegador…" : "Conectar InvIU"}
+          </button>
+          <div className="pie">
+            Tu contraseña y tu código de mail se tipean en la ventana de Chrome que
+            se abre, nunca acá. La sesión queda guardada cifrada para las próximas veces.
+          </div>
+        </div>
+      )}
+      {msg && <div className={"aviso " + msg[0]}>{msg[1]}</div>}
+    </div>
+  );
+}
+
 function Conectores() {
   const [d, setD] = useState(null);
   const [brk, setBrk] = useState(null);
@@ -5077,12 +5270,15 @@ function Conectores() {
   return (
     <>
       <div className="aviso">
-        Solo dos fuentes piden credencial, y las dos son <b>opcionales</b>: sin ellas la
-        aplicación funciona igual, con menos cobertura.
+        Ninguna de las tres es obligatoria: sin ellas la aplicación funciona igual, con
+        menos cobertura.
       </div>
       <div className="fila f2">
         <Cocos f={fuente("Cocos")} brk={brk} recargar={cargar} />
         <Fmp f={fuente("Financial Modeling")} brk={brk} recargar={cargar} />
+      </div>
+      <div style={{ marginBottom: 14 }}>
+        <Inviu f={fuente("InvIU")} brk={brk} recargar={cargar} />
       </div>
       <div className="panel" style={{ marginBottom: 14 }}>
         <h3>Públicas · sin credencial</h3>
@@ -5636,6 +5832,472 @@ function MiCocos() {
   );
 }
 
+/* ═══════════════ Mi InvIU · la cuenta real del broker ═══════════════ */
+// Espejo de lo que InvIU expone hoy: cartera, operaciones y rentas, más los
+// importadores hacia una cartera de la app. Login por navegador, ver Inviu().
+
+function MiInviu() {
+  const [conectado, setConectado] = useState(null);
+  const [titular, setTitular] = useState(null);
+  const [cart, setCart] = useState(null);
+  const [errCart, setErrCart] = useState(null);
+  const [ops, setOps] = useState(null);
+  const [destino, setDestino] = useState("");
+  const [impOps, setImpOps] = useState(null);
+  const [sinImportar, setSinImportar] = useState(null);
+  const [rentas, setRentas] = useState(null);
+  const [impRentas, setImpRentas] = useState(null);
+  const [caucion, setCaucion] = useState(null);
+  const [evolucion, setEvolucion] = useState(null);
+  const [flujoProyectado, setFlujoProyectado] = useState(null);
+
+  const cargar = () => {
+    setTitular(null); setCart(null); setErrCart(null); setOps(null); setImpOps(null);
+    setSinImportar(null); setRentas(null); setImpRentas(null); setCaucion(null);
+    setEvolucion(null); setFlujoProyectado(null);
+    api("/api/inviu/estado").then((e) => {
+      setConectado(e.conectado);
+      if (!e.conectado) return;
+      api("/api/inviu/titular").then(setTitular);
+      api("/api/inviu/cartera").then((r) => {
+        if (r.error) { setErrCart(r.error); return; }
+        setCart(r);
+      });
+      api("/api/inviu/operaciones").then((o) => {
+        setOps(o);
+        if (o.cartera) setDestino(o.cartera);
+      });
+      api("/api/inviu/rentas").then(setRentas);
+      api("/api/inviu/caucion").then(setCaucion);
+      api("/api/inviu/evolucion").then(setEvolucion);
+      api("/api/inviu/flujo-proyectado").then(setFlujoProyectado);
+    });
+  };
+  useEffect(() => { cargar(); }, []);
+
+  // Igual que en Cocos: arranca con las cerradas que la cartera ya tiene
+  // destildadas, para no contar el mismo resultado dos veces.
+  const fuera = sinImportar ?? new Set((ops?.ya_cerradas || []).map((c) => c.clave));
+  const alternar = (clave) => {
+    const s = new Set(fuera);
+    s.has(clave) ? s.delete(clave) : s.add(clave);
+    setSinImportar(s);
+  };
+
+  const importarOps = (que) => {
+    setImpOps({ estado: "yendo", que });
+    const cuerpo = { cartera: destino };
+    if (que === "cerradas") {
+      cuerpo.solo = (ops.cerrados || []).map((c) => c.clave).filter((k) => !fuera.has(k));
+    }
+    post(`/api/inviu/operaciones/${que}`, cuerpo).then((r) => setImpOps({ ...r, que }));
+  };
+
+  const importarRentas = () => {
+    setImpRentas({ estado: "yendo" });
+    post("/api/inviu/rentas/importar", { cartera: destino }).then(setImpRentas);
+  };
+
+  const [impCaucion, setImpCaucion] = useState(null);
+  const importarCaucion = () => {
+    setImpCaucion({ estado: "yendo" });
+    post("/api/inviu/caucion/importar", { cartera: destino }).then(setImpCaucion);
+  };
+
+  if (conectado === null) return <div className="cargando">Consultando tu cuenta de InvIU…</div>;
+  if (!conectado) return (
+    <div className="vacio">
+      No estás conectado a InvIU. Andá a <b>Conectores</b> y conectá tu cuenta para
+      ver acá tu cartera, operaciones y rentas.
+    </div>
+  );
+
+  const port = cart?.results?.[0]?.portfolio;
+  const holdings = (port?.holdingsByCategory || [])
+    .filter((c) => !["ARG_PESOS", "US_DOLLARS"].includes(c.categoryName))
+    .flatMap((c) => c.holdings || []);
+  const efectivoArs = port?.available?.["24HS"]?.ARS?.amount ?? null;
+  const efectivoUsd = port?.available?.["24HS"]?.USD?.amount ?? null;
+  const rentasImportables = (rentas?.movimientos || [])
+    .filter((m) => m.tipo === "Renta" || m.tipo === "Amortización");
+  const cuantasCerradas = (ops?.cerrados || []).filter((c) => !fuera.has(c.clave)).length;
+  const mon = (o, dec = 2) => o?.amount == null ? "—"
+    : o.currency === "ARS" ? ars(o.amount, dec) : num(o.amount, dec) + " " + (o.currency || "");
+
+  return (
+    <>
+      <div className="aviso ojo">
+        Todo lo de esta pantalla sale <b>en vivo de InvIU</b>. Es de solo lectura hasta que
+        importás. <button className="btn" style={{ padding: "1px 9px", fontSize: 12, marginLeft: 4 }}
+        onClick={cargar}>Actualizar</button>
+      </div>
+
+      {errCart && <div className="aviso mal">{errCart}</div>}
+
+      {titular && !titular.error && (
+        <div className="panel" style={{ marginBottom: 14 }}>
+          <h3>Cuenta</h3>
+          <div className="kpis">
+            <Kpi etiqueta="Titular" valor={titular.titular || "—"} sub={titular.perfil_riesgo} />
+            <Kpi etiqueta="N° de comitente" valor={titular.comitente || "—"} sub={titular.custodio} />
+            <Kpi etiqueta="Gestor asignado" valor={titular.gestor || "sin asesor"}
+                 sub={titular.mandato_discrecional === "ACCEPT_DISCRETIONARY_MANAGER"
+                   ? "gestión discrecional" : titular.gestor_email} />
+          </div>
+        </div>
+      )}
+
+      {port && <div className="kpis">
+        <Kpi etiqueta="Patrimonio total" valor={usd(port.totalPortfolioValue?.USD?.amount, 0)}
+             sub={ars(port.totalPortfolioValue?.ARS?.amount, 0)} />
+        <Kpi etiqueta="Tipo de cambio interno" valor={num(port.exchangeRate, 2)}
+             sub="el que usa InvIU para su MEP" />
+        <Kpi etiqueta="Efectivo ARS" valor={ars(efectivoArs, 2)} />
+        <Kpi etiqueta="Efectivo USD" valor={num(efectivoUsd, 2)} tono={efectivoUsd < 0 ? "neg" : undefined}
+             sub={efectivoUsd < 0 ? "negativo: caución tomadora" : null} />
+      </div>}
+
+      {/* ── Caución ──
+          Solo se muestra el lado que sigue vigente hoy (ver `_inviu_caucion`
+          en el backend): si `null`, esa posición ya venció y no queda
+          ninguna abierta de ese lado — no es que falte cargar nada. */}
+      {caucion && !caucion.error && (caucion.tomadora || caucion.colocadora
+                                     || caucion.resultado_neto) && (
+        <div className="panel" style={{ marginBottom: 14 }}>
+          <h3>Caución abierta</h3>
+          <div className="kpis">
+            {caucion.tomadora ? (
+              <Kpi etiqueta="Tomadora (deuda de corto plazo)"
+                   valor={caucion.tomadora.moneda === "ARS" ? ars(caucion.tomadora.monto, 0)
+                                                             : usd(caucion.tomadora.monto, 0)}
+                   tono="neg recuadro"
+                   sub={`desde ${caucion.tomadora.desde} · vence ${caucion.tomadora.vence}` +
+                     (caucion.tomadora.tasa_tna != null
+                       ? ` · ${num(caucion.tomadora.tasa_tna, 1)}% (TNA)` : "")} />
+            ) : (
+              <Kpi etiqueta="Tomadora" valor="sin deuda abierta" sub="no hay caución tomadora vigente hoy" />
+            )}
+            {caucion.colocadora ? (
+              <Kpi etiqueta="Colocadora (plata prestada por vos)"
+                   valor={caucion.colocadora.moneda === "ARS" ? ars(caucion.colocadora.monto, 0)
+                                                               : usd(caucion.colocadora.monto, 0)}
+                   tono="pos recuadro"
+                   sub={`desde ${caucion.colocadora.desde} · vence ${caucion.colocadora.vence}` +
+                     (caucion.colocadora.tasa_tna != null
+                       ? ` · ${num(caucion.colocadora.tasa_tna, 1)}% (TNA)` : "")} />
+            ) : (
+              <Kpi etiqueta="Colocadora" valor="sin colocación abierta" sub="no hay caución colocadora vigente hoy" />
+            )}
+            {caucion.resultado_neto && (
+              <Kpi etiqueta="Resultado neto del carry trade"
+                   valor={usd(caucion.resultado_neto.total_usd)}
+                   tono={caucion.resultado_neto.total_usd >= 0 ? "pos" : "neg"}
+                   sub="interés cobrado − interés pagado, todo el historial" />
+            )}
+          </div>
+          {caucion.resultado_neto && (
+            <div className="tabla-wrap" style={{ marginTop: 10 }}><table>
+              <thead><tr><th></th><th className="n">USD</th></tr></thead>
+              <tbody>
+                <tr><td>Interés pagado tomando caución (USD)</td>
+                  <td className={"n " + signo(caucion.resultado_neto.tomadora_usd)}>
+                    {usd(caucion.resultado_neto.tomadora_usd)}</td></tr>
+                <tr><td>Cargos en pesos de esas cauciones (convertidos al MEP del día)</td>
+                  <td className={"n " + signo(caucion.resultado_neto.tomadora_cargos_usd)}>
+                    {usd(caucion.resultado_neto.tomadora_cargos_usd)}</td></tr>
+                <tr><td>Interés cobrado colocando caución (convertido al MEP del día)</td>
+                  <td className={"n " + signo(caucion.resultado_neto.colocadora_usd)}>
+                    {usd(caucion.resultado_neto.colocadora_usd)}</td></tr>
+                <tr style={{ fontWeight: 700 }}><td>Neto</td>
+                  <td className={"n " + signo(caucion.resultado_neto.total_usd)}>
+                    {usd(caucion.resultado_neto.total_usd)}</td></tr>
+              </tbody>
+            </table></div>
+          )}
+          {caucion.resultado_neto && (
+            <div style={{ borderTop: "1px solid var(--borde)", marginTop: 12, paddingTop: 12,
+                          display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <span style={{ fontSize: 13 }}>Llevar el resultado neto al P&L realizado</span>
+              <select value={destino} onChange={(e) => setDestino(e.target.value)}>
+                <option value="">elegí una…</option>
+                {(ops?.carteras || []).map((n) => <option key={n} value={n}>{n}</option>)}
+              </select>
+              <button className="btn" disabled={!destino || impCaucion?.estado === "yendo"}
+                      onClick={importarCaucion}>
+                {impCaucion?.estado === "yendo" ? "Importando…" : "Importar cauciones"}
+              </button>
+              {impCaucion?.ok && <span className="ok" style={{ fontSize: 12 }}>
+                Listo: {impCaucion.agregados} en {impCaucion.cartera}
+                {impCaucion.reemplazados ? ` (pisó ${impCaucion.reemplazados})` : ""}.
+              </span>}
+              {impCaucion?.error && <span className="mal" style={{ fontSize: 12 }}>{impCaucion.error}</span>}
+            </div>
+          )}
+          <div className="pie">
+            Se importan dos registros —"CAUCIONT" y "CAUCIONC"— con el resultado agregado de
+            cada lado, no uno por rollover: son cientos de tomas diarias, y anotar cada una
+            no diría nada que el neto no diga mejor.
+          </div>
+          <div className="pie">
+            Esta cuenta viene renovando una caución tomadora todos los días —no es un
+            movimiento suelto, es una posición que se re-toma sola cada rueda. El monto que
+            de verdad afecta hoy tu patrimonio ya está descontado en "Efectivo USD/ARS" de
+            arriba; los KPIs de arriba solo agregan desde cuándo corre y a qué tasa (TNA,
+            confirmada contra el boleto real de InvIU). El <b>resultado neto</b> sí es un
+            cálculo sobre todo el historial de tomas, colocaciones y vencimientos, con cada
+            pata en pesos convertida al MEP de su propia fecha — ahí está la respuesta a si
+            el carry trade rindió de verdad o no.
+          </div>
+        </div>
+      )}
+
+      {/* ── Posiciones ── */}
+      <div className="panel" style={{ marginBottom: 14 }}>
+        <h3>Posiciones ({holdings.length})</h3>
+        {holdings.length === 0
+          ? <div className="vacio">Sin tenencias en la cuenta.</div>
+          : <div className="tabla-wrap"><table>
+              <thead><tr>
+                <th>Ticker</th><th>Instrumento</th>
+                <th className="n">Cantidad</th><th className="n">PPC</th>
+                <th className="n">Valor</th><th className="n">Resultado</th><th className="n">Rend.</th>
+              </tr></thead>
+              <tbody>{holdings.map((h) => {
+                // InvIU ya manda el % como porcentaje (-0.58 = -0,58 %), no
+                // como fracción — sin este comentario alguien lo multiplica
+                // por 100 de nuevo la próxima vez que toque esto.
+                const resPct = h.performance?.ppc?.percent ?? null;
+                return (
+                  <tr key={h.id}>
+                    <td className="mono"><b>{h.ticker}</b></td>
+                    <td>{h.name}</td>
+                    <td className="n">{num(h.quantity, h.quantity % 1 ? 4 : 0)}</td>
+                    <td className="n">{mon(h.averagePurchasePrice, 4)}</td>
+                    <td className="n">{mon(h.totalValuation, 0)}</td>
+                    <td className={"n " + signo(h.performance?.ppc?.value?.amount)}>
+                      {mon(h.performance?.ppc?.value)}</td>
+                    <td className={"n " + signo(resPct)}>{resPct == null ? "—" : pct(resPct)}</td>
+                  </tr>);
+              })}</tbody>
+            </table></div>}
+        <div className="pie">
+          PPC y resultado, cada uno en la moneda en que InvIU los informa. El patrimonio
+          total del panel de arriba ya viene convertido a dólares por InvIU con su MEP interno.
+        </div>
+      </div>
+
+      {/* ── Compras y ventas ── */}
+      {ops && !ops.error && ((ops.abiertos || []).length > 0 || (ops.cerrados || []).length > 0) && (
+        <div className="panel" style={{ marginBottom: 14 }}>
+          <h3>Compras y ventas · lo que tenés y lo que ya cerraste</h3>
+
+          {(ops.ya_cargados || []).length > 0 && (
+            <div className="aviso ojo">
+              <b>{ops.cartera}</b> ya tiene cargados a mano {ops.ya_cargados.length} de estos
+              papeles: <b className="mono">{ops.ya_cargados.join(", ")}</b>. Importar las
+              posiciones no los pisa —lo cargado a mano no se toca nunca— así que quedarían
+              dos veces.
+            </div>)}
+          {(ops.ya_cerradas || []).length > 0 && (
+            <div className="aviso ojo">
+              <b>{ops.ya_cerradas.length} operaciones cerradas ya están cargadas</b> en{" "}
+              {ops.cartera}. Vienen destildadas en la tabla para no contar el mismo resultado
+              dos veces.
+            </div>)}
+
+          <div className="tabla-wrap"><table>
+            <thead><tr>
+              <th>Ticker</th><th>Compra</th><th>Venta</th><th className="n">Cantidad</th>
+              <th className="n">Precio compra</th><th className="n">Precio venta</th>
+              <th className="n">Resultado</th>
+            </tr></thead>
+            <tbody>
+              {(ops.abiertos || []).map((a, i) => (
+                <tr key={"a" + i}>
+                  <td className="mono"><b>{a.ticker}</b>
+                    <span className="chip ok" style={{ marginLeft: 6, minWidth: 0 }}>abierta</span></td>
+                  <td className="mono">{a.buy_date}</td>
+                  <td style={{ color: "var(--texto-3)" }}>—</td>
+                  <td className="n">{num(a.qty, 2)}</td>
+                  <td className="n">{usd(a.buy_price, 4)}</td>
+                  <td className="n">—</td><td className="n">—</td>
+                </tr>))}
+              {(ops.cerrados || []).map((c, i) => (
+                <tr key={"c" + i} style={fuera.has(c.clave) ? { opacity: .45 } : undefined}>
+                  <td className="mono">
+                    <label style={{ display: "inline-flex", alignItems: "center", gap: 6,
+                                    cursor: "pointer" }}
+                           title={fuera.has(c.clave) ? "No se importa" : "Se importa"}>
+                      <input type="checkbox" checked={!fuera.has(c.clave)}
+                             onChange={() => alternar(c.clave)} />
+                      {c.ticker}
+                    </label></td>
+                  <td className="mono">{c.buy_date}</td>
+                  <td className="mono">{c.sell_date}</td>
+                  <td className="n">{num(c.qty, 2)}</td>
+                  <td className="n">{usd(c.buy_price, 4)}</td>
+                  <td className="n">{usd(c.sell_price, 4)}</td>
+                  <td className={"n " + signo(c.pnl)}>{usd(c.pnl)}</td>
+                </tr>))}
+              {(ops.cerrados || []).length > 0 && (
+                <tr style={{ fontWeight: 700 }}>
+                  <td colSpan={6}>Resultado de lo cerrado</td>
+                  <td className={"n " + signo(ops.cerrados.reduce((s, c) => s + c.pnl, 0))}>
+                    {usd(ops.cerrados.reduce((s, c) => s + c.pnl, 0))}</td>
+                </tr>)}
+            </tbody>
+          </table></div>
+
+          <div style={{ borderTop: "1px solid var(--borde)", marginTop: 12, paddingTop: 12,
+                        display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 13 }}>Llevar a la cartera</span>
+            <select value={destino} onChange={(e) => setDestino(e.target.value)}
+                    disabled={!!ops.cartera}>
+              <option value="">elegí una…</option>
+              {(ops.carteras || []).map((n) => <option key={n} value={n}>{n}</option>)}
+            </select>
+            <button className="btn" disabled={!destino || impOps?.estado === "yendo"
+                                              || !(ops.abiertos || []).length}
+                    onClick={() => importarOps("posiciones")}>
+              {impOps?.estado === "yendo" && impOps.que === "posiciones"
+                ? "Importando…" : `Importar ${(ops.abiertos || []).length} posiciones`}
+            </button>
+            <button className="btn"
+                    disabled={!destino || impOps?.estado === "yendo" || !cuantasCerradas}
+                    onClick={() => importarOps("cerradas")}>
+              {impOps?.estado === "yendo" && impOps.que === "cerradas"
+                ? "Importando…" : `Importar ${cuantasCerradas} operaciones cerradas`}
+            </button>
+            {impOps?.ok && <span className="ok" style={{ fontSize: 12 }}>
+              {impOps.que === "posiciones"
+                ? <>Listo: {impOps.importadas} posiciones en {impOps.cartera}
+                   {impOps.reemplazadas ? ` (pisó ${impOps.reemplazadas})` : ""}.</>
+                : <>Listo: {impOps.agregados} operaciones en {impOps.cartera}
+                   {impOps.reemplazados ? ` (pisó ${impOps.reemplazados})` : ""}.</>}
+            </span>}
+            {impOps?.error && <span className="mal" style={{ fontSize: 12 }}>{impOps.error}</span>}
+          </div>
+          <div className="pie">
+            Se apea por bono/CEDEAR subyacente, no por ticker crudo: comprar en pesos y vender
+            la misma especie en dólares —esta cuenta lo hace seguido— cierra como una sola
+            posición, no dos, y cada pata se pasa a dólares con el MEP de <b>su</b> fecha. Las
+            cauciones (colocadora/tomadora) no entran acá: son préstamos de corto plazo, no
+            compra/venta de un instrumento.
+          </div>
+        </div>
+      )}
+
+      {/* ── Rentas, amortizaciones, depósitos y retiros ── */}
+      <div className="panel" style={{ marginBottom: 14 }}>
+        <h3>Rentas, amortizaciones, depósitos y retiros</h3>
+        {!rentas
+          ? <div className="cargando">Leyendo el historial…</div>
+          : rentas.error
+          ? <div className="aviso mal">{rentas.error}</div>
+          : (rentas.movimientos || []).length === 0
+          ? <div className="vacio">Sin movimientos de este tipo en el historial.</div>
+          : <>
+              <div className="tabla-wrap"><table>
+                <thead><tr><th>Fecha</th><th>Tipo</th><th>Ticker</th><th className="n">Monto</th></tr></thead>
+                <tbody>{rentas.movimientos.map((m, i) => (
+                  <tr key={i}>
+                    <td className="mono">{m.fecha}</td>
+                    <td>{m.tipo}</td>
+                    <td className="mono">{m.ticker}</td>
+                    <td className="n">{m.moneda === "ARS" ? ars(m.monto, 2)
+                      : num(m.monto, 2) + " " + m.moneda}</td>
+                  </tr>))}</tbody>
+              </table></div>
+              <div className="pie">
+                Depósitos y retiros son informativos —aportes de capital, no resultado— y no se
+                importan. Solo Renta y Amortización van al P&L realizado. La pata en pesos de la
+                renta de un bono dual no aparece acá: sale negativa y es un ajuste técnico de
+                Caja de Valores, no plata real (verificado contra el extracto real de la cuenta).
+              </div>
+
+              {rentasImportables.length > 0 && (
+                <div style={{ borderTop: "1px solid var(--borde)", marginTop: 12, paddingTop: 12,
+                              display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 13 }}>Llevar al P&L realizado</span>
+                  <select value={destino} onChange={(e) => setDestino(e.target.value)}>
+                    <option value="">elegí una…</option>
+                    {(ops?.carteras || []).map((n) => <option key={n} value={n}>{n}</option>)}
+                  </select>
+                  <button className="btn" disabled={!destino || impRentas?.estado === "yendo"}
+                          onClick={importarRentas}>
+                    {impRentas?.estado === "yendo" ? "Importando…"
+                      : `Importar ${rentasImportables.length} rentas/amortizaciones`}
+                  </button>
+                  {impRentas?.ok && <span className="ok" style={{ fontSize: 12 }}>
+                    Listo: {impRentas.agregados} en {impRentas.cartera}
+                    {impRentas.reemplazados ? ` (pisó ${impRentas.reemplazados})` : ""}.
+                  </span>}
+                  {impRentas?.error && <span className="mal" style={{ fontSize: 12 }}>{impRentas.error}</span>}
+                </div>
+              )}
+            </>}
+      </div>
+
+      {/* ── Rendimiento según InvIU — control cruzado ──
+          Esta TIR la calcula InvIU con sus propios flujos; la que ya
+          calcula esta app con el MEP de cada fecha vive en Análisis →
+          Posición → "Rendimiento anual · TIR". Si difieren mucho, hay algo
+          para investigar de un lado o del otro. */}
+      {evolucion && !evolucion.error && evolucion.summary && (
+        <div className="panel" style={{ marginBottom: 14 }}>
+          <h3>Rendimiento según InvIU</h3>
+          <div className="kpis">
+            <Kpi etiqueta="TIR del período" valor={pct(evolucion.summary.tir * 100, 2)}
+                 tono={signo(evolucion.summary.tir)} />
+            <Kpi etiqueta="TIR anualizada" valor={pct(evolucion.summary.annualTir * 100, 2)}
+                 tono={signo(evolucion.summary.annualTir)}
+                 sub="comparala contra Análisis → Posición" />
+            <Kpi etiqueta="Ganancia estimada" valor={usd(evolucion.summary.estimatedEarnings)}
+                 tono={signo(evolucion.summary.estimatedEarnings)} />
+          </div>
+          <div className="pie">
+            Calculado por InvIU con sus propios flujos de caja (aportes, retiros, cobros), no
+            con el MEP de cada fecha como hace esta app. Sirve de control cruzado: si esta TIR
+            y la de Análisis → Posición se parecen, las dos cuentas están midiendo lo mismo
+            bien; si difieren mucho, vale la pena mirar por qué.
+          </div>
+        </div>
+      )}
+
+      {/* ── Próximos cobros de bonos ── */}
+      {flujoProyectado && !flujoProyectado.error && (flujoProyectado.data || []).length > 0 && (
+        <div className="panel" style={{ marginBottom: 14 }}>
+          <h3>Próximos cobros de bonos ({flujoProyectado.data.length})</h3>
+          <div className="kpis">
+            {Object.entries(flujoProyectado.metrics || {}).map(([moneda, m]) => (
+              <Kpi key={moneda} etiqueta={`TIR de la renta fija (${moneda})`}
+                   valor={pct(m.tir * 100, 2)}
+                   sub={`duration ${num(m.modifiedDuration, 2)} · DV01 ${usd(m.dv01)} · convexidad ${num(m.convexity, 2)}`} />
+            ))}
+          </div>
+          <div className="tabla-wrap"><table>
+            <thead><tr><th>Fecha</th><th>Ticker</th><th>Tipo</th><th className="n">Monto</th></tr></thead>
+            <tbody>{[...flujoProyectado.data].sort((a, b) => a.date < b.date ? -1 : 1).map((p, i) => (
+              <tr key={i}>
+                <td className="mono">{p.date}</td>
+                <td className="mono">{p.ticker}</td>
+                <td>{p.type === "INCOME" ? "Renta" : p.type === "AMORTIZATION" ? "Amortización" : p.type}</td>
+                <td className="n">{p.currency === "ARS" ? ars(p.amount, 2) : num(p.amount, 2) + " " + p.currency}</td>
+              </tr>))}</tbody>
+          </table></div>
+          <div className="pie">
+            Lo que InvIU proyecta que vas a cobrar de tus bonos actuales, cupón por cupón,
+            hasta el vencimiento de cada uno — no son movimientos que ya pasaron, es la
+            proyección hacia adelante. Duration, DV01 y convexidad son los mismos conceptos
+            que ya calcula <code>bonds.py</code> para esta cartera; sirven para cruzar contra
+            eso también.
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 /* ═══════════════ Dólar MEP · serie, hitos y noticias ═══════════════ */
 
 function Mercado({ cartera }) {
@@ -6121,6 +6783,7 @@ function App() {
         {modo === "mercado" && <Mercado cartera={cartera} />}
         {modo === "conectores" && <Conectores />}
         {modo === "cocos" && <MiCocos />}
+        {modo === "inviu" && <MiInviu />}
         </Red>
       </div>
       <footer>

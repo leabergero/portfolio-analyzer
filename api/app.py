@@ -102,7 +102,13 @@ LIBRES = ("/api/modo", "/api/yo", "/api/entrar", "/api/entrar/google", "/api/sal
 # Sin este corte, cualquiera con sesión podía borrar el vault o cambiarle la
 # clave de FMP a todo el mundo.
 SOLO_LOCAL = ("/api/broker/vault", "/api/broker/conectar", "/api/broker/borrar",
-              "/api/broker/desconectar", "/api/conectores/fmp")
+              "/api/broker/desconectar", "/api/conectores/fmp",
+              # InvIU guarda su sesión en `vault.py`, que es global al proceso —
+              # no por usuario, como el sobre firmado de Cocos. Conectarlo en la
+              # web mezclaría la sesión de un usuario con la de cualquier otro
+              # logueado en ese momento: hasta que exista un camino igual de
+              # aislado que el de Cocos, esto no se ofrece en modo web.
+              "/api/inviu/conectar", "/api/inviu/borrar", "/api/inviu/desconectar")
 
 
 @app.get("/api/modo")

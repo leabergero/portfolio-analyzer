@@ -486,15 +486,22 @@ def historico(ticker: str, desde: str, hasta: str = None) -> pd.DataFrame:
 
     hasta = hasta or date.today().isoformat()
     base = base_symbol(ticker)
-    try:
-        largo = _c().long_ticker(base, _c().settlements.T2,
-                                     _c().currencies.PESOS)
-        crudo = _c().get_daily_history(largo, desde)
-    except Exception as e:
-        print(f"  [cocos] histórico de {ticker}: {e}")
-        return pd.DataFrame()
-
-    registros = crudo.get("prices") if isinstance(crudo, dict) else crudo
+    # No todos los instrumentos liquidan en T2 — verificado con AO28D, que solo
+    # tiene historial en T0/T1 y con T2 fijo devolvía `None` siempre, aunque el
+    # bono cotice y tenga precio en vivo. Se prueba T2 primero (es lo más común)
+    # y se cae a T1 y T0 antes de rendirse.
+    registros = None
+    for settlement in ("T2", "T1", "T0"):
+        try:
+            largo = _c().long_ticker(base, getattr(_c().settlements, settlement),
+                                         _c().currencies.PESOS)
+            crudo = _c().get_daily_history(largo, desde)
+        except Exception as e:
+            print(f"  [cocos] histórico de {ticker} ({settlement}): {e}")
+            continue
+        registros = crudo.get("prices") if isinstance(crudo, dict) else crudo
+        if registros:
+            break
     if not registros:
         return pd.DataFrame()
 

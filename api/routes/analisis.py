@@ -14,6 +14,8 @@ Dos formas de pedir lo mismo, según haga falta:
 from flask import Blueprint, jsonify, request
 
 from api import jobs, sim
+from core.data import bonistas
+from core.data.symbols import is_bond
 from core.io import store
 from core.models import (blacklitterman, bonds, capm, composicion, markowitz,
                          momentum, montecarlo, portfolio, regimenes, risk,
@@ -223,6 +225,29 @@ def curva():
     except ValueError:
         return jsonify({"error": "Los precios tienen que ser números."}), 400
     return jsonify(bonds.curva(precios))
+
+
+@bp.get("/tir/<nombre>")
+def tir_por_activo(nombre):
+    """TIR por ticker de renta fija de la cartera: primero el catálogo propio
+    de `bonds.py` (exacto, calcado del flujo de fondos real), y para lo que
+    ese catálogo no tiene, bonistas.com como respaldo (ver `core.data.bonistas`).
+    `{"AO28D": 9.36, ...}`, en %."""
+    posiciones = store.cargar(nombre)
+    tickers = sorted({p["ticker"].upper() for p in posiciones
+                      if is_bond(p["ticker"], p.get("source"))})
+    if not tickers:
+        return jsonify({})
+
+    propio = bonds.riesgo_tasa_cartera(posiciones)
+    tirs = ({b["ticker"]: b["tir_pct"] for b in propio.get("bonos", [])}
+            if not propio.get("error") else {})
+    for t in tickers:
+        if t not in tirs:
+            v = bonistas.tir_pct(t)
+            if v is not None:
+                tirs[t] = v
+    return jsonify(tirs)
 
 
 @bp.post("/blacklitterman/<nombre>")

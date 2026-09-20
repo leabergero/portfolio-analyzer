@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Lab InvIU</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 780px; margin: 40px auto; padding: 0 16px; }
+  button { padding: 10px 18px; font-size: 15px; cursor: pointer; margin-right: 8px; margin-bottom: 8px; }
+  input { padding: 8px; font-size: 14px; margin-right: 8px; }
+  #detalle { color: #555; margin: 12px 0; }
+  pre { background: #f4f4f4; padding: 12px; border-radius: 6px; overflow-x: auto; font-size: 13px; max-height: 400px; }
+  .ok { color: #0a7d2c; font-weight: 600; }
+  .paso { margin: 16px 0; padding: 12px; border: 1px solid #ddd; border-radius: 6px; }
+</style>
+</head>
+<body>
+  <h1>Lab InvIU</h1>
+  <p>Tu contraseña y tu código se tipean en la ventana de Chrome real que
+     abre este lab — nunca se guardan, solo se reenvían una vez a esa página.</p>
+
+  <div class="paso">
+    <strong>1.</strong> <button id="btn-conectar">Abrir InvIU</button>
+    <strong>2.</strong>
+    <input id="email" placeholder="email" type="email">
+    <input id="password" placeholder="contraseña" type="password">
+    <button id="btn-login">Loguearse</button>
+    <strong>3.</strong>
+    <input id="codigo" placeholder="código del mail">
+    <button id="btn-2fa">Confirmar código</button>
+  </div>
+
+  <button id="btn-recorrer">Recorrer todas las pestañas (mapear la API)</button>
+  <button id="btn-cerrar">Cerrar sesión del lab</button>
+
+  <p id="detalle">sin conectar</p>
+
+  <h2>Capturas de la API (en vivo)</h2>
+  <pre id="capturas">todavía nada</pre>
+
+  <h2>Tu cartera</h2>
+  <pre id="cartera">todavía nada</pre>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let poll = null;
+
+async function post(ruta, body) {
+  const r = await fetch(ruta, {
+    method: "POST",
+    headers: body ? { "Content-Type": "application/json" } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  return r.json();
+}
+async function get(ruta) {
+  const r = await fetch(ruta);
+  return r.json();
+}
+
+function pintarEstado(e) {
+  $("detalle").textContent = (e.detalle || e.error || "") + (e.n_capturas ? ` · ${e.n_capturas} llamadas capturadas` : "");
+  $("detalle").className = e.conectado ? "ok" : "";
+}
+
+async function tick() {
+  const e = await get("/api/estado");
+  pintarEstado(e);
+  const c = await get("/api/cartera");
+  $("capturas").textContent = JSON.stringify(c.capturas, null, 2);
+  if (c.cartera) $("cartera").textContent = JSON.stringify(c.cartera, null, 2);
+}
+
+$("btn-conectar").onclick = async () => {
+  pintarEstado(await post("/api/conectar"));
+  clearInterval(poll);
+  poll = setInterval(tick, 2000);
+};
+
+$("btn-login").onclick = async () => {
+  pintarEstado(await post("/api/login", { email: $("email").value, password: $("password").value }));
+};
+
+$("btn-2fa").onclick = async () => {
+  pintarEstado(await post("/api/2fa", { codigo: $("codigo").value }));
+};
+
+$("btn-recorrer").onclick = async () => {
+  const r = await post("/api/recorrer");
+  alert("Pestañas visitadas: " + JSON.stringify(r.vistas));
+  tick();
+};
+
+$("btn-cerrar").onclick = async () => {
+  clearInterval(poll);
+  pintarEstado(await post("/api/cerrar"));
+  $("capturas").textContent = "todavía nada";
+  $("cartera").textContent = "todavía nada";
+};
+</script>
+</body>
+</html>

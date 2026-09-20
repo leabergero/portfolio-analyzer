@@ -187,6 +187,14 @@ select,input[type=text],input[type=number],input[type=email],input[type=password
 .kpi .sub .up{color:var(--positivo)} .kpi .sub .down{color:var(--negativo)}
 .kpi.pos .val{color:var(--positivo)} .kpi.neg .val{color:var(--negativo)}
 
+/* Recuadro entero, no solo el número: para una posición que hay que tener
+   presente sí o sí — una deuda (caución tomadora) o un crédito (colocadora) —
+   el color del texto solo no alcanza, tiene que notarse el KPI entero. */
+.kpi.recuadro.neg{border-color:var(--negativo);
+                   background:color-mix(in srgb,var(--negativo) 10%,var(--panel))}
+.kpi.recuadro.pos{border-color:var(--positivo);
+                   background:color-mix(in srgb,var(--positivo) 10%,var(--panel))}
+
 /* El popup se abre al pasar el mouse Y al hacer clic: en tablet no hay hover,
    y esta herramienta se usa en tablet. */
 .ayuda{width:14px;height:14px;border-radius:50%;border:1px solid var(--texto-3);

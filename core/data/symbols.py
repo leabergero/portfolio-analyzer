@@ -58,7 +58,20 @@ ON_D_TICKER = {
     "PAMB8": "PAMB8D",
     "CARC1": "CARC1D",
     "IRCP2": "IRCP2D",
+    "BPOB8": "BPB8D",   # Bopreal: se cae la "O" del medio, no es sufijo
+    "BPOA8": "BPA8D",
+    "MGCTO": "MGCTD",
+    "TTCDO": "TTCDD",
+    "YMCXO": "YMCXD",
+    "IRCPO": "IRCPD",
+    "DNC7O": "DNC7D",
 }
+
+# La reversa de la de arriba: del ticker en dólares al código real que Cocos
+# reconoce. `base_symbol` la necesita para pedir precio — sin esto, a MGCTD
+# le sacaba la "D" final y pedía "MGCT", que Cocos devuelve 400 "Instrument
+# code does not exist" porque ese código no existe: el real es "MGCTO".
+ON_O_TICKER = {v: k for k, v in ON_D_TICKER.items()}
 
 LETRAS = {
     "S31E5", "S28F5", "S31M5", "S30J5", "S31J5",
@@ -109,20 +122,28 @@ def base_symbol(ticker: str) -> str:
     KOD.BA  → KO
     AL30D.BA→ AL30
     METR.BA → METR
+    MGCTD   → MGCTO  (tabla: no es "sacarle la D", es la ON en su clase pesos)
     """
     sym = strip_ba(ticker)
-    return sym[:-1] if is_d_variant(sym) else sym
+    if not is_d_variant(sym):
+        return sym
+    return ON_O_TICKER.get(sym, sym[:-1])
 
 
 def d_ticker(symbol: str) -> str:
     """Ticker del tramo en dólares, en el espacio de nombres de Cocos.
 
-    Soberanos y letras agregan "D"; las ONs reemplazan la "O" final.
+    Soberanos y letras agregan "D"; las ONs reemplazan la "O" final. La tabla
+    cubre los casos irregulares (alguna letra que se cae en el medio, como
+    BPOB8 → BPB8D); el resto de las ONs sigue el patrón general y no hace
+    falta agregarlas a mano — antes de esto, una ON nueva sin entrada en la
+    tabla caía en "agregar D" sin más: DNC7O → "DNC7OD", que no cierra contra
+    el DNC7D real y deja la posición colgada para siempre en un apareo FIFO.
     """
     sym = base_symbol(symbol)
     if sym in ON_D_TICKER:
         return ON_D_TICKER[sym]
-    return sym + "D"
+    return sym[:-1] + "D" if sym.endswith("O") else sym + "D"
 
 
 # ── Clasificación ─────────────────────────────────────────────────────────────
@@ -186,13 +207,18 @@ def ticker_currency(ticker: str) -> str:
     """
     t = ticker.upper().strip()
 
-    if not t.endswith(".BA"):
-        return "USD" if "." not in t else _moneda_declarada(t)
-
     # Bonos, ONs y letras: Cocos los devuelve en pesos incluso en su variante
-    # "D". Va ANTES del chequeo de variante dólar, justamente por eso.
+    # "D", y van **sin** sufijo de mercado (AL30D, no AL30D.BA — es la
+    # convención de todo `cocos.py`). Por eso este chequeo va antes que el de
+    # ".BA": si quedara después, "no tiene .BA" los declaraba dólares de
+    # EE.UU. sin mirar nada más, y la valuación quedaba 1.500 veces más chica
+    # de lo real —justo el error de ~1.500 que advierte el docstring de acá
+    # arriba— porque el precio (ya en pesos/100) nunca se convertía por MEP.
     if is_cocos_only(t):
         return "ARS"
+
+    if not t.endswith(".BA"):
+        return "USD" if "." not in t else _moneda_declarada(t)
 
     # Acciones y CEDEARs: la "D" sí significa que ya viene en dólares.
     return "USD" if is_d_variant(strip_ba(t)) else "ARS"
