@@ -5343,6 +5343,13 @@ function Inviu({ f, brk, recargar }) {
   const [msg, setMsg] = useState(null);
   const [yendo, setYendo] = useState(false);
   const pollRef = useRef(null);
+  // React exige el mismo número de hooks en cada render de un mismo
+  // componente — así que el corte hacia `InviuWeb` tiene que ir DESPUÉS de
+  // declararlos todos, nunca antes: `brk` llega en `null` en el primer
+  // render y recién trae "web" cuando responde `/api/broker/estado`, y ese
+  // cambio de rama a mitad de vida disparaba "Rendered fewer hooks than
+  // expected" (error #300) si el `return` cortaba antes del `useEffect`.
+  useEffect(() => () => clearInterval(pollRef.current), []);
 
   // El login (el reCAPTCHA) sigue haciendo falta hacerlo en la máquina local,
   // que tiene pantalla; el servidor no. Lo que viaja a la web son solo los
@@ -5350,8 +5357,6 @@ function Inviu({ f, brk, recargar }) {
   // en ESTE navegador, igual que el de Cocos: el servidor no los guarda en
   // ningún lado, ni un instante más de lo que tarda en atender cada request.
   if (brk?.modo === "web") return <InviuWeb f={f} recargar={recargar} />;
-
-  useEffect(() => () => clearInterval(pollRef.current), []);
 
   const empezarPoll = () => {
     clearInterval(pollRef.current);
