@@ -187,7 +187,12 @@ def abrir_sesion():
 
     # 3 · InvIU, igual de opcional, sólo en sus propias rutas — ver el
     #     comentario de CABECERA_INVIU sobre por qué no se mira siempre.
-    if not request.path.startswith("/api/inviu/"):
+    #     /api/conectores es la única excepción: ahí vive el chip
+    #     "conectado/no conectado" de InvIU, y sin restaurar acá siempre
+    #     mostraba "no conectado" aunque la sesión estuviera viva — el chip
+    #     lee `inviu.estado()`, que sin este paso nunca se puso al día en
+    #     esta request.
+    if not (request.path.startswith("/api/inviu/") or request.path == "/api/conectores"):
         return None
     sobre_inviu = request.headers.get(CABECERA_INVIU)
     if not sobre_inviu:
