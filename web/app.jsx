@@ -203,6 +203,51 @@ const leerPref = () => { try { return localStorage.getItem(FCI_KEY) !== "0"; }
 const guardarPref = (v) => { try { localStorage.setItem(FCI_KEY, v ? "1" : "0"); }
                              catch { /* sin almacenamiento: vale sólo esta sesión */ } };
 
+/* Recuerda si un cuadro quedó abierto o cerrado, por `id`, en este navegador.
+   La primera vez no hay nada guardado: se abre solo (`porDefecto`), y desde
+   que el usuario lo cierra una vez, se acuerda para la próxima. */
+const usarColapsable = (id, porDefecto = true) => {
+  const key = "pa.colapsable." + id;
+  const [abierto, setAbierto] = useState(() => {
+    try {
+      const v = localStorage.getItem(key);
+      return v === null ? porDefecto : v === "1";
+    } catch { return porDefecto; }
+  });
+  const alternar = () => setAbierto((a) => {
+    const n = !a;
+    try { localStorage.setItem(key, n ? "1" : "0"); } catch { /* sin memoria */ }
+    return n;
+  });
+  return [abierto, alternar];
+};
+
+/* Un panel con título que se pliega y despliega, recordando la elección por
+   `id` (ver `usarColapsable`). `extra` es contenido del título que no debe
+   disparar el toggle —un botón de descarga, por ejemplo— así que se le corta
+   la propagación del clic aparte. */
+function Plegable({ id, titulo, extra, porDefecto = true, children }) {
+  const [abierto, alternar] = usarColapsable(id, porDefecto);
+  return (
+    <div className="panel">
+      <h3 style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <span onClick={alternar} role="button" tabIndex={0}
+              style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: 8,
+                       userSelect: "none" }}
+              onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && alternar()}>
+          <span style={{ display: "inline-block", transition: "transform .15s",
+                         transform: abierto ? "rotate(90deg)" : "rotate(0deg)" }}>▸</span>
+          {titulo}
+        </span>
+        {extra && <span style={{ marginLeft: "auto" }} onClick={(e) => e.stopPropagation()}>
+          {extra}
+        </span>}
+      </h3>
+      {abierto && children}
+    </div>
+  );
+}
+
 /* El mismo color con transparencia. Las bandas de un abanico se pisan entre
    ellas, y el `opacity` de la traza no toca el relleno: tiene que ir en el
    color o la última cartera dibujada tapa a todas las anteriores. */
@@ -974,19 +1019,24 @@ function Posicion({ d, cartera, recargar, extras, bench, sim, setSim }) {
   const caucionTrades = (crudo?.trades || []).filter((t) => t.tipo === "caucion");
   const caucionTotal = caucionTrades.length
     ? caucionTrades.reduce((s, t) => s + t.pnl, 0) : null;
-  // La posición de caución es de la cuenta de InvIU, no de esta cartera en
-  // particular —por eso se pide aparte, no sale de `crudo`— pero importa
-  // verla acá mismo: es una deuda u otra inversión que hay que tener
-  // presente al mirar la posición general, no solo dentro de la pestaña InvIU.
+  // La posición de caución es de la cuenta de InvIU entera, no de esta cartera
+  // en particular —por eso se pide aparte, no sale de `crudo`—, pero mostrarla
+  // sin más se colaba en CUALQUIER cartera del usuario, aunque sea la de otro
+  // inversor de la familia que comparte cuenta de Google pero no de broker.
+  // `tiene_inviu` (posiciones abiertas) y el lote de los cerrados son la
+  // huella de que esta cartera en particular es la que está atada a InvIU.
+  const esDeInviu = d.tiene_inviu ||
+    (crudo?.trades || []).some((t) => String(t.lote || "").startsWith("inviu-"));
   const [caucionAbierta, setCaucionAbierta] = useState(null);
   useEffect(() => {
+    if (!esDeInviu) { setCaucionAbierta(null); return; }
     let vivo = true;
     api("/api/inviu/estado").then((e) => {
       if (!vivo || !e.conectado) return;
       api("/api/inviu/caucion").then((c) => vivo && setCaucionAbierta(c));
     });
     return () => { vivo = false; };
-  }, []);
+  }, [esDeInviu]);
   const cerrado = real?.n ? real.total_usd : null;
   // Con el mercado cerrado la última rueda no es la de hoy: la columna lo dice.
   const hoy = diaEtiqueta(d.dia_fecha) === "hoy" ? "Hoy" : "Día";
@@ -1062,11 +1112,10 @@ function Posicion({ d, cartera, recargar, extras, bench, sim, setSim }) {
       )}
       {real?.n > 0 && <CalendarioRealizado real={real} />}
 
-      <div className="panel">
-        <h3>Tenencias
-          <a className="btn" style={{ marginLeft: "auto", textDecoration: "none", fontSize: 12.5 }}
-             href={`/api/reporte/${encodeURIComponent(d.cartera_nombre || "")}`}>Descargar PDF</a>
-        </h3>
+      <Plegable id={`tenencias-${cartera}`} titulo="Tenencias" extra={
+        <a className="btn" style={{ textDecoration: "none", fontSize: 12.5 }}
+           href={`/api/reporte/${encodeURIComponent(d.cartera_nombre || "")}`}>Descargar PDF</a>
+      }>
         <div className="tabla-wrap"><table className="tenencias">
           <thead><tr>
             <th>Ticker</th><th>Compra</th><th className="n" title="Cantidad">Cant.</th>
@@ -1121,7 +1170,7 @@ function Posicion({ d, cartera, recargar, extras, bench, sim, setSim }) {
           semana y uno que viene de hace dos años no son la misma posición, y el porcentaje
           solo no los distingue. Se mide contra tu costo, comisiones incluidas.
         </div>
-      </div>
+      </Plegable>
 
       {/* Cargar y simular van juntos y acá: debajo de lo que tenés —que es
           contra lo que se agrega o se simula— y antes de lo que ya cerraste. */}
@@ -2700,8 +2749,7 @@ function Composicion({ d, cartera }) {
           );
         })}
       </div>
-      <div className="panel">
-        <h3>Detalle por activo</h3>
+      <Plegable id={`detalle-activo-${cartera}`} titulo="Detalle por activo">
         <div className="tabla-wrap"><table>
           <thead><tr><th>Ticker</th><th>Nombre</th><th>Tipo</th><th>Sector</th>
                      <th>Industria</th><th className="n">TIR</th><th className="n">Valor</th></tr></thead>
@@ -2720,7 +2768,7 @@ function Composicion({ d, cartera }) {
           cuando el bono está en el catálogo interno, y de bonistas.com (24hs) cuando no —
           las dos son tasas de mercado, nominales.
         </div>
-      </div>
+      </Plegable>
     </>
   );
 }

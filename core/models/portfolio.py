@@ -228,6 +228,11 @@ def valuar(posiciones, precios=None, previos=None, fechas=None, vivo=False,
         "costo_total": round(total_costo, 2),
         "pnl": round(total_valor - total_costo, 2),
         "pnl_pct": round((total_valor / total_costo - 1) * 100, 2) if total_costo else 0,
+        # Para decidir si tiene sentido pedir el estado de InvIU (cartera, caución
+        # abierta) — no todas las carteras del mismo usuario son la misma cuenta de
+        # broker: mostrarle la caución de InvIU a una cartera de otro inversor de la
+        # familia sería atribuirle una deuda o inversión que no es suya.
+        "tiene_inviu": any(str(p.get("lote", "")).startswith("inviu-") for p in posiciones),
         "moneda": mercado.moneda(),
         "mep_hoy": round(float(serie_mep.iloc[-1]), 2) if not serie_mep.empty else None,
         "sin_precio": sorted(set(sin_precio)),
