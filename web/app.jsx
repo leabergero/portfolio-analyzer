@@ -5277,38 +5277,55 @@ function InviuWeb({ f, recargar }) {
           </span>
         </div>
       ) : (
-        <div style={{ display: "grid", gap: 12 }}>
-          <div style={{ display: "grid", gap: 7 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-              <a className="btn primario" href={bookmarkletInviu()}
-                 onClick={(e) => e.preventDefault()}
-                 title="Arrastrame a tus marcadores, no me hagas clic acá">
-                🔖 Conectar InvIU
-              </a>
-              <span className="pie" style={{ margin: 0 }}>
-                Arrastrá este botón a la barra de marcadores de tu navegador (no le hagas
-                clic directo, arrastralo).
-              </span>
-            </div>
-            <div className="pie">
-              Después: entrá a InvIU y logueate como todos los días, en tu navegador de
-              siempre —nada que instalar, la contraseña nunca sale de la página de InvIU—.
-              Con esa pestaña abierta, hacé clic en el marcador: abre esta pantalla con la
-              sesión ya cargada, solo falta apretar "Usar esta sesión" más abajo.
-            </div>
+        <div style={{ display: "grid", gap: 14 }}>
+          <div className="aviso">
+            <b>Conectar InvIU, en 4 pasos</b>
+            <ol style={{ margin: "8px 0 0 20px", padding: 0, display: "grid", gap: 6 }}>
+              <li><b>Arrastrá</b> el botón <b>🔖 Conectar InvIU</b> de acá abajo a la barra
+                de marcadores de tu navegador. Se hace una sola vez — después queda ahí
+                para siempre, como cualquier otro marcador.</li>
+              <li>Abrí InvIU en <b>otra pestaña</b> y entrá con tu usuario y clave, exactamente
+                como cualquier día. Tu clave nunca pasa por acá: se tipea directo en la
+                página real de InvIU, nunca en esta app.</li>
+              <li>Con esa pestaña de InvIU todavía abierta, hacé clic en el marcador que
+                guardaste. Se abre esta pantalla de nuevo, en una pestaña nueva, con el
+                código ya cargado solo.</li>
+              <li>Apretá <b>"Usar esta sesión"</b> ahí abajo. Listo — InvIU queda conectado.</li>
+            </ol>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <a className="btn primario" href={bookmarkletInviu()}
+               onClick={(e) => e.preventDefault()}
+               title="Arrastrame a tus marcadores, no me hagas clic acá">
+              🔖 Conectar InvIU
+            </a>
+            <span className="pie" style={{ margin: 0 }}>
+              ☝️ Ese es el paso 1: arrastralo (no le hagas clic).
+            </span>
           </div>
           <textarea rows={3} value={blob} onChange={(e) => setBlob(e.target.value)}
-                    placeholder="El marcador completa esto solo. También podés pegar acá el código de `inviu_sesion_web`."
+                    placeholder="El marcador completa esto solo al volver del paso 3. No hace falta tocar este campo a mano."
                     style={{ fontFamily: "monospace", fontSize: 12 }} />
           <button className="btn primario" disabled={yendo || !blob.trim()} onClick={usar}>
             {yendo ? "Validando…" : "Usar esta sesión"}
           </button>
           <div className="pie">
-            Alternativa sin marcadores: desde una terminal con Python y esta app clonada,{" "}
-            <code>python -m core.broker.inviu_sesion_web</code> pide usuario y clave, hace el
-            login en una ventana real y trae el código acá solo. En los dos caminos, lo único
-            que viaja son los tokens ya obtenidos — nunca la contraseña — y este servidor los
-            valida una sola vez antes de guardarlos en este navegador.
+            <b>¿Por qué un marcador y no un botón acá mismo?</b> Porque esta pantalla y la de
+            InvIU son sitios distintos, y ningún sitio puede leer los datos de otro — es la
+            protección más básica que tiene tu navegador. El marcador funciona porque se
+            ejecuta parado en la pestaña de InvIU, con sus propios permisos, en el momento en
+            que vos lo apretás.
+          </div>
+          <div className="pie">
+            <b>Alternativa sin marcadores:</b> desde una terminal, con Python y esta app
+            clonada, <code>python -m core.broker.inviu_sesion_web</code> pide tu usuario y
+            clave, hace el login en una ventana real y trae el código acá solo.
+          </div>
+          <div className="pie">
+            En los dos caminos viajan únicamente los tokens que InvIU ya emitió — nunca tu
+            usuario ni tu clave — y este servidor los valida una sola vez contra InvIU antes
+            de devolverlos envueltos en un código firmado que queda solo en este navegador.
+            No quedan copiados en ningún lado del lado del servidor.
           </div>
         </div>
       )}
