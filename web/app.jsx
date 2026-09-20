@@ -5189,11 +5189,45 @@ function Cocos({ f, brk, recargar }) {
   );
 }
 
-/* Modo web de InvIU: pegar acá los tokens que ya sacaste corriendo
-   `python -m core.broker.inviu_sesion_web` en tu máquina — nunca la
-   contraseña, que no sale de ahí. El servidor los valida una vez contra
-   InvIU y los devuelve envueltos en un sobre firmado que vive en ESTE
-   navegador; no los guarda. */
+// El bookmarklet corre DENTRO de la pestaña de InvIU, con su propio origen:
+// ahí `localStorage` es el de InvIU, no el nuestro, así que puede leer los
+// tokens que la SPA de InvIU ya dejó después de un login común y silvestre —
+// nada que automatizar, nada que instalar. Es la misma búsqueda que hace
+// `_login_navegador` en Python, calcada a JS de una línea.
+function bookmarkletInviu() {
+  const fn = function () {
+    let t = null;
+    Object.entries(localStorage).forEach(([k, v]) => {
+      if (!/token/i.test(k)) return;
+      try {
+        const j = JSON.parse(v);
+        if (j && j.idToken && j.refreshToken) t = j;
+      } catch (e) { /* no era JSON */ }
+    });
+    if (!t) {
+      alert("No encontré una sesión de InvIU en esta pestaña. Iniciá sesión en InvIU y volvé a hacer clic.");
+      return;
+    }
+    const b = btoa(JSON.stringify(t));
+    window.open("__ORIGEN__/#inviu-web=" + encodeURIComponent(b), "_blank");
+  };
+  return "javascript:" + encodeURIComponent(
+    "(" + fn.toString().replace("__ORIGEN__", location.origin) + ")();");
+}
+
+/* Modo web de InvIU: dos caminos, ninguno pasa la contraseña por acá.
+
+   1. El bookmarklet: arrastralo a los marcadores, entrá a InvIU y logueate
+      como siempre en tu navegador de todos los días —nada que instalar—, y
+      con esa pestaña abierta hacé clic en el marcador. Lee los tokens que ya
+      quedaron en el localStorage de InvIU y abre esta pantalla con el
+      código cargado.
+   2. `python -m core.broker.inviu_sesion_web`, para quien prefiere hacer el
+      login desde una terminal en vez de tocar los marcadores del navegador.
+
+   En los dos casos el servidor valida los tokens una vez contra InvIU y los
+   devuelve envueltos en un sobre firmado que vive en ESTE navegador; no los
+   guarda. */
 function InviuWeb({ f, recargar }) {
   const [blob, setBlob] = useState("");
   const [msg, setMsg] = useState(null);
@@ -5243,22 +5277,38 @@ function InviuWeb({ f, recargar }) {
           </span>
         </div>
       ) : (
-        <div style={{ display: "grid", gap: 7 }}>
+        <div style={{ display: "grid", gap: 12 }}>
+          <div style={{ display: "grid", gap: 7 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              <a className="btn primario" href={bookmarkletInviu()}
+                 onClick={(e) => e.preventDefault()}
+                 title="Arrastrame a tus marcadores, no me hagas clic acá">
+                🔖 Conectar InvIU
+              </a>
+              <span className="pie" style={{ margin: 0 }}>
+                Arrastrá este botón a la barra de marcadores de tu navegador (no le hagas
+                clic directo, arrastralo).
+              </span>
+            </div>
+            <div className="pie">
+              Después: entrá a InvIU y logueate como todos los días, en tu navegador de
+              siempre —nada que instalar, la contraseña nunca sale de la página de InvIU—.
+              Con esa pestaña abierta, hacé clic en el marcador: abre esta pantalla con la
+              sesión ya cargada, solo falta apretar "Usar esta sesión" más abajo.
+            </div>
+          </div>
           <textarea rows={3} value={blob} onChange={(e) => setBlob(e.target.value)}
-                    placeholder="Pegá acá el código que te da tu instalación local al conectar InvIU"
+                    placeholder="El marcador completa esto solo. También podés pegar acá el código de `inviu_sesion_web`."
                     style={{ fontFamily: "monospace", fontSize: 12 }} />
           <button className="btn primario" disabled={yendo || !blob.trim()} onClick={usar}>
             {yendo ? "Validando…" : "Usar esta sesión"}
           </button>
           <div className="pie">
-            En tu máquina, con Python y esta app clonada, corré{" "}
-            <code>python -m core.broker.inviu_sesion_web</code>: te pide tu usuario y clave
-            de InvIU, abre una ventana real para el login (ahí resolvés el código por mail o
-            un captcha visible si aparece) y al final imprime un código para pegar acá. No
-            hace falta tener el servidor de esta app corriendo. Tu clave nunca sale de tu
-            máquina ni queda guardada en ningún lado — lo que viaja son los tokens ya
-            obtenidos, y este servidor los valida una sola vez antes de guardarlos en este
-            navegador.
+            Alternativa sin marcadores: desde una terminal con Python y esta app clonada,{" "}
+            <code>python -m core.broker.inviu_sesion_web</code> pide usuario y clave, hace el
+            login en una ventana real y trae el código acá solo. En los dos caminos, lo único
+            que viaja son los tokens ya obtenidos — nunca la contraseña — y este servidor los
+            valida una sola vez antes de guardarlos en este navegador.
           </div>
         </div>
       )}
