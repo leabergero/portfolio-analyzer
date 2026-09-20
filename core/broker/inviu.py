@@ -214,10 +214,8 @@ def _login_navegador(timeout_segundos: int = 300) -> dict:
 
 
 def refresh() -> dict:
-    """POST /auth/refresh — inferido del JS de la app, no capturado en vivo
-    todavía (el idToken de la sesión de prueba no llegó a vencer dentro de la
-    ventana de captura). Si esto empieza a fallar con 400/422, es lo primero
-    a re-verificar contra tráfico real."""
+    """POST /auth/refresh — confirmado contra la cuenta real: se esperaron
+    los ~5 minutos de vida del idToken y refrescó sin pedir login de nuevo."""
     c = _c()
     if c is None:
         return {"error": "sin conectar"}
@@ -236,6 +234,46 @@ def _cargar_cuenta(c: "_Cliente") -> dict:
     c.account_id = info["accounts"][0]["id"]
     c.client_id = info["accounts"][0]["userId"]
     return info
+
+
+# ── Modo web: sin vault, sin disco ────────────────────────────────────────────
+# El login sigue exigiendo un navegador de verdad (el reCAPTCHA), así que en
+# vez de intentarlo en el servidor —que no tiene pantalla, y automatizarlo ahí
+# es una apuesta sin garantía contra reCAPTCHA v3— el login se hace en la
+# máquina local de siempre y solo los tokens resultantes viajan al servidor.
+# De ahí en más es el mismo patrón que ya usa Cocos: el servidor no guarda
+# nada, el navegador lleva el sobre firmado y cada request reconstruye el
+# cliente al vuelo.
+
+def restaurar(jwt: dict) -> tuple:
+    """Reconstruye el cliente desde los tokens del sobre. Sin login, sin
+    navegador. Se llama en cada request de InvIU en modo web: `_get` ya
+    reintenta con `refresh()` si el idToken vino vencido (dura ~5 minutos, así
+    que esto pasa seguido y es esperado, no un error).
+
+    Devuelve (estado, jwt_renovado). El segundo es `None` si los tokens no
+    cambiaron; si no lo es, hay que reemitir el sobre y devolvérselo al
+    navegador, **con el login_ts del sobre viejo** — igual que Cocos, o la
+    sesión de 24 h nunca vencería.
+    """
+    c = _Cliente(jwt.get("idToken", ""), jwt.get("refreshToken", ""))
+    _poner(c)
+    info = _cargar_cuenta(c)
+    if isinstance(info, dict) and info.get("error"):
+        _poner(None)
+        _est().update(conectado=False, detalle=f"sesión rechazada: {info['error']}", cuenta=None)
+        return estado(), None
+
+    renovado = c.jwt() if c.jwt() != jwt else None
+    _est().update(conectado=True, detalle="sesión restaurada", cuenta=c.account_id)
+    return estado(), renovado
+
+
+def olvidar():
+    """Suelta el cliente al terminar el request. No persiste nada — ni en
+    disco, ni más allá de este request en memoria."""
+    _poner(None)
+    _est().update(conectado=False, detalle="sin conectar", cuenta=None)
 
 
 def _intentar_refresh(api_key: str) -> bool:

@@ -97,10 +97,21 @@ const sesion = {
   tirar: () => { try { localStorage.removeItem(SOBRE); } catch { /* nada que hacer */ } },
 };
 
+// Mismo mecanismo, sobre aparte: el de InvIU es independiente del de Cocos —
+// se puede tener uno, el otro, los dos, o ninguno.
+const SOBRE_INVIU = "pa.sesion.inviu";
+const sesionInviu = {
+  leer: () => { try { return localStorage.getItem(SOBRE_INVIU); } catch { return null; } },
+  poner: (s) => { try { localStorage.setItem(SOBRE_INVIU, s); } catch { /* sin memoria */ } },
+  tirar: () => { try { localStorage.removeItem(SOBRE_INVIU); } catch { /* nada que hacer */ } },
+};
+
 const api = async (ruta, opciones) => {
   const o = { ...(opciones || {}) };
   const guardado = sesion.leer();
   if (guardado) o.headers = { ...(o.headers || {}), "X-Sesion": guardado };
+  const guardadoInviu = sesionInviu.leer();
+  if (guardadoInviu) o.headers = { ...(o.headers || {}), "X-Sesion-Inviu": guardadoInviu };
   if (SIM_ACTIVA) o.headers = { ...(o.headers || {}), "X-Sim": SIM_ACTIVA };
   o.headers = { ...(o.headers || {}), "X-Mercado": MERCADO };
 
@@ -110,13 +121,19 @@ const api = async (ruta, opciones) => {
   // quedárselo, o la próxima request va con el viejo y no entra.
   const renovado = r.headers.get("X-Sesion");
   if (renovado) sesion.poner(renovado);
+  const renovadoInviu = r.headers.get("X-Sesion-Inviu");
+  if (renovadoInviu) sesionInviu.poner(renovadoInviu);
 
-  // El servidor avisa que el sobre murió (venció, o Cocos lo rechazó). Se tira
-  // y se avisa a la pantalla, pero NO se sale de la app: el broker es opcional
-  // y las carteras se siguen viendo igual.
+  // El servidor avisa que el sobre murió (venció, o el broker lo rechazó). Se
+  // tira y se avisa a la pantalla, pero NO se sale de la app: el broker es
+  // opcional y las carteras se siguen viendo igual.
   if (r.headers.get("X-Sesion-Fin")) {
     sesion.tirar();
     window.dispatchEvent(new CustomEvent("pa:reautenticar"));
+  }
+  if (r.headers.get("X-Sesion-Inviu-Fin")) {
+    sesionInviu.tirar();
+    window.dispatchEvent(new CustomEvent("pa:reautenticar-inviu"));
   }
 
   const d = await r.json().catch(() => ({ error: "Respuesta ilegible del servidor." }));
@@ -129,8 +146,13 @@ const api = async (ruta, opciones) => {
   if (r.status === 401 && d.ingresar) {
     window.dispatchEvent(new CustomEvent("pa:ingresar"));
   } else if (r.status === 401 && d.reautenticar) {
-    sesion.tirar();
-    window.dispatchEvent(new CustomEvent("pa:reautenticar", { detail: d.error }));
+    if (ruta.startsWith("/api/inviu/")) {
+      sesionInviu.tirar();
+      window.dispatchEvent(new CustomEvent("pa:reautenticar-inviu", { detail: d.error }));
+    } else {
+      sesion.tirar();
+      window.dispatchEvent(new CustomEvent("pa:reautenticar", { detail: d.error }));
+    }
   }
   return d;
 };
@@ -5167,6 +5189,69 @@ function Cocos({ f, brk, recargar }) {
   );
 }
 
+/* Modo web de InvIU: pegar acá los tokens que ya sacaste conectando en tu
+   instalación local (`python -m core.broker.inviu_local_a_web`, o el botón
+   equivalente si lo agregamos ahí) — nunca la contraseña, que no sale de tu
+   máquina. El servidor los valida una vez contra InvIU y los devuelve
+   envueltos en un sobre firmado que vive en ESTE navegador; no los guarda. */
+function InviuWeb({ f, recargar }) {
+  const [blob, setBlob] = useState("");
+  const [msg, setMsg] = useState(null);
+  const [yendo, setYendo] = useState(false);
+
+  const usar = async () => {
+    let jwt;
+    try {
+      jwt = JSON.parse(atob(blob.trim()));
+    } catch {
+      setMsg(["mal", "Eso no es lo que copiaste de tu máquina local — revisá que esté completo."]);
+      return;
+    }
+    setYendo(true); setMsg(null);
+    const r = await post("/api/inviu/web/sesion", jwt);
+    setYendo(false);
+    if (r.error) { setMsg(["mal", r.error]); return; }
+    sesionInviu.poner(r.sobre);
+    setBlob("");
+    recargar();
+  };
+
+  const salir = () => { sesionInviu.tirar(); recargar(); };
+
+  return (
+    <div className="panel">
+      <Ficha f={f} />
+      {f.conectado ? (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <button className="btn peligro" onClick={salir}>Desconectar</button>
+          <span className="pie" style={{ margin: 0 }}>
+            {f.cuenta ? `Cuenta ${f.cuenta}.` : "Sesión activa."} Vive solo en este
+            navegador — el servidor no la guarda. Cuando venza (hasta 24 h, o antes si
+            InvIU la rechaza), hay que repetir este paso.
+          </span>
+        </div>
+      ) : (
+        <div style={{ display: "grid", gap: 7 }}>
+          <textarea rows={3} value={blob} onChange={(e) => setBlob(e.target.value)}
+                    placeholder="Pegá acá el código que te da tu instalación local al conectar InvIU"
+                    style={{ fontFamily: "monospace", fontSize: 12 }} />
+          <button className="btn primario" disabled={yendo || !blob.trim()} onClick={usar}>
+            {yendo ? "Validando…" : "Usar esta sesión"}
+          </button>
+          <div className="pie">
+            En tu máquina local, conectá InvIU como siempre y corré{" "}
+            <code>python -m core.broker.inviu_sesion_web</code> (dentro de{" "}
+            <code>portfolio-analyzer</code>): imprime un código para pegar acá. Nunca es tu
+            contraseña — son los tokens ya obtenidos, y se validan una sola vez antes de
+            guardarse en este navegador.
+          </div>
+        </div>
+      )}
+      {msg && <div className={"aviso " + msg[0]}>{msg[1]}</div>}
+    </div>
+  );
+}
+
 /* InvIU no tiene formulario de contraseña acá: el login exige un reCAPTCHA
    real de Google, que solo un navegador de verdad puede resolver. El botón
    abre un Chrome aparte con la página oficial de InvIU — la contraseña y el
@@ -5177,21 +5262,12 @@ function Inviu({ f, brk, recargar }) {
   const [yendo, setYendo] = useState(false);
   const pollRef = useRef(null);
 
-  // La sesión de InvIU hoy vive en `vault.py`, global al proceso — no por
-  // usuario, como el sobre firmado de Cocos. Conectarla en la web mezclaría
-  // la cuenta de un usuario con la de cualquier otro logueado en ese momento,
-  // así que ni se ofrece el botón hasta que exista un camino tan aislado como
-  // el de Cocos.
-  if (brk?.modo === "web") return (
-    <div className="panel">
-      <Ficha f={f} />
-      <div className="aviso ojo">
-        InvIU todavía no está disponible en la versión web: guarda la sesión del broker
-        en el servidor, y acá varias personas comparten el mismo servidor. Conectala desde
-        tu instalación local — las carteras que ya importaste de ahí sí se ven bien acá.
-      </div>
-    </div>
-  );
+  // El login (el reCAPTCHA) sigue haciendo falta hacerlo en la máquina local,
+  // que tiene pantalla; el servidor no. Lo que viaja a la web son solo los
+  // tokens ya obtenidos —nunca la contraseña—, y quedan en un sobre firmado
+  // en ESTE navegador, igual que el de Cocos: el servidor no los guarda en
+  // ningún lado, ni un instante más de lo que tarda en atender cada request.
+  if (brk?.modo === "web") return <InviuWeb f={f} recargar={recargar} />;
 
   useEffect(() => () => clearInterval(pollRef.current), []);
 

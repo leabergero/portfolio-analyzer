@@ -23,7 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from api.routes import acceso, analisis, carteras, datos  # noqa: E402
 from core import mercado, usuarios  # noqa: E402
-from core.broker import cocos, sesion  # noqa: E402
+from core.broker import cocos, inviu, sesion  # noqa: E402
 from core.io import store  # noqa: E402
 from core.data import mep  # noqa: E402
 
@@ -91,6 +91,15 @@ def cabeceras(resp):
 CABECERA = "X-Sesion"
 FIN = "X-Sesion-Fin"      # "este sobre ya no vale, tiralo"
 
+# El mismo mecanismo para InvIU, en su propia cabecera: un usuario puede tener
+# las dos sesiones (Cocos y InvIU) a la vez, y son sobres independientes. Se
+# procesa sólo en rutas de InvIU —a diferencia de Cocos, el idToken dura ~5
+# minutos, así que HAY refresh en casi cada request; hacerlo en cada request
+# de la app entera sería pagar esa llamada de más sin que el usuario esté
+# usando InvIU para nada.
+CABECERA_INVIU = "X-Sesion-Inviu"
+FIN_INVIU = "X-Sesion-Inviu-Fin"
+
 # Lo único que se sirve sin sobre: la página, sus assets, y las dos rutas que el
 # navegador necesita ANTES de tener sesión — saber en qué modo corre el servidor
 # y poder hacer el login.
@@ -147,31 +156,58 @@ def abrir_sesion():
     # 2 · Cocos, opcional. Quien no conectó el broker usa la app igual: carga su
     #     cartera a mano o por CSV y los precios salen de yfinance. Por eso la
     #     falta de sobre no corta el request, sólo deja el broker sin conectar.
+    #     Es un `if`, no un `return` temprano: Cocos e InvIU son independientes
+    #     y este mismo request puede traer sobre de uno solo de los dos.
     sobre = request.headers.get(CABECERA)
-    if not sobre:
+    if sobre:
+        # Si el sobre no sirve, el broker se cae pero la app NO. Cocos es
+        # opcional: bloquear todo acá dejaba a alguien sin poder mirar sus
+        # propias carteras porque se le venció una sesión que ni siquiera
+        # necesita. Se marca el sobre como muerto, el front lo tira, y se
+        # sigue como quien nunca lo conectó.
+        try:
+            jwt = sesion.leer(sobre)
+        except sesion.SesionInvalida as e:
+            app.logger.info("sobre de Cocos descartado · %s · %s", request.path, e)
+            g.sobre_muerto = str(e)
+            jwt = None
+
+        if jwt is not None:
+            g.login_ts = jwt.pop("login_ts", None)
+            estado, renovado = cocos.restaurar(jwt)
+            if not estado["conectado"]:
+                app.logger.info("Cocos no restauró · %s · %s", request.path, estado["detalle"])
+                g.sobre_muerto = estado["detalle"]
+            elif renovado:
+                # Cocos renovó el access token: hay que devolverle un sobre
+                # nuevo al navegador, con el login_ts VIEJO. Si acá se
+                # emitiera uno fresco, el reloj de 24 h se reiniciaría solo y
+                # el 2FA diario no llegaría nunca.
+                g.sobre_nuevo = sesion.emitir(renovado, login_ts=g.login_ts)
+
+    # 3 · InvIU, igual de opcional, sólo en sus propias rutas — ver el
+    #     comentario de CABECERA_INVIU sobre por qué no se mira siempre.
+    if not request.path.startswith("/api/inviu/"):
         return None
-    # Si el sobre no sirve, el broker se cae pero la app NO. Cocos es opcional:
-    # bloquear todo acá dejaba a alguien sin poder mirar sus propias carteras
-    # porque se le venció una sesión que ni siquiera necesita. Se marca el sobre
-    # como muerto, el front lo tira, y se sigue como quien nunca lo conectó.
+    sobre_inviu = request.headers.get(CABECERA_INVIU)
+    if not sobre_inviu:
+        return None
     try:
-        jwt = sesion.leer(sobre)
+        jwt_inviu = sesion.leer(sobre_inviu)
     except sesion.SesionInvalida as e:
-        app.logger.info("sobre de Cocos descartado · %s · %s", request.path, e)
-        g.sobre_muerto = str(e)
+        app.logger.info("sobre de InvIU descartado · %s · %s", request.path, e)
+        g.sobre_inviu_muerto = str(e)
         return None
 
-    g.login_ts = jwt.pop("login_ts", None)
-    estado, renovado = cocos.restaurar(jwt)
-    if not estado["conectado"]:
-        app.logger.info("Cocos no restauró · %s · %s", request.path, estado["detalle"])
-        g.sobre_muerto = estado["detalle"]
+    g.login_ts_inviu = jwt_inviu.pop("login_ts", None)
+    estado_inviu, renovado_inviu = inviu.restaurar(jwt_inviu)
+    g.hubo_inviu = True
+    if not estado_inviu["conectado"]:
+        app.logger.info("InvIU no restauró · %s · %s", request.path, estado_inviu["detalle"])
+        g.sobre_inviu_muerto = estado_inviu["detalle"]
         return None
-    if renovado:
-        # Cocos renovó el access token: hay que devolverle un sobre nuevo al
-        # navegador, con el login_ts VIEJO. Si acá se emitiera uno fresco, el
-        # reloj de 24 h se reiniciaría solo y el 2FA diario no llegaría nunca.
-        g.sobre_nuevo = sesion.emitir(renovado, login_ts=g.login_ts)
+    if renovado_inviu:
+        g.sobre_inviu_nuevo = sesion.emitir(renovado_inviu, login_ts=g.login_ts_inviu)
     return None
 
 
@@ -197,6 +233,16 @@ def cerrar_sesion(resp):
             return muerta
     if sobre := g.pop("sobre_nuevo", None):
         resp.headers[CABECERA] = sobre
+
+    if motivo := g.pop("sobre_inviu_muerto", None):
+        resp.headers[FIN_INVIU] = "1"
+        if request.path.startswith("/api/inviu/"):
+            muerta = jsonify({"error": motivo, "reautenticar": True})
+            muerta.status_code = 401
+            muerta.headers[FIN_INVIU] = "1"
+            return muerta
+    if sobre := g.pop("sobre_inviu_nuevo", None):
+        resp.headers[CABECERA_INVIU] = sobre
     return resp
 
 
@@ -209,6 +255,8 @@ def soltar_cliente(exc):
     store.como(None)
     if g.pop("login_ts", None) is not None:
         cocos.olvidar()
+    if g.pop("hubo_inviu", False):
+        inviu.olvidar()
 
 
 @app.get("/")

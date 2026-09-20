@@ -599,6 +599,32 @@ def inviu_estado():
     return jsonify({**inviu.estado(), "vault_cargado": vault.existe(inviu.BROKER)})
 
 
+@bp.post("/inviu/web/sesion")
+def inviu_web_sesion():
+    """Recibe los tokens que ya sacaste conectando InvIU en tu máquina local
+    (nunca la contraseña — esa no sale de ahí) y los devuelve envueltos en un
+    sobre firmado, como el que ya usa Cocos. El servidor no los guarda en
+    ningún lado, ni siquiera más allá de esta respuesta: se validan pidiendo
+    los datos de la cuenta una vez y se sueltan enseguida.
+    """
+    if not sesion.modo_web():
+        return jsonify({"error": "Esto es solo para el modo web; en local ya estás conectado."}), 400
+
+    body = request.json or {}
+    jwt = {"idToken": (body.get("idToken") or "").strip(),
+           "refreshToken": (body.get("refreshToken") or "").strip()}
+    if not jwt["idToken"] or not jwt["refreshToken"]:
+        return jsonify({"error": "Faltan los tokens."}), 400
+
+    estado, renovado = inviu.restaurar(jwt)
+    inviu.olvidar()
+    if not estado["conectado"]:
+        return jsonify({"error": estado["detalle"]}), 401
+    # Si InvIU rotó el refreshToken al validarlo, el sobre tiene que llevar
+    # los tokens nuevos: los originales ya habrían quedado muertos.
+    return jsonify({"ok": True, **estado, "sobre": sesion.emitir(renovado or jwt)})
+
+
 @bp.get("/inviu/cartera")
 def inviu_cartera():
     """Espejo de lo que InvIU expone hoy: tenencias con PPC y P&L en vivo,
