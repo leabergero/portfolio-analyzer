@@ -160,17 +160,22 @@ def _post(ruta: str, body: dict, id_token: str = None):
 
 # ── Login (necesita navegador) ────────────────────────────────────────────────
 
-def _login_navegador(timeout_segundos: int = 300) -> dict:
-    """Abre un Chrome real, deja que el usuario se loguee a mano (contraseña +
-    el código que le llega por mail) y devuelve los tokens que quedan en el
-    `localStorage` al terminar.
+def _login_navegador(timeout_segundos: int = 300, email: str = None,
+                      password: str = None) -> dict:
+    """Abre un Chrome real y devuelve los tokens que quedan en el
+    `localStorage` al terminar el login.
 
-    Por qué a mano y no tipeando nosotros el formulario: el primer paso exige
-    un reCAPTCHA v3 válido, que un navegador de verdad resuelve solo con la
-    interacción real del usuario — automatizar el tipeo no cambia eso, solo
-    agrega selectores frágiles para ahorrar diez segundos. Ver
-    `inviu-integration/lab_server.py` si en algún momento hace falta esa
-    versión (ahí está probada, con sus selectores y sus riesgos anotados).
+    El reCAPTCHA v3 de InvIU es invisible: no hay casillero que tildar, solo
+    exige que la puntuación salga de un navegador real (ver
+    `inviu-integration/lab_server.py`, donde tipear el formulario con
+    Playwright ya se probó contra la cuenta real y no cambió el resultado).
+    Por eso con `email`/`password` se completa el primer paso solo — el
+    reCAPTCHA sigue corriendo igual, invisible, en este mismo navegador. Lo
+    único que puede seguir exigiendo al humano es el código que llega por
+    mail (2FA) o, si InvIU alguna vez decide desconfiar del intento, un
+    challenge visible de reCAPTCHA: para ambos la ventana queda abierta y
+    visible para resolverlos a mano, exactamente como en el login 100% manual
+    (sin `email`/`password`, que sigue andando igual que antes).
     """
     import json
     from playwright.sync_api import sync_playwright
@@ -193,6 +198,12 @@ def _login_navegador(timeout_segundos: int = 300) -> dict:
         browser = pw.chromium.launch(headless=False)
         page = browser.new_page()
         page.goto(LOGIN_URL)
+
+        if email and password:
+            page.wait_for_selector('input[type="email"]', timeout=15000)
+            page.fill('input[type="email"]', email)
+            page.fill('input[type="password"]', password)
+            page.get_by_text("Ingresar", exact=True).click()
 
         # Se espera a que aparezcan los tokens en el localStorage, no a que
         # cambie la URL: la SPA pasa por un par de redirects transitorios al

@@ -5239,11 +5239,14 @@ function InviuWeb({ f, recargar }) {
             {yendo ? "Validando…" : "Usar esta sesión"}
           </button>
           <div className="pie">
-            En tu máquina local, conectá InvIU como siempre y corré{" "}
-            <code>python -m core.broker.inviu_sesion_web</code> (dentro de{" "}
-            <code>portfolio-analyzer</code>): imprime un código para pegar acá. Nunca es tu
-            contraseña — son los tokens ya obtenidos, y se validan una sola vez antes de
-            guardarse en este navegador.
+            En tu máquina, con Python y esta app clonada, corré{" "}
+            <code>python -m core.broker.inviu_sesion_web</code>: te pide tu usuario y clave
+            de InvIU, abre una ventana real para el login (ahí resolvés el código por mail o
+            un captcha visible si aparece) y al final imprime un código para pegar acá. No
+            hace falta tener el servidor de esta app corriendo. Tu clave nunca sale de tu
+            máquina ni queda guardada en ningún lado — lo que viaja son los tokens ya
+            obtenidos, y este servidor los valida una sola vez antes de guardarlos en este
+            navegador.
           </div>
         </div>
       )}
