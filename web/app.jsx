@@ -5189,15 +5189,27 @@ function Cocos({ f, brk, recargar }) {
   );
 }
 
-/* Modo web de InvIU: pegar acá los tokens que ya sacaste conectando en tu
-   instalación local (`python -m core.broker.inviu_local_a_web`, o el botón
-   equivalente si lo agregamos ahí) — nunca la contraseña, que no sale de tu
-   máquina. El servidor los valida una vez contra InvIU y los devuelve
-   envueltos en un sobre firmado que vive en ESTE navegador; no los guarda. */
+/* Modo web de InvIU: pegar acá los tokens que ya sacaste corriendo
+   `python -m core.broker.inviu_sesion_web` en tu máquina — nunca la
+   contraseña, que no sale de ahí. El servidor los valida una vez contra
+   InvIU y los devuelve envueltos en un sobre firmado que vive en ESTE
+   navegador; no los guarda. */
 function InviuWeb({ f, recargar }) {
   const [blob, setBlob] = useState("");
   const [msg, setMsg] = useState(null);
   const [yendo, setYendo] = useState(false);
+
+  // El script local, al terminar, abre esta misma pantalla con el código en
+  // `#inviu-web=...`: el fragmento nunca se manda al servidor, solo lo lee
+  // este JavaScript. Se precarga el campo y se borra el fragmento enseguida
+  // —no debe quedar un token dando vueltas en la URL ni en el historial—;
+  // el envío en sí sigue siendo un clic aparte, no automático.
+  useEffect(() => {
+    const m = /^#inviu-web=(.+)$/.exec(location.hash);
+    if (!m) return;
+    try { setBlob(decodeURIComponent(m[1])); } catch { /* fragmento roto: se ignora */ }
+    history.replaceState(null, "", location.pathname + location.search);
+  }, []);
 
   const usar = async () => {
     let jwt;
@@ -6765,7 +6777,11 @@ class Red extends React.Component {
 }
 
 function App() {
-  const [modo, setModo] = useState("analisis");
+  // El script local de InvIU abre esta app con `#inviu-web=...`: hay que
+  // caer directo en Conectores, o el código queda precargado en una pantalla
+  // que nadie está mirando.
+  const [modo, setModo] = useState(
+    () => location.hash.startsWith("#inviu-web=") ? "conectores" : "analisis");
   const [tema, setTema] = useState(() => localStorage.getItem("tema") || "auto");
   const movil = useMedia(ES_MOVIL);
   const [carteras, setCarteras] = useState([]);
