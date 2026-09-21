@@ -38,6 +38,70 @@ def guardar(nombre):
     return jsonify({"ok": True, "guardadas": store.guardar(nombre, posiciones)})
 
 
+@bp.post("/<nombre>/vender")
+def vender(nombre):
+    """Cierra parte o toda una posición: resta cantidad y registra el resultado.
+
+    Aparea FIFO contra los lotes más viejos de ese ticker, igual que al
+    importar de Yahoo (core/io/csv_yahoo.py): vender la mitad de un lote
+    arrastra la mitad de su comisión de compra. El pnl no se guarda acá: se
+    calcula on-the-fly al servir /realizado, como cualquier venta importada.
+    """
+    c = request.json or {}
+    ticker = (c.get("ticker") or "").strip().upper()
+    fecha = csv_native.normalizar_fecha(c.get("sell_date") or "")
+    # La moneda de la operación: si no se elige, pnl_realizado la deduce sola
+    # del ticker (misma convención que un dividendo cargado a mano).
+    moneda = (c.get("moneda") or "").strip().upper()
+    if moneda not in ("ARS", "USD", "EUR"):
+        moneda = None
+    try:
+        precio = float(c.get("sell_price") or 0)
+        qty = float(c.get("qty") or 0)
+        comision = float(c.get("commissions") or 0)
+    except (TypeError, ValueError):
+        return jsonify({"error": "El precio, la cantidad y la comisión tienen que ser números."}), 400
+    if not ticker or not fecha or precio <= 0 or qty <= 0:
+        return jsonify({"error": "Hacen falta ticker, fecha, precio y cantidad."}), 400
+
+    posiciones = store.cargar(nombre)
+    lotes = sorted((p for p in posiciones if p["ticker"] == ticker), key=lambda p: p["buy_date"])
+    disponible = sum(l["qty"] for l in lotes)
+    if qty > disponible + 1e-9:
+        return jsonify({"error": f"Solo hay {disponible:g} unidades de {ticker} en la cartera."}), 400
+
+    pendiente, trades, restantes = qty, [], {}
+    for lote in lotes:
+        if pendiente <= 1e-9:
+            break
+        apareado = min(pendiente, lote["qty"])
+        trade = {
+            "ticker": ticker, "buy_date": lote["buy_date"], "buy_price": lote["buy_price"],
+            "sell_date": fecha, "sell_price": precio, "qty": round(apareado, 6),
+            "buy_comm": round(lote["commissions"] * apareado / lote["qty"], 4) if lote["qty"] else 0.0,
+            "sell_comm": round(comision * apareado / qty, 4),
+        }
+        if moneda:
+            trade["moneda"] = moneda
+        trades.append(trade)
+        restantes[id(lote)] = lote["qty"] - apareado
+        pendiente -= apareado
+
+    nuevas = []
+    for p in posiciones:
+        if id(p) not in restantes:
+            nuevas.append(p)
+            continue
+        resto = restantes[id(p)]
+        if resto > 1e-9:
+            nuevas.append({**p, "qty": round(resto, 6),
+                           "commissions": round(p["commissions"] * resto / p["qty"], 4)})
+
+    store.guardar(nombre, nuevas)
+    r = store.agregar_realizado(nombre, trades)
+    return jsonify({"ok": True, "trades": trades, **r})
+
+
 @bp.post("/<nombre>/mercado")
 def fijar_mercado(nombre):
     """Ata la cartera a una plaza. Sin `mercado`, vuelve a deducirse sola.

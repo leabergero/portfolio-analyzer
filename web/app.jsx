@@ -874,12 +874,12 @@ function Analisis({ cartera, recargar, sim, setSim }) {
           </div>);
       })()}
       <Panel key={simKey} tab={tab} R={R} M={M} cartera={cartera} bench={bench}
-             recargar={recargar} sim={sim} setSim={setSim} />
+             recargar={recargar} lanzar={lanzar} sim={sim} setSim={setSim} />
     </>
   );
 }
 
-function Panel({ tab, R, M, cartera, bench, recargar, sim, setSim }) {
+function Panel({ tab, R, M, cartera, bench, recargar, lanzar, sim, setSim }) {
   const d = R[tab];
   if (M[tab]?.estado === "corriendo" || M[tab]?.estado === "en cola")
     return <div className="cargando">Calculando {M[tab]?.nombre}…</div>;
@@ -888,7 +888,7 @@ function Panel({ tab, R, M, cartera, bench, recargar, sim, setSim }) {
 
   const vistas = {
     posicion: <Posicion d={{ ...d, cartera_nombre: cartera }} cartera={cartera}
-                        recargar={recargar} bench={bench} sim={sim} setSim={setSim}
+                        recargar={recargar} lanzar={lanzar} bench={bench} sim={sim} setSim={setSim}
                         extras={{ composicion: R.composicion, riesgo: R.riesgo,
                                   momentum: R.momentum, capm: R.capm,
                                   correlaciones: R.correlaciones,
@@ -904,9 +904,10 @@ function Panel({ tab, R, M, cartera, bench, recargar, sim, setSim }) {
 }
 
 /* ── Posición ── */
-function AltaRapida({ cartera, recargar }) {
-  const vacio = { ticker: "", buy_date: new Date().toISOString().slice(0, 10),
-                  buy_price: "", qty: "", commissions: "0", source: "" };
+function AltaRapida({ cartera, recargar, lanzar }) {
+  const vacio = { ticker: "", fecha: new Date().toISOString().slice(0, 10),
+                  precio: "", qty: "", commissions: "0", source: "", currency: "" };
+  const [tipo, setTipo] = useState("compra");
   const [f, setF] = useState(vacio);
   const [check, setCheck] = useState(null);
   const [msg, setMsg] = useState(null);
@@ -920,16 +921,29 @@ function AltaRapida({ cartera, recargar }) {
   };
   const agregar = async () => {
     const t = f.ticker.trim().toUpperCase();
-    if (!t || !f.buy_price || !f.qty) { setMsg({ mal: "Faltan ticker, precio o cantidad." }); return; }
-    const actuales = await api(`/api/carteras/${encodeURIComponent(cartera)}`);
-    const nuevas = [...actuales, { ...f, ticker: t, buy_price: dec(f.buy_price),
-                                   qty: dec(f.qty), commissions: dec(f.commissions) || 0 }];
-    const r = await api(`/api/carteras/${encodeURIComponent(cartera)}`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ posiciones: nuevas }) });
+    if (!t || !f.precio || !f.qty) { setMsg({ mal: "Faltan ticker, precio o cantidad." }); return; }
+    let r;
+    if (tipo === "compra") {
+      const actuales = await api(`/api/carteras/${encodeURIComponent(cartera)}`);
+      const nuevas = [...actuales, { ticker: t, buy_date: f.fecha, buy_price: dec(f.precio),
+                                     qty: dec(f.qty), commissions: dec(f.commissions) || 0,
+                                     source: f.source, currency: f.currency }];
+      r = await api(`/api/carteras/${encodeURIComponent(cartera)}`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ posiciones: nuevas }) });
+    } else {
+      r = await api(`/api/carteras/${encodeURIComponent(cartera)}/vender`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ticker: t, sell_date: f.fecha, sell_price: dec(f.precio),
+                               qty: dec(f.qty), commissions: dec(f.commissions) || 0,
+                               moneda: f.currency }) });
+    }
     if (r.error) { setMsg({ mal: r.error }); return; }
-    setMsg({ ok: `${t} agregado. Recargá el análisis para verlo reflejado.` });
-    setF(vacio); setCheck(null); recargar && recargar();
+    setMsg(tipo === "compra" ? { ok: `${t} agregado. Recalculando los KPIs…` }
+                              : { ok: `Venta de ${t} registrada. Recalculando los KPIs…` });
+    setF(vacio); setCheck(null);
+    recargar && recargar();
+    lanzar && lanzar(true);
   };
 
   if (!abierto) return (
@@ -938,34 +952,53 @@ function AltaRapida({ cartera, recargar }) {
 
   return (
     <div className="panel" style={{ marginBottom: 14 }}>
-      <h3>Agregar una posición a {cartera}
+      <h3>{tipo === "compra" ? "Agregar una posición a" : "Vender de"} {cartera}
         <button className="btn" style={{ marginLeft: "auto", padding: "3px 10px", fontSize: 12 }}
                 onClick={() => setAbierto(false)}>Cerrar</button>
       </h3>
+      <div style={{ display: "flex", gap: 14, marginTop: 10 }}>
+        <label style={{ fontSize: 12.5 }}>
+          <input type="radio" checked={tipo === "compra"} onChange={() => setTipo("compra")} /> Compra
+        </label>
+        <label style={{ fontSize: 12.5 }}>
+          <input type="radio" checked={tipo === "venta"} onChange={() => setTipo("venta")} /> Venta
+        </label>
+      </div>
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end", marginTop: 10 }}>
         {[["ticker", "Ticker", "text", 120, "GGAL.BA"],
-          ["buy_date", "Fecha de compra", "text", 120, "2025-09-19"],
-          ["buy_price", "Precio pagado", "decimal", 110, ""],
+          ["fecha", tipo === "compra" ? "Fecha de compra" : "Fecha de venta", "text", 120, "2025-09-19"],
+          ["precio", tipo === "compra" ? "Precio pagado" : "Precio de venta", "decimal", 110, ""],
           ["qty", "Cantidad", "decimal", 100, ""],
-          ["commissions", "Comisiones", "decimal", 100, ""]].map(([k, et, tipo, w, ph]) => (
+          ["commissions", "Comisiones", "decimal", 100, ""]].map(([k, et, inputTipo, w, ph]) => (
           <label key={k} style={{ fontSize: 11.5, color: "var(--texto-3)" }}>
             {et}<br />
-            <input type={tipo === "decimal" ? "text" : tipo}
-                   inputMode={tipo === "decimal" ? "decimal" : undefined}
+            <input type={inputTipo === "decimal" ? "text" : inputTipo}
+                   inputMode={inputTipo === "decimal" ? "decimal" : undefined}
                    value={f[k]} placeholder={ph} style={{ width: w, marginTop: 3 }}
                    onChange={(e) => setF({ ...f, [k]:
-                     tipo === "decimal" ? soloNum(e.target.value) : e.target.value })}
+                     inputTipo === "decimal" ? soloNum(e.target.value) : e.target.value })}
                    onBlur={k === "ticker" ? validar : undefined} />
           </label>))}
         <label style={{ fontSize: 11.5, color: "var(--texto-3)" }}>
-          Origen<br />
-          <select value={f.source} style={{ marginTop: 3 }}
-                  onChange={(e) => setF({ ...f, source: e.target.value })}>
-            <option value="">automático</option>
-            <option value="cocos">cocos (bono / ON)</option>
+          Moneda<br />
+          <select value={f.currency} style={{ marginTop: 3 }}
+                  onChange={(e) => setF({ ...f, currency: e.target.value })}>
+            <option value="">automático (según el ticker)</option>
+            <option value="ARS">ARS</option>
+            <option value="USD">USD</option>
+            <option value="EUR">EUR</option>
           </select>
         </label>
-        <button className="btn primario" onClick={agregar}>Agregar</button>
+        {tipo === "compra" && (
+          <label style={{ fontSize: 11.5, color: "var(--texto-3)" }}>
+            Origen<br />
+            <select value={f.source} style={{ marginTop: 3 }}
+                    onChange={(e) => setF({ ...f, source: e.target.value })}>
+              <option value="">automático</option>
+              <option value="cocos">cocos (bono / ON)</option>
+            </select>
+          </label>)}
+        <button className="btn primario" onClick={agregar}>{tipo === "compra" ? "Agregar" : "Vender"}</button>
       </div>
       {check && !check.cargando && (
         <div className={"aviso " + (check.valido && !check.convertible ? "ojo"
@@ -982,8 +1015,13 @@ function AltaRapida({ cartera, recargar }) {
         </div>)}
       {msg && <div className={"aviso " + (msg.mal ? "mal" : "ok")}>{msg.mal || msg.ok}</div>}
       <div className="pie">
-        El precio va en la moneda en que cotiza el activo. Se valida el ticker al salir del
-        campo, para no descubrir que no hay historia cuando ya cargaste todo.
+        {tipo === "compra"
+          ? <>El precio va en la moneda elegida (o en la del ticker si dejás «automático»).
+             Se valida el ticker al salir del campo, para no descubrir que no hay historia
+             cuando ya cargaste todo.</>
+          : <>Se descuenta de los lotes más viejos de ese ticker (FIFO), igual que al
+             importar operaciones desde un broker. El resultado entra al P&amp;L realizado,
+             convertido con el tipo de cambio de cada pata.</>}
       </div>
     </div>
   );
@@ -991,7 +1029,7 @@ function AltaRapida({ cartera, recargar }) {
 
 const claveLote = (x) => `${x.ticker}|${x.buy_date}|${x.qty}`;
 
-function Posicion({ d, cartera, recargar, extras, bench, sim, setSim }) {
+function Posicion({ d, cartera, recargar, lanzar, extras, bench, sim, setSim }) {
   const filas = d.posiciones || [];
   const [crudo, setCrudo] = useState(null);
   const r = extras?.riesgo;
@@ -1174,7 +1212,7 @@ function Posicion({ d, cartera, recargar, extras, bench, sim, setSim }) {
 
       {/* Cargar y simular van juntos y acá: debajo de lo que tenés —que es
           contra lo que se agrega o se simula— y antes de lo que ya cerraste. */}
-      <AltaRapida cartera={cartera} recargar={recargar} />
+      <AltaRapida cartera={cartera} recargar={recargar} lanzar={lanzar} />
       <Simulador cartera={cartera} sim={sim} setSim={setSim}
                  tenencias={filas.reduce(
                    (a, f) => ({ ...a, [f.ticker]: (a[f.ticker] || 0) + f.qty }), {})} />
