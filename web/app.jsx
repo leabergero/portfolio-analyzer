@@ -628,7 +628,7 @@ function useMedia(q) {
 
 const ES_MOVIL = "(max-width: 640px)";
 
-function Usuario({ yo, compacto, idioma, cambiarIdioma }) {
+function Usuario({ yo, idioma, cambiarIdioma, tema, setTema }) {
   const [abierto, setAbierto] = useState(false);
   const [sinFoto, setSinFoto] = useState(false);
   const caja = useRef(null);
@@ -647,12 +647,20 @@ function Usuario({ yo, compacto, idioma, cambiarIdioma }) {
   // distintas, pero irse es irse de las dos.
   const salir = async () => { await post("/api/salir"); sesion.tirar(); location.reload(); };
   const inicial = (yo.nombre || yo.email || "?").trim()[0].toUpperCase();
+  // El switch es binario y el tema tiene tres estados: "auto" —mientras no se
+  // tocó— se resuelve mirando qué prefiere el sistema.
+  const sistemaOscuro = window.matchMedia?.("(prefers-color-scheme: dark)").matches;
+  const esOscuro = tema === "dark" || (tema === "auto" && sistemaOscuro);
 
   return (
     <div ref={caja} style={{ position: "relative" }}>
+      {/* Solo el avatar: el nombre al lado se comía el ancho justo cuando la
+          pantalla es angosta —monitor vertical, celular— y terminaba tapando
+          la fila de pestañas de abajo. El nombre y el email ya están adentro
+          del menú, a un clic. */}
       <button className="btn auto" onClick={() => setAbierto((v) => !v)}
-              title={yo.email} aria-haspopup="menu" aria-expanded={abierto}
-              style={{ display: "flex", alignItems: "center", gap: 7, paddingLeft: 4 }}>
+              title={yo.nombre || yo.email} aria-haspopup="menu" aria-expanded={abierto}
+              style={{ display: "flex", alignItems: "center", padding: 4 }}>
         {yo.foto && !sinFoto ? (
           <img src={yo.foto} alt="" width="22" height="22" referrerPolicy="no-referrer"
                onError={() => setSinFoto(true)}
@@ -663,17 +671,13 @@ function Usuario({ yo, compacto, idioma, cambiarIdioma }) {
                          color: "var(--panel)", fontSize: 11, fontWeight: 700 }}>
             {inicial}</span>
         )}
-        {!compacto && (
-          <span style={{ maxWidth: 130, overflow: "hidden", textOverflow: "ellipsis",
-                         whiteSpace: "nowrap" }}>
-            {yo.nombre || yo.email}</span>
-        )}
       </button>
 
       {abierto && (
         <div className="panel" role="menu"
              style={{ position: "absolute", right: 0, top: "calc(100% + 6px)",
                       minWidth: 210, padding: 10, zIndex: 50, marginBottom: 0 }}>
+          <div style={{ fontWeight: 600, fontSize: 13.5 }}>{yo.nombre}</div>
           <div className="pie" style={{ margin: 0, wordBreak: "break-all" }}>{yo.email}</div>
           {cambiarIdioma && (
             <label style={{ display: "block", fontSize: 11.5, color: "var(--texto-3)", marginTop: 8 }}>
@@ -683,6 +687,16 @@ function Usuario({ yo, compacto, idioma, cambiarIdioma }) {
                 <option value="es">Español</option>
                 <option value="en">English</option>
               </select>
+            </label>
+          )}
+          {setTema && (
+            <label className="lab-dianoche" style={{ display: "flex", alignItems: "center",
+                                                      justifyContent: "space-between", marginTop: 10 }}>
+              <span style={{ fontSize: 11.5, color: "var(--texto-3)" }}>
+                {esOscuro ? t("Tema oscuro", "Dark theme") : t("Tema claro", "Light theme")}</span>
+              <input type="checkbox" checked={!esOscuro} aria-label={t("Tema claro", "Light theme")}
+                     onChange={() => setTema(esOscuro ? "light" : "dark")} />
+              <span className="g"><span className="estrellas" /></span>
             </label>
           )}
           <button className="btn peligro" role="menuitem" onClick={salir}
@@ -742,7 +756,8 @@ function BarraMovil({ modo, setModo, tema, setTema, carteras, cartera, setCarter
           <span /><span /><span />
         </button>
         <div className="marca">Portfolio <span>Analyzer</span></div>
-        {yo?.email && <Usuario yo={yo} compacto idioma={idioma} cambiarIdioma={cambiarIdioma} />}
+        {yo?.email && <Usuario yo={yo} idioma={idioma} cambiarIdioma={cambiarIdioma}
+                               tema={tema} setTema={setTema} />}
       </div>
 
       {/* La cartera se cambia mucho más seguido que el modo: queda a mano. */}
@@ -769,15 +784,19 @@ function BarraMovil({ modo, setModo, tema, setTema, carteras, cartera, setCarter
               <button key={k} className={"menu-m-item" + (modo === k ? " on" : "")}
                       onClick={() => elegir(k)}>{modoLabel(k, etiqueta)}</button>
             ))}
-            <div className="menu-m-pie">
-              <label className="lab-dianoche"
-                     title={esOscuro ? t("Pasar a claro", "Switch to light")
-                                      : t("Pasar a oscuro", "Switch to dark")}>
-                <input type="checkbox" checked={!esOscuro} aria-label={t("Tema claro", "Light theme")}
-                       onChange={() => setTema(esOscuro ? "light" : "dark")} />
-                <span className="g"><span className="estrellas" /></span>
-              </label>
-            </div>
+            {!yo?.email && (
+              // Con sesión de Google el toggle ya está en el menú de la cuenta;
+              // sin ella (modo local) no hay otro lugar donde ponerlo.
+              <div className="menu-m-pie">
+                <label className="lab-dianoche"
+                       title={esOscuro ? t("Pasar a claro", "Switch to light")
+                                        : t("Pasar a oscuro", "Switch to dark")}>
+                  <input type="checkbox" checked={!esOscuro} aria-label={t("Tema claro", "Light theme")}
+                         onChange={() => setTema(esOscuro ? "light" : "dark")} />
+                  <span className="g"><span className="estrellas" /></span>
+                </label>
+              </div>
+            )}
           </nav>
         </div>
       )}
@@ -794,34 +813,47 @@ function Barra({ modo, setModo, tema, setTema, carteras, cartera, setCartera, yo
   const locales = MERCADOS[mercado].locales;
   return (
     <div className="barra">
-      <div className="marca">Portfolio <span>Analyzer</span></div>
-      <div className="modos">
-        {MODOS.filter(([k]) => locales || !MODOS_LOCALES.includes(k)).map(([k, etiqueta]) => (
-          <button key={k} className={"modo" + (modo === k ? " on" : "")}
-                  onClick={() => setModo(k)}>{modoLabel(k, etiqueta)}</button>
-        ))}
+      {/* Fila 1: lo que no cambia nunca de tamaño — logo, pestañas y quién sos.
+          El avatar es chico (22 px) y entra siempre acá, aunque las pestañas
+          ocupen varias líneas en un monitor angosto. */}
+      <div className="barra-fila">
+        <div className="marca">Portfolio <span>Analyzer</span></div>
+        <div className="modos">
+          {MODOS.filter(([k]) => locales || !MODOS_LOCALES.includes(k)).map(([k, etiqueta]) => (
+            <button key={k} className={"modo" + (modo === k ? " on" : "")}
+                    onClick={() => setModo(k)}>{modoLabel(k, etiqueta)}</button>
+          ))}
+        </div>
+        <div className="der">
+          {yo?.email ? (
+            <Usuario yo={yo} idioma={idioma} cambiarIdioma={cambiarIdioma} tema={tema} setTema={setTema} />
+          ) : (
+            // Sin sesión de Google (modo local, de escritorio) no hay menú de
+            // cuenta donde meter el toggle: se queda suelto, como antes.
+            <label className="lab-dianoche"
+                   title={esOscuro ? t("Pasar a claro", "Switch to light") : t("Pasar a oscuro", "Switch to dark")}>
+              <input type="checkbox" checked={!esOscuro} aria-label={t("Tema claro", "Light theme")}
+                     onChange={() => setTema(esOscuro ? "light" : "dark")} />
+              <span className="g"><span className="estrellas" /></span>
+            </label>
+          )}
+        </div>
       </div>
-      {/* La plaza no se elige acá: es de la cartera y se fija en Carteras. Un
-          selector suelto en la barra invitaba a cambiarla como si fuera una
-          vista, cuando cambia la moneda con la que se mide todo. */}
-      <span className="plaza" title={t(`Se mide desde ${MERCADOS[mercado].nombre}`,
-                                        `Measured from ${MERCADOS[mercado].nombre_en}`)}>
-        {MERCADOS[mercado].bandera} {t(MERCADOS[mercado].nombre, MERCADOS[mercado].nombre_en)}</span>
+      {/* Fila 2, solo en Análisis: la plaza no se elige acá —es de la cartera y
+          se fija en Carteras—, solo se muestra con una bandera pegada al
+          selector en vez del chip con el nombre del país que tenía antes. */}
       {(modo === "analisis") && (
-        <select value={cartera || ""} onChange={(e) => setCartera(e.target.value)}>
-          <option value="">{t("— elegí una cartera —", "— choose a portfolio —")}</option>
-          {carteras.map((c) => <option key={c.nombre} value={c.nombre}>{c.nombre}</option>)}
-        </select>
+        <div className="barra-fila">
+          <span className="plaza-select" title={t(`Se mide desde ${MERCADOS[mercado].nombre}`,
+                                                   `Measured from ${MERCADOS[mercado].nombre_en}`)}>
+            <span aria-hidden="true">{MERCADOS[mercado].bandera}</span>
+            <select value={cartera || ""} onChange={(e) => setCartera(e.target.value)}>
+              <option value="">{t("— elegí una cartera —", "— choose a portfolio —")}</option>
+              {carteras.map((c) => <option key={c.nombre} value={c.nombre}>{c.nombre}</option>)}
+            </select>
+          </span>
+        </div>
       )}
-      <div className="der">
-        {yo?.email && <Usuario yo={yo} idioma={idioma} cambiarIdioma={cambiarIdioma} />}
-        <label className="lab-dianoche"
-               title={esOscuro ? t("Pasar a claro", "Switch to light") : t("Pasar a oscuro", "Switch to dark")}>
-          <input type="checkbox" checked={!esOscuro} aria-label={t("Tema claro", "Light theme")}
-                 onChange={() => setTema(esOscuro ? "light" : "dark")} />
-          <span className="g"><span className="estrellas" /></span>
-        </label>
-      </div>
     </div>
   );
 }

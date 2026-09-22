@@ -129,10 +129,15 @@ body{margin:0;background:var(--fondo);color:var(--texto);
      -webkit-font-smoothing:antialiased}
 .mono{font-family:"IBM Plex Mono",ui-monospace,Menlo,monospace;font-variant-numeric:tabular-nums}
 
-/* ── Barra superior ── */
+/* ── Barra superior ──
+   Dos filas apiladas, no una sola que se envuelve: envolver mezclaba el
+   avatar con la plaza y la cartera en la fila de abajo, y a un ancho angosto
+   —monitor vertical, celular— esa fila terminaba pisando las pestañas de
+   Análisis. El avatar es chico (22 px): entra sobrando en la fila del logo. */
 .barra{position:sticky;top:0;z-index:50;background:var(--panel);
-       border-bottom:1px solid var(--borde);display:flex;align-items:center;
-       gap:18px;padding:0 20px;height:56px;flex-wrap:wrap}
+       border-bottom:1px solid var(--borde);display:flex;flex-direction:column;
+       gap:10px;padding:10px 20px}
+.barra-fila{display:flex;align-items:center;gap:14px;flex-wrap:wrap;min-height:32px}
 .marca{font-weight:700;letter-spacing:-.02em;font-size:16px;white-space:nowrap}
 .marca span{color:var(--acento)}
 .modos{display:flex;gap:2px;background:var(--panel-2);padding:3px;border-radius:8px}
@@ -143,6 +148,10 @@ body{margin:0;background:var(--fondo);color:var(--texto);
 /* La plaza desde la que se mide: se muestra, no se elige — se fija en Carteras. */
 .plaza{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--texto-2);
        border:1px solid var(--borde);border-radius:7px;padding:5px 10px;white-space:nowrap}
+/* La bandera pegada al selector de cartera: mismo dato que antes iba en `.plaza`
+   como chip aparte con el nombre del país, pero en un tercio del ancho — eso
+   era lo que, en una pantalla angosta, terminaba tapando la fila de pestañas. */
+.plaza-select{display:inline-flex;align-items:center;gap:5px}
 .chip-plaza{display:inline-flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;
             background:var(--panel);color:var(--texto-2);border:1px solid var(--borde);
             border-radius:100px;padding:5px 12px}
