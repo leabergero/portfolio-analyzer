@@ -149,7 +149,11 @@ def canjear(code: str, redirect_uri: str) -> dict:
         raise NoAutenticado("ese email todavía no está verificado en Google")
 
     return {"sub": p["sub"], "email": p.get("email", ""),
-            "nombre": p.get("name") or p.get("email", ""), "foto": p.get("picture", "")}
+            "nombre": p.get("name") or p.get("email", ""), "foto": p.get("picture", ""),
+            # Solo se usa una vez, al alta (ver `store.anotar`): para elegir el
+            # idioma inicial sin preguntar. Google lo manda como "es-AR",
+            # "en-US", etc. — no viaja en la cookie de sesión, no hace falta.
+            "locale": p.get("locale", "")}
 
 
 # ── La sesión de la app ───────────────────────────────────────────────────────

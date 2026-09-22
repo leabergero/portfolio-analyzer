@@ -93,18 +93,34 @@ def anotar(usuario: dict) -> None:
     carteras, y no en un registro central: así borrar a alguien sigue siendo
     borrar un directorio.
 
-    `alta` se escribe una sola vez; `visto` en cada ingreso.
+    `alta` se escribe una sola vez; `visto` en cada ingreso. `idioma` también
+    una sola vez, deducido del `locale` que mandó Google: si ya lo eligió a
+    mano (`fijar_idioma`) un ingreso nuevo no se lo pisa.
     """
     if quien() is None:
         return                     # en local no hay a quién anotar
     antes = _leer(_perfil())
     ahora = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    idioma = antes.get("idioma") or (
+        "en" if str(usuario.get("locale", "")).lower().startswith("en") else "es")
     _escribir(_perfil(), {**antes,
                           "sub": quien(),
                           "email": usuario.get("email", ""),
                           "nombre": usuario.get("nombre", ""),
                           "alta": antes.get("alta") or ahora,
-                          "visto": ahora})
+                          "visto": ahora,
+                          "idioma": idioma})
+
+
+def perfil() -> dict:
+    return _leer(_perfil())
+
+
+def fijar_idioma(idioma: str) -> None:
+    if idioma not in ("es", "en"):
+        return
+    antes = _leer(_perfil())
+    _escribir(_perfil(), {**antes, "idioma": idioma})
 
 
 def altas() -> list:

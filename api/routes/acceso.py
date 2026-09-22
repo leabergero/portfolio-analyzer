@@ -68,8 +68,24 @@ def yo():
         u = usuarios.leer(request.cookies.get(usuarios.COOKIE))
     except usuarios.NoAutenticado:
         return jsonify({"dentro": False, "configurado": usuarios.configurado()})
+    # Esta ruta es una de las pocas exentas de `abrir_sesion` (LIBRES, en
+    # app.py): nadie fijó el contexto de carpeta todavía, hay que hacerlo acá
+    # para leer el perfil de ESTE usuario y no el de quien pasó antes por este
+    # mismo hilo.
+    store.como(usuarios.carpeta(u))
+    idioma = store.perfil().get("idioma") or "es"
     return jsonify({"dentro": True, "email": u.get("email"),
-                    "nombre": u.get("nombre"), "foto": u.get("foto")})
+                    "nombre": u.get("nombre"), "foto": u.get("foto"), "idioma": idioma})
+
+
+@bp.post("/yo/idioma")
+def fijar_idioma():
+    """Cambia el idioma a mano. Después de esto, un ingreso nuevo no lo pisa."""
+    idioma = (request.json or {}).get("idioma")
+    if idioma not in ("es", "en"):
+        return jsonify({"error": "Idioma inválido."}), 400
+    store.fijar_idioma(idioma)
+    return jsonify({"ok": True, "idioma": idioma})
 
 
 @bp.post("/salir")
