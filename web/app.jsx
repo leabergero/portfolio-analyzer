@@ -2240,7 +2240,7 @@ function MatrizCorrelaciones({ corr }) {
           <button className="btn" style={{ marginLeft: "auto", padding: "3px 10px", fontSize: 12 }}
                   onClick={() => setEnCaidas(!enCaidas)}>
             {enCaidas ? t("Ver días normales", "View normal days") : t("Ver solo días de caída", "View only down days")}</button>)}
-        {LAB && corr.orden_hrp && (
+        {corr.orden_hrp && (
           <button className="btn" style={{ marginLeft: corr.matriz_caidas ? 0 : "auto", padding: "3px 10px", fontSize: 12 }}
                   onClick={() => setAgrupado(!agrupado)}
                   title={t("Reordena la matriz con el clustering jerárquico de Hierarchical Risk "
@@ -2249,7 +2249,7 @@ function MatrizCorrelaciones({ corr }) {
                            "Reorders the matrix using Hierarchical Risk Parity's clustering "
                             + "(López de Prado): it groups the most similar assets first, without "
                             + "inverting any matrix.")}>
-            {agrupado ? t("Ver orden original", "View original order") : t("Agrupar por correlación — HRP (lab)", "Group by correlation — HRP (lab)")}</button>)}
+            {agrupado ? t("Ver orden original", "View original order") : t("Agrupar por correlación — HRP", "Group by correlation — HRP")}</button>)}
       </h3>
       <div className="fila f2" style={{ marginTop: 10, marginBottom: 0 }}>
         <Grafico alto={Math.max(260, corr.tickers.length * 44)}
@@ -3415,11 +3415,9 @@ function Composicion({ d, cartera }) {
           );
         })}
       </div>
-      {LAB && (
-        <Plegable id={`mapamundi-${cartera}`} titulo={t("Mapamundi (lab)", "World map (lab)")}>
-          <Grafico datos={mapaDatos} layout={mapaLayout} alto={420} config={mapaConfig} />
-        </Plegable>
-      )}
+      <Plegable id={`mapamundi-${cartera}`} titulo={t("Mapamundi", "World map")}>
+        <Grafico datos={mapaDatos} layout={mapaLayout} alto={420} config={mapaConfig} />
+      </Plegable>
       <Plegable id={`detalle-activo-${cartera}`} titulo={t("Detalle por activo", "Detail by asset")}>
         <div className="tabla-wrap"><table>
           <thead><tr><th>Ticker</th><th>{t("Nombre", "Name")}</th><th>{t("Tipo", "Type")}</th>
@@ -4728,9 +4726,8 @@ function ObjetivosYBL({ cartera, extras, d, bench }) {
 
   // HRP no toma views ni opiniones propias —solo la matriz de correlación—,
   // así que se pide una sola vez por cartera y benchmark, sin depender de
-  // `manuales`. Lab hasta que se valide contra Markowitz y BL.
+  // `manuales`.
   useEffect(() => {
-    if (!LAB) return;
     let vivo = true;
     api(`/api/hrp/${encodeURIComponent(cartera)}?benchmark=${bench}`).then((r) => vivo && setHrp(r));
     return () => { vivo = false; };
@@ -4808,18 +4805,16 @@ function ObjetivosYBL({ cartera, extras, d, bench }) {
                                  onCerrar={() => setEditando(null)} />}
       </Plegable>
 
-      {LAB && (
-        <Plegable id={`hrp-${cartera}`} titulo={t("Hierarchical Risk Parity · ¿Y si reparto por clustering, no por optimización?",
-                                                   "Hierarchical Risk Parity · What if I allocate by clustering, not optimization?")}>
-          {!hrp ? <div className="cargando">{t("Calculando HRP…", "Calculating HRP…")}</div>
-           : hrp.error ? <div className="aviso mal">{hrp.error}</div>
-           : <HRP d={hrp} />}
-        </Plegable>
-      )}
+      <Plegable id={`hrp-${cartera}`} titulo={t("Hierarchical Risk Parity · ¿Y si reparto por clustering, no por optimización?",
+                                                 "Hierarchical Risk Parity · What if I allocate by clustering, not optimization?")}>
+        {!hrp ? <div className="cargando">{t("Calculando HRP…", "Calculating HRP…")}</div>
+         : hrp.error ? <div className="aviso mal">{hrp.error}</div>
+         : <HRP d={hrp} />}
+      </Plegable>
 
       {d && !d.error && (() => {
         const blOk = bl && bl !== "cargando" && !bl.error && bl.ret_bl_pct != null ? bl : null;
-        const hrpOk = LAB && hrp && !hrp.error ? hrp : null;
+        const hrpOk = hrp && !hrp.error ? hrp : null;
         const n = 3 + (blOk ? 1 : 0) + (hrpOk ? 1 : 0);
         const TITULOS = { 3: t("Las tres carteras, lado a lado", "The three portfolios, side by side"),
                           4: t("Las cuatro carteras, lado a lado", "The four portfolios, side by side"),
