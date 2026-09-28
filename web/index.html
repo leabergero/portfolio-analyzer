@@ -620,6 +620,21 @@ td:has(> .editar){position:relative}
                  font-size:12px;color:var(--texto-3)}
 .lab-pasos .pies b{color:var(--texto-2)}
 
+/* TGL-01 · switch neón, para agrupar la matriz de correlaciones por HRP.
+   Colores de la app (--alerta, el ámbar de tinta) en vez de --a1-lt del picker. */
+.lab-switch-hrp{display:inline-flex;align-items:center;gap:8px;cursor:pointer;user-select:none}
+.lab-switch-hrp input{position:absolute;opacity:0;width:0;height:0}
+.lab-switch-hrp .g{width:40px;height:21px;border-radius:11px;background:var(--panel-2);
+  border:1px solid var(--borde);position:relative;transition:.3s}
+.lab-switch-hrp .g::after{content:"";position:absolute;top:2px;left:2px;width:15px;height:15px;
+  border-radius:50%;background:var(--texto-3);transition:.3s cubic-bezier(.6,-.3,.3,1.4)}
+.lab-switch-hrp input:checked+.g{background:color-mix(in srgb,var(--alerta) 18%,transparent);
+  border-color:var(--alerta);box-shadow:inset 0 0 10px -3px var(--alerta)}
+.lab-switch-hrp input:checked+.g::after{left:21px;background:var(--alerta);box-shadow:0 0 8px var(--alerta)}
+.lab-switch-hrp .lbl{font:10px/1 ui-monospace,monospace;letter-spacing:.14em;color:var(--texto-3);transition:.25s}
+.lab-switch-hrp input:checked~.lbl{color:var(--alerta)}
+.lab-switch-hrp input:focus-visible+.g{outline:2px solid var(--acento);outline-offset:2px}
+
 /* El cuarto spinner de FDB-05 acompaña a cada "Calculando…". En yema, como el
    resto de lo que pide atención. El anillo de 1px es lo que lo salva en el tema
    claro: la yema sola contra el panel da 1,45:1 y una forma de 24 px con ese

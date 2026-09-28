@@ -2194,7 +2194,7 @@ function MatrizCorrelaciones({ corr }) {
   // cluster jerárquico que ya arma el backend (`orden_hrp`) deja los pares
   // correlacionados contiguos, así se ven los bloques en vez del orden
   // alfabético de siempre. Los pesos de portafolio (paso 3) quedan afuera.
-  const [agrupado, setAgrupado] = useState(false);
+  const [agrupado, setAgrupado] = useState(true);
   const mBase = enCaidas && corr.matriz_caidas ? corr.matriz_caidas : corr.matriz;
   const orden = agrupado && corr.orden_hrp ? corr.orden_hrp : corr.tickers;
   const idx = orden.map((tk) => corr.tickers.indexOf(tk));
@@ -2241,15 +2241,17 @@ function MatrizCorrelaciones({ corr }) {
                   onClick={() => setEnCaidas(!enCaidas)}>
             {enCaidas ? t("Ver días normales", "View normal days") : t("Ver solo días de caída", "View only down days")}</button>)}
         {corr.orden_hrp && (
-          <button className="btn" style={{ marginLeft: corr.matriz_caidas ? 0 : "auto", padding: "3px 10px", fontSize: 12 }}
-                  onClick={() => setAgrupado(!agrupado)}
-                  title={t("Reordena la matriz con el clustering jerárquico de Hierarchical Risk "
-                            + "Parity (López de Prado): agrupa primero los activos más parecidos, "
-                            + "sin invertir ninguna matriz.",
-                           "Reorders the matrix using Hierarchical Risk Parity's clustering "
-                            + "(López de Prado): it groups the most similar assets first, without "
-                            + "inverting any matrix.")}>
-            {agrupado ? t("Ver orden original", "View original order") : t("Agrupar por correlación — HRP", "Group by correlation — HRP")}</button>)}
+          <label className="lab-switch-hrp" style={{ marginLeft: corr.matriz_caidas ? 0 : "auto" }}
+                 title={t("Reordena la matriz con el clustering jerárquico de Hierarchical Risk "
+                           + "Parity (López de Prado): agrupa primero los activos más parecidos, "
+                           + "sin invertir ninguna matriz.",
+                          "Reorders the matrix using Hierarchical Risk Parity's clustering "
+                           + "(López de Prado): it groups the most similar assets first, without "
+                           + "inverting any matrix.")}>
+            <input type="checkbox" checked={agrupado} onChange={() => setAgrupado(!agrupado)} />
+            <span className="g" />
+            <span className="lbl">{agrupado ? "HRP ON" : "HRP OFF"}</span>
+          </label>)}
       </h3>
       <div className="fila f2" style={{ marginTop: 10, marginBottom: 0 }}>
         <Grafico alto={Math.max(260, corr.tickers.length * 44)}
