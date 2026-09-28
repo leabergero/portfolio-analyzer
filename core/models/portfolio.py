@@ -385,6 +385,37 @@ def matriz_retornos(posiciones, desde=None, hasta=None):
     return df.dropna(thresh=max(1, len(df.columns) // 2)).fillna(0.0), precios
 
 
+def _orden_jerarquico(matriz_df: pd.DataFrame) -> tuple:
+    """(orden, grupo) que agrupa los correlacionados, al estilo HRP.
+
+    Es el paso 2 de Hierarchical Risk Parity (López de Prado): convierte la
+    correlación en una distancia (`sqrt((1-ρ)/2)` — cero si se mueven igual,
+    máxima si van opuestos) y arma un cluster jerárquico agregando primero los
+    pares más parecidos. El orden en que el dendrograma deja las hojas es la
+    "quasi-diagonalización": los activos correlacionados quedan contiguos, así
+    la matriz muestra bloques en vez del mismo desorden alfabético de siempre.
+    No es HRP completo — los pesos de portafolio (paso 3, bisección
+    recursiva) quedan afuera, esto es solo para ver la matriz agrupada.
+
+    `grupo` corta ese mismo árbol a una distancia —el 70 % de la unión más
+    lejana, el mismo criterio que usa scipy para colorear un dendrograma— y
+    dice a qué cluster quedó cada ticker, en el orden ya reordenado. Sirve
+    para remarcar el bloque en la matriz, no para nada del cálculo.
+    """
+    from scipy.cluster.hierarchy import dendrogram, fcluster, linkage
+    from scipy.spatial.distance import squareform
+
+    dist = np.sqrt(np.clip((1 - matriz_df.to_numpy()) / 2, 0, None))
+    np.fill_diagonal(dist, 0.0)
+    enlace = linkage(squareform(dist, checks=False), method="single")
+    hojas = dendrogram(enlace, no_plot=True)["leaves"]
+    orden = [matriz_df.columns[i] for i in hojas]
+    umbral = 0.7 * enlace[:, 2].max() if len(enlace) else 0.0
+    etiquetas = fcluster(enlace, t=umbral, criterion="distance") if umbral > 0 else np.ones(len(orden))
+    grupo = [int(etiquetas[i]) for i in hojas]
+    return orden, grupo
+
+
 def correlaciones(posiciones, ventana: int = 252) -> dict:
     """Matriz de correlaciones y qué dice sobre el carácter de la cartera.
 
@@ -436,8 +467,11 @@ def correlaciones(posiciones, ventana: int = 252) -> dict:
                  f"{media_caidas:.2f}: parte de la diversificación desaparece justo "
                  f"cuando se la necesita.")
 
+    orden_hrp, grupos_hrp = _orden_jerarquico(matriz)
     return {
         "tickers": tickers,
+        "orden_hrp": orden_hrp,
+        "grupos_hrp": grupos_hrp,
         "matriz": [[round(float(matriz.loc[a, b]), 3) for b in tickers] for a in tickers],
         "matriz_caidas": ([[round(float(matriz_caidas.loc[a, b]), 3) for b in tickers]
                            for a in tickers] if matriz_caidas is not None else None),

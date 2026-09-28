@@ -318,6 +318,70 @@ def test_etf_del_dow_es_dia():
     assert "DOW" not in futuros, "DOW es Dow Inc., no el ETF del índice"
 
 
+def test_pais_del_cedear_es_el_del_subyacente_no_byma():
+    """KOD.BA es Coca-Cola: el país del mapamundi tiene que ser EE.UU., no
+    Argentina solo porque cotiza en BYMA con sufijo .BA."""
+    clasificar = require("core.models.composicion", "_clasificar_pais")
+    pais = clasificar("KOD.BA", "KO", "Renta Variable", {"country": "United States"})
+    assert pais == "United States"
+
+
+def test_pais_de_etf_cedear_sin_country_no_cae_en_argentina():
+    """GLDD.BA, QQQD.BA y SLVD.BA son CEDEARs de ETFs de EE.UU. (oro, Nasdaq,
+    plata), y yfinance no trae `country` para un ETF —es un dato de empresa,
+    no de fondo—. Bug real: sin este chequeo, los tres quedaban marcados como
+    Argentina en el mapamundi por el sufijo ".BA" de la especie D."""
+    clasificar = require("core.models.composicion", "_clasificar_pais")
+    assert clasificar("GLDD.BA", "GLD", "Commodities", {}) == "United States"
+    assert clasificar("QQQD.BA", "QQQ", "ETF", {}) == "United States"
+
+
+def test_pais_de_etf_regional_es_su_region_no_la_plaza():
+    """FXI (China), EWZ (Brasil) e IEUR (Europa) son ETFs de un país o una
+    región puntual, y yfinance tampoco les trae `country`. Sin esta tabla
+    curada, FXID.BA e IEURD.BA (los que tiene MAMI) quedaban en Argentina o
+    EE.UU. por el CEDEAR, en vez del país o la región real del ETF."""
+    clasificar = require("core.models.composicion", "_clasificar_pais")
+    assert clasificar("FXID.BA", "FXI", "ETF", {}) == "China"
+    assert clasificar("EWZD.BA", "EWZ", "ETF", {}) == "Brazil"
+    assert clasificar("IEURD.BA", "IEUR", "ETF", {}) == "Europe"
+
+
+def test_pais_de_etf_ucits_comprado_directo_usa_el_ticker_con_sufijo():
+    """IWDA.AS (iShares Core MSCI World, listado en Amsterdam) se compra
+    directo, sin CEDEAR — `base_symbol` no le toca el ".AS" porque solo pela
+    el ".BA". La tabla tiene que tener la clave con el sufijo puesto, o el
+    ETF de este mundo entero quedaba asignado a un país cualquiera."""
+    clasificar = require("core.models.composicion", "_clasificar_pais")
+    assert clasificar("IWDA.AS", "IWDA.AS", "ETF", {}) == "World"
+
+
+def test_vista_energy_es_argentina_aunque_mude_la_sede_a_mexico():
+    """Vista Energy (VIST) mudó el holding a México en 2023 por impuestos,
+    pero opera Vaca Muerta: yfinance va a decir `country: Mexico`, y eso mide
+    dónde está la sede, no dónde está el riesgo geográfico real de la
+    inversión. Va a mano en `PAISES_MANUAL`, antes que cualquier otro dato."""
+    clasificar = require("core.models.composicion", "_clasificar_pais")
+    assert clasificar("VISTD.BA", "VIST", "Renta Variable", {"country": "Mexico"}) == "Argentina"
+
+
+def test_pais_de_bono_argentino_es_argentina_sin_dato_de_yfinance():
+    """Los bonos y ONs de esta app son todos emisores argentinos, y yfinance no
+    trae `country` para ellos (AL30, GD30). Sin ese fallback, todo bono caía en
+    "Sin dato" en el mapamundi."""
+    clasificar = require("core.models.composicion", "_clasificar_pais")
+    assert clasificar("AL30", "AL30", "RF Pública Nacional", {}) == "Argentina"
+
+
+def test_pais_sin_dato_usa_el_sufijo_como_ultimo_recurso():
+    """Sin `country` de yfinance y sin CEDEAR de por medio, el sufijo decide:
+    `.BA` es Argentina, lo demás EE.UU. — mismo criterio que ya usa
+    `dividendos.tipo()`."""
+    clasificar = require("core.models.composicion", "_clasificar_pais")
+    assert clasificar("GGAL.BA", "GGAL", "Renta Variable", {}) == "Argentina"
+    assert clasificar("AAPL", "AAPL", "Renta Variable", {}) == "United States"
+
+
 # ══════════════════════════════════════════════════════════════════════════
 #  PESOS — la caída silenciosa a equiponderado
 # ══════════════════════════════════════════════════════════════════════════
@@ -504,6 +568,61 @@ def test_la_correlacion_entra_en_la_prueba():
     t_dis = test(distinta, base)
     assert t_par["correlacion"] > 0.9
     assert abs(t_dis["correlacion"]) < 0.3
+
+
+def test_orden_hrp_agrupa_los_pares_correlacionados():
+    """El orden jerárquico (paso 2 de HRP) tiene que dejar juntos a los
+    activos que se mueven parecido, aunque en la matriz de entrada estén
+    salteados. Matriz sintética: A-D muy correlacionados, B-C muy
+    correlacionados, A/D casi sin relación con B/C — el orden agrupado tiene
+    que ser (A,D,B,C) o (D,A,C,B), nunca A y D separados por B o C."""
+    import pandas as pd
+    orden_jerarquico = require("core.models.portfolio", "_orden_jerarquico")
+    matriz = pd.DataFrame(
+        [[1.00, 0.05, 0.05, 0.95],
+         [0.05, 1.00, 0.92, 0.05],
+         [0.05, 0.92, 1.00, 0.05],
+         [0.95, 0.05, 0.05, 1.00]],
+        index=["A", "B", "C", "D"], columns=["A", "B", "C", "D"])
+    resultado, _ = orden_jerarquico(matriz)
+    pos = {t: i for i, t in enumerate(resultado)}
+    assert abs(pos["A"] - pos["D"]) == 1, f"A y D tienen que quedar contiguos: {resultado}"
+    assert abs(pos["B"] - pos["C"]) == 1, f"B y C tienen que quedar contiguos: {resultado}"
+
+
+def test_grupos_hrp_separan_los_dos_bloques():
+    """El corte del árbol (para remarcar el bloque en la matriz) tiene que
+    poner a A y D en un cluster, a B y C en otro, y los dos clusters
+    distintos entre sí — si no, el borde alrededor del bloque abarcaría toda
+    la matriz o ninguna."""
+    import pandas as pd
+    orden_jerarquico = require("core.models.portfolio", "_orden_jerarquico")
+    matriz = pd.DataFrame(
+        [[1.00, 0.05, 0.05, 0.95],
+         [0.05, 1.00, 0.92, 0.05],
+         [0.05, 0.92, 1.00, 0.05],
+         [0.95, 0.05, 0.05, 1.00]],
+        index=["A", "B", "C", "D"], columns=["A", "B", "C", "D"])
+    orden, grupo = orden_jerarquico(matriz)
+    cluster = dict(zip(orden, grupo))
+    assert cluster["A"] == cluster["D"], f"A y D tienen que ir al mismo cluster: {cluster}"
+    assert cluster["B"] == cluster["C"], f"B y C tienen que ir al mismo cluster: {cluster}"
+    assert cluster["A"] != cluster["B"], f"los dos pares tienen que quedar en clusters distintos: {cluster}"
+
+
+def test_hrp_le_da_mas_peso_al_lado_de_menor_varianza():
+    """Paso 3 de HRP: en una matriz block-diagonal —dos pares sin covarianza
+    cruzada, varianza 1 cada uno del primer par y 4 cada uno del segundo—, el
+    cálculo a mano da 40/40/10/10: el par de menor varianza se lleva el 80 %
+    del total, y dentro de cada par, mismo riesgo, el reparto es parejo.
+    Si la bisección no diera más peso al lado tranquilo, sería equiponderar
+    con pasos de más."""
+    import numpy as np
+    biseccion = require("core.models.hrp", "_bisección_recursiva")
+    cov = np.diag([1.0, 1.0, 4.0, 4.0])
+    w = biseccion(cov)
+    assert abs(w.sum() - 1.0) < 1e-9
+    np.testing.assert_allclose(w, [0.4, 0.4, 0.1, 0.1], atol=1e-9)
 
 
 # ══════════════════════════════════════════════════════════════════════════

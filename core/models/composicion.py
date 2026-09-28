@@ -60,6 +60,62 @@ COMMODITIES = {"GLD", "SLV", "IAU", "SGOL", "PPLT", "PALL", "GDX", "GDXJ", "SIL"
 
 _PALABRAS_COMMODITY = ("gold", "silver", "metal", "commodity", "precious")
 
+# ETFs de un país o una región: yfinance no trae `country` para un ETF —es
+# un dato de empresa, no de fondo—, así que sin esta tabla un ETF de China o
+# de Europa quedaba con el país por default (EE.UU., o Argentina si la
+# especie D no tenía subyacente con `country`).
+#
+# La clave es el ticker tal como llega a `base_symbol`: para un CEDEAR
+# (FXID.BA) eso ya es el subyacente pelado ("FXI"); para un ETF europeo
+# comprado directo (IWDA.AS) `base_symbol` no le toca el sufijo de plaza —no
+# es ".BA"— así que la clave lleva el ticker completo.
+#
+# ponytail: tabla curada a mano con los iShares/MSCI de un solo país y los
+# regionales más comunes en BYMA (CEDEAR), Europa (UCITS) y EE.UU. — no es
+# exhaustiva. Un ETF de país que no esté acá cae en el fallback de
+# `_clasificar_pais` (país del sufijo). Agregar la línea que falte cuando
+# aparezca en una cartera real, como ya pasó con FXI/EWZ/IEUR.
+PAISES_ETF = {
+    # Un solo país (iShares MSCI, listados en EE.UU. — CEDEAR en BYMA con "D")
+    "EWA": "Australia", "EWC": "Canada", "EWG": "Germany", "EWH": "Hong Kong",
+    "EWI": "Italy", "EWJ": "Japan", "EWK": "Belgium", "EWL": "Switzerland",
+    "EWN": "Netherlands", "EWO": "Austria", "EWP": "Spain", "EWQ": "France",
+    "EWS": "Singapore", "EWT": "Taiwan", "EWU": "United Kingdom", "EWW": "Mexico",
+    "EWY": "South Korea", "EWZ": "Brazil", "EZA": "South Africa",
+    "EIDO": "Indonesia", "EPHE": "Philippines", "EPU": "Peru", "ECH": "Chile",
+    "EIRL": "Ireland", "EIS": "Israel", "EPOL": "Poland", "ENZL": "New Zealand",
+    "ENOR": "Norway", "EDEN": "Denmark", "EFNL": "Finland", "EWD": "Sweden",
+    "THD": "Thailand", "TUR": "Turkey", "INDA": "India", "MCHI": "China",
+    "FXI": "China", "KSA": "Saudi Arabia", "QAT": "Qatar", "ARGT": "Argentina",
+
+    # Regiones y "el mundo": no son un país, así que no salen coloreados en el
+    # mapa —Plotly pinta países, no continentes—, pero sí entran en el reparto.
+    "IEUR": "Europe", "VGK": "Europe", "EZU": "Eurozone",
+    "EFA": "Developed Markets ex-US", "EEM": "Emerging Markets", "VWO": "Emerging Markets",
+    "IPAC": "Asia-Pacific", "AAXJ": "Asia ex-Japan", "ILF": "Latin America",
+    "ACWI": "World", "URTH": "World", "VT": "World",
+
+    # UCITS europeos (Amsterdam, Londres, Frankfurt…): la clave lleva el
+    # sufijo de plaza porque `base_symbol` solo le saca el ".BA" a un CEDEAR.
+    "IWDA.AS": "World", "VWCE.DE": "World", "VWRL.L": "World", "VWRL.AS": "World",
+    "XDWD.L": "World", "SWDA.L": "World",
+    "CSPX.L": "United States", "VUSA.L": "United States", "SXR8.DE": "United States",
+    "IUSA.L": "United States", "CSPX.AS": "United States",
+    "EIMI.L": "Emerging Markets", "IS3N.DE": "Emerging Markets",
+    "IMEU.L": "Europe", "MEUD.PA": "Europe", "VEUR.AS": "Europe",
+    "IJPN.L": "Japan", "SJPA.L": "Japan",
+    "FLXC.DE": "China", "MCHA.L": "China",
+}
+
+# Empresas cuyo `country` en yfinance es la sede legal, no donde está el
+# negocio real —lo que importa para el riesgo geográfico de la cartera—.
+# Vista Energy (VIST) mudó su holding a México en 2023 por temas fiscales,
+# pero opera y factura en Vaca Muerta: es una apuesta a Argentina, no a
+# México, y así hay que verla en el mapamundi.
+PAISES_MANUAL = {
+    "VIST": "Argentina",
+}
+
 
 def _clasificar_tipo(ticker: str, base: str, source: str):
     """(tipo, ficha_del_subyacente). La ficha se reutiliza para sector."""
@@ -131,6 +187,39 @@ def _clasificar_sector(ticker: str, base: str, tipo: str, ficha: dict):
     return sector, (industria or sector)
 
 
+def _clasificar_pais(ticker: str, base: str, tipo: str, ficha: dict) -> str:
+    """País de la inversión, no de la plaza donde cotiza.
+
+    Un CEDEAR cotiza en BYMA pero el país que importa es el del subyacente
+    —la `ficha` ya es la del subyacente cuando `_clasificar_tipo` lo resolvió—.
+    Los bonos y ONs de esta app son todos emisores argentinos, y yfinance no
+    trae `country` para ellos.
+
+    Sin `country` en la ficha, no alcanza con mirar el sufijo del ticker: un
+    ETF (GLDD.BA, QQQD.BA, SLVD.BA) no tiene `country` en yfinance —eso es un
+    dato de empresa, no de fondo— y quedaba mal clasificado como Argentina
+    solo por el ".BA" de la especie D. La pregunta correcta es si hay un
+    CEDEAR de por medio (`base` distinto del ticker sin sufijo): si lo hay, el
+    subyacente casi siempre cotiza en EE.UU.; si no, el ".BA" sí es Argentina.
+    """
+    if tipo.startswith("RF") or tipo == "Renta Fija":
+        return "Argentina"
+    if base in PAISES_MANUAL:
+        return PAISES_MANUAL[base]
+    if base in PAISES_ETF:
+        return PAISES_ETF[base]
+    pais = ficha.get("country")
+    if pais:
+        return pais
+    # En inglés, no "Estados Unidos": yfinance ya devuelve `country` en inglés
+    # ("United States") y el mapamundi lo busca por nombre (`locationmode:
+    # "country names"` en Plotly) — dos idiomas para el mismo país abrían dos
+    # porciones separadas en vez de sumarse en una.
+    if base != sources.strip_ba(ticker):
+        return "United States"
+    return "Argentina" if ticker.upper().endswith(".BA") else "United States"
+
+
 def analizar(posiciones, precios=None) -> dict:
     """Composición de la cartera por tipo, sector e industria.
 
@@ -142,7 +231,7 @@ def analizar(posiciones, precios=None) -> dict:
 
     precios = precios if precios is not None else precios_actuales(posiciones)
 
-    por_tipo, por_sector, por_industria, detalle = {}, {}, {}, []
+    por_tipo, por_sector, por_industria, por_pais, detalle = {}, {}, {}, {}, []
     total = 0.0
 
     for p in posiciones:
@@ -163,14 +252,16 @@ def analizar(posiciones, precios=None) -> dict:
         else:
             tipo, ficha = _clasificar_tipo(ticker, base, origen)
         sector, industria = _clasificar_sector(ticker, base, tipo, ficha)
+        pais = _clasificar_pais(ticker, base, tipo, ficha)
 
         por_tipo[tipo] = por_tipo.get(tipo, 0.0) + valor
         por_sector[sector] = por_sector.get(sector, 0.0) + valor
         por_industria[industria] = por_industria.get(industria, 0.0) + valor
+        por_pais[pais] = por_pais.get(pais, 0.0) + valor
         total += valor
 
         detalle.append({"ticker": ticker, "subyacente": base, "valor_usd": round(valor, 2),
-                        "tipo": tipo, "sector": sector, "industria": industria,
+                        "tipo": tipo, "sector": sector, "industria": industria, "pais": pais,
                         "nombre": ficha.get("longName") or ficha.get("shortName") or ""})
 
     if total <= 0:
@@ -190,6 +281,7 @@ def analizar(posiciones, precios=None) -> dict:
         "por_tipo": reparto(por_tipo),
         "por_sector": reparto(por_sector),
         "por_industria": reparto(por_industria),
+        "por_pais": reparto(por_pais),
         "detalle": sorted(agregado.values(), key=lambda x: -x["valor_usd"]),
         "valor_total": round(total, 2),
         "moneda": "USD",

@@ -449,7 +449,7 @@ function colores() {
 
 /* ═══════════════ Gráfico ═══════════════ */
 
-function Grafico({ datos, layout, alto = 280 }) {
+function Grafico({ datos, layout, alto = 280, config: configExtra }) {
   const nodo = useRef(null);
   const tema = document.documentElement.dataset.theme || "auto";
 
@@ -476,9 +476,11 @@ function Grafico({ datos, layout, alto = 280 }) {
       margin: { ...base.margin, ...(layout?.margin || {}) },
       xaxis: { ...base.xaxis, ...(layout?.xaxis || {}) },
       yaxis: { ...base.yaxis, ...(layout?.yaxis || {}) } };
+    // Plotly pide los contornos de países a cdn.plot.ly por default; acá se
+    // sirve todo local (nada de red externa), así que el atlas va vendoreado.
     Plotly.react(nodo.current, datos, mezcla,
-                 { displayModeBar: false, responsive: true });
-  }, [datos, layout, alto, tema]);
+                 { displayModeBar: false, responsive: true, topojsonURL: "/vendor/topojson/", ...configExtra });
+  }, [datos, layout, alto, tema, configExtra]);
 
   useEffect(() => () => { if (nodo.current) Plotly.purge(nodo.current); }, []);
   return <div ref={nodo} style={{ height: alto }} />;
@@ -1333,6 +1335,26 @@ function Posicion({ d, cartera, recargar, lanzar, extras, bench, sim, setSim }) 
   // es la que tiene las series; los lotes sin serie —un FCI— no están y van "—".
   const twu = Object.fromEntries(((ev && !ev.error && ev.bajo_agua) || [])
     .map((x) => [claveLote(x), x]));
+  // Orden de Tenencias al tocar el encabezado. Copia `filas` en vez de
+  // ordenarlo en el lugar: el mismo array alimenta el conteo de activos y al
+  // simulador más abajo, y un `.sort()` in-place les cambiaría el orden
+  // también a esos sin que lo pidan.
+  const [sortCol, setSortCol] = useState(null);
+  const [sortDir, setSortDir] = useState(1);
+  const ordenarPor = (col) => {
+    if (sortCol === col) setSortDir(-sortDir); else { setSortCol(col); setSortDir(1); }
+  };
+  const VALOR_COL = {
+    ticker: (f) => f.ticker, buy_date: (f) => f.buy_date, qty: (f) => f.qty,
+    buy_price_usd: (f) => f.buy_price_usd, precio_usd: (f) => f.precio_usd ?? -Infinity,
+    valor_usd: (f) => f.valor_usd, pnl_dia_usd: (f) => f.pnl_dia_usd,
+    pnl_dia_pct: (f) => f.pnl_dia_pct, pnl_usd: (f) => f.pnl_usd, pnl_pct: (f) => f.pnl_pct,
+    twu: (f) => twu[claveLote(f)]?.dias ?? -1,
+  };
+  const filasOrdenadas = sortCol ? [...filas].sort((a, b) => {
+    const va = VALOR_COL[sortCol](a), vb = VALOR_COL[sortCol](b);
+    return typeof va === "string" ? sortDir * va.localeCompare(vb) : sortDir * ((va ?? 0) - (vb ?? 0));
+  }) : filas;
   // Lo cerrado se venía guardando y neteando sin que se viera en ningún lado.
   const [n, setN] = useState(0);
   const [conFci, setConFci] = useState(leerPref);
@@ -1454,17 +1476,21 @@ function Posicion({ d, cartera, recargar, lanzar, extras, bench, sim, setSim }) 
       }>
         <div className="tabla-wrap"><table className="tenencias">
           <thead><tr>
-            <th>Ticker</th><th>{t("Compra", "Purchase")}</th>
-            <th className="n" title={t("Cantidad", "Quantity")}>{t("Cant.", "Qty.")}</th>
-            <th className="n">{t("Precio compra", "Buy price")}</th>
-            <th className="n">{t("Precio hoy", "Price today")}</th>
-            <th className="n">{t("Valor", "Value")}</th>
-            <th className="n" title={dia}>{hoy}</th><th className="n" title={dia}>{hoy} %</th>
-            <th className="n">{t("Resultado", "Result")}</th><th className="n">%</th>
+            <th onClick={() => ordenarPor("ticker")} style={{ cursor: "pointer" }}>Ticker</th>
+            <th onClick={() => ordenarPor("buy_date")} style={{ cursor: "pointer" }}>{t("Compra", "Purchase")}</th>
+            <th className="n" title={t("Cantidad", "Quantity")} onClick={() => ordenarPor("qty")} style={{ cursor: "pointer" }}>{t("Cant.", "Qty.")}</th>
+            <th className="n" onClick={() => ordenarPor("buy_price_usd")} style={{ cursor: "pointer" }}>{t("Precio compra", "Buy price")}</th>
+            <th className="n" onClick={() => ordenarPor("precio_usd")} style={{ cursor: "pointer" }}>{t("Precio hoy", "Price today")}</th>
+            <th className="n" onClick={() => ordenarPor("valor_usd")} style={{ cursor: "pointer" }}>{t("Valor", "Value")}</th>
+            <th className="n" title={dia} onClick={() => ordenarPor("pnl_dia_usd")} style={{ cursor: "pointer" }}>{hoy}</th>
+            <th className="n" title={dia} onClick={() => ordenarPor("pnl_dia_pct")} style={{ cursor: "pointer" }}>{hoy} %</th>
+            <th className="n" onClick={() => ordenarPor("pnl_usd")} style={{ cursor: "pointer" }}>{t("Resultado", "Result")}</th>
+            <th className="n" onClick={() => ordenarPor("pnl_pct")} style={{ cursor: "pointer" }}>%</th>
             <th className="n" title={t("Time under water: días corridos que lleva el lote sin volver a lo que costó.",
-                                       "Time under water: running days the lot has gone without recovering its cost.")}>TWU</th>
+                                       "Time under water: running days the lot has gone without recovering its cost.")}
+                onClick={() => ordenarPor("twu")} style={{ cursor: "pointer" }}>TWU</th>
           </tr></thead>
-          <tbody>{filas.map((f, i) => (
+          <tbody>{filasOrdenadas.map((f, i) => (
             <tr key={i}>
               <td className="mono textochip">{f.ticker}
                 {f.es_bono && <span className="chip" style={{marginLeft:6}}>{t("bono", "bond")}</span>}
@@ -2163,7 +2189,47 @@ function PnlRealizado({ real, cartera, recargar, fciTrades, hayFci, conFci, setC
 function MatrizCorrelaciones({ corr }) {
   const c = colores();
   const [enCaidas, setEnCaidas] = useState(false);
-  const m = enCaidas && corr.matriz_caidas ? corr.matriz_caidas : corr.matriz;
+  // HRP (Hierarchical Risk Parity) tiene tres pasos; acá solo se usa el
+  // segundo, la "quasi-diagonalización": reordenar filas y columnas según el
+  // cluster jerárquico que ya arma el backend (`orden_hrp`) deja los pares
+  // correlacionados contiguos, así se ven los bloques en vez del orden
+  // alfabético de siempre. Los pesos de portafolio (paso 3) quedan afuera.
+  const [agrupado, setAgrupado] = useState(false);
+  const mBase = enCaidas && corr.matriz_caidas ? corr.matriz_caidas : corr.matriz;
+  const orden = agrupado && corr.orden_hrp ? corr.orden_hrp : corr.tickers;
+  const idx = orden.map((tk) => corr.tickers.indexOf(tk));
+  const m = idx.map((i) => idx.map((j) => mBase[i][j]));
+  // Un borde por bloque, no el árbol completo: `grupos_hrp` ya viene cortado
+  // al 70 % de la unión más lejana (mismo criterio que colorea un
+  // dendrograma), alineado con `orden_hrp`. Acá solo se buscan las corridas
+  // contiguas del mismo cluster —de a dos o más, uno solo no es un bloque—
+  // y se remarcan con un rectángulo sobre la diagonal.
+  const bloques = [];
+  if (agrupado && corr.grupos_hrp) {
+    let inicio = 0;
+    for (let i = 1; i <= corr.grupos_hrp.length; i++) {
+      if (i === corr.grupos_hrp.length || corr.grupos_hrp[i] !== corr.grupos_hrp[inicio]) {
+        if (i - inicio >= 2) bloques.push([inicio, i - 1]);
+        inicio = i;
+      }
+    }
+  }
+  // Verde lima si el bloque en promedio se mueve junto, rojo rubí si en
+  // promedio se mueve en contra —la distancia de HRP agrupa por lo más
+  // parecido, así que casi siempre da positivo; un bloque negativo es un
+  // grupo que se junta más entre sí de lo que se aleja, aun moviéndose opuesto.
+  const shapes = bloques.map(([ini, fin]) => {
+    let suma = 0, pares = 0;
+    for (let i = ini; i <= fin; i++) for (let j = ini; j <= fin; j++) {
+      if (i !== j) { suma += m[i][j]; pares++; }
+    }
+    const promedio = pares ? suma / pares : 0;
+    return {
+      type: "rect", xref: "x", yref: "y",
+      x0: ini - 0.5, x1: fin + 0.5, y0: ini - 0.5, y1: fin + 0.5,
+      line: { color: promedio >= 0 ? "#32CD32" : "#9B111E", width: 2 }, fillcolor: "transparent",
+    };
+  });
   const tono = { defensiva: "ok", mixta: "ojo", agresiva: "mal" }[corr.caracter];
   const CARACTER_EN = { defensiva: "defensive", mixta: "mixed", agresiva: "aggressive" };
   return (
@@ -2174,16 +2240,26 @@ function MatrizCorrelaciones({ corr }) {
           <button className="btn" style={{ marginLeft: "auto", padding: "3px 10px", fontSize: 12 }}
                   onClick={() => setEnCaidas(!enCaidas)}>
             {enCaidas ? t("Ver días normales", "View normal days") : t("Ver solo días de caída", "View only down days")}</button>)}
+        {LAB && corr.orden_hrp && (
+          <button className="btn" style={{ marginLeft: corr.matriz_caidas ? 0 : "auto", padding: "3px 10px", fontSize: 12 }}
+                  onClick={() => setAgrupado(!agrupado)}
+                  title={t("Reordena la matriz con el clustering jerárquico de Hierarchical Risk "
+                            + "Parity (López de Prado): agrupa primero los activos más parecidos, "
+                            + "sin invertir ninguna matriz.",
+                           "Reorders the matrix using Hierarchical Risk Parity's clustering "
+                            + "(López de Prado): it groups the most similar assets first, without "
+                            + "inverting any matrix.")}>
+            {agrupado ? t("Ver orden original", "View original order") : t("Agrupar por correlación — HRP (lab)", "Group by correlation — HRP (lab)")}</button>)}
       </h3>
       <div className="fila f2" style={{ marginTop: 10, marginBottom: 0 }}>
         <Grafico alto={Math.max(260, corr.tickers.length * 44)}
-          datos={[{ type: "heatmap", z: m, x: corr.tickers, y: corr.tickers,
+          datos={[{ type: "heatmap", z: m, x: orden, y: orden,
                     zmin: -1, zmax: 1, colorscale: [[0, c.negativo], [0.5, c.panel], [1, c.acento]],
                     text: m.map((f) => f.map((v) => v.toFixed(2))),
                     texttemplate: "%{text}", textfont: { size: 10 },
                     hovertemplate: "%{y} ↔ %{x}: %{z:.2f}<extra></extra>",
                     colorbar: { thickness: 10, len: 0.8 } }]}
-          layout={{ margin: { l: 80, b: 70, t: 10, r: 10 } }} />
+          layout={{ margin: { l: 80, b: 70, t: 10, r: 10 }, shapes }} />
         <div>
           <div className="kpis" style={{ gridTemplateColumns: "1fr 1fr" }}>
             <Kpi etiqueta={t("Correlación media", "Average correlation")} valor={num(corr.correlacion_media, 3)}
@@ -2857,7 +2933,7 @@ function Radar({ ejes, series, alto = 250 }) {
    entraba al Math.min/max compartido de cada eje, daba NaN, y esa NaN
    contaminaba las CUATRO series (el radar entero quedaba en blanco, no solo
    la cuarta). */
-function RadarCarteras({ mk, bl }) {
+function RadarCarteras({ mk, bl, hrp }) {
   const c = colores();
   const T = mk.tickers || [];
   const hhi = (w) => w.reduce((a, x) => a + (x / 100) ** 2, 0);
@@ -2873,6 +2949,9 @@ function RadarCarteras({ mk, bl }) {
   if (bl && bl.ret_bl_pct != null) {
     const pesosBl = T.map((tk) => bl.pesos_bl_pct?.[tk] ?? 0);
     C.push(["Black-Litterman", c.series[4], bl.ret_bl_pct, bl.vol_bl_pct, bl.sharpe_bl, pesosBl]);
+  }
+  if (hrp && !hrp.error) {
+    C.push(["HRP", c.series[5], hrp.hrp.ret_pct, hrp.hrp.vol_pct, hrp.hrp.sharpe, hrp.hrp.pesos]);
   }
   const ejes = [
     { et: t("Retorno", "Return"), mas: true, fmt: (v) => pct(v, 1) },
@@ -3222,6 +3301,90 @@ function Composicion({ d, cartera }) {
   });
   const cortes = [["por_tipo", t("Por tipo de activo", "By asset type")], ["por_sector", t("Por sector", "By sector")],
                   ["por_industria", t("Por industria", "By industry")]];
+  // Mapamundi: mismo Plotly que las donas de arriba, un trace "choropleth" en
+  // vez de "pie". `locationmode: "country names"` evita convertir a ISO-3166.
+  const paises = d.por_pais || [];
+  // Un ETF regional (IEUR = Europa, ILF = Latinoamérica) no es un país: la
+  // inversión real está repartida en todo el continente, así que en el mapa
+  // —a diferencia de la tabla de abajo, que sí distingue "Europe" como su
+  // propio renglón— se pinta cada país del continente con el % del ETF.
+  const CONTINENTES = {
+    Europe: ["Austria", "Belgium", "Denmark", "Finland", "France", "Germany",
+      "Ireland", "Italy", "Netherlands", "Norway", "Portugal", "Spain",
+      "Sweden", "Switzerland", "United Kingdom"],
+    Eurozone: ["Austria", "Belgium", "Finland", "France", "Germany", "Ireland",
+      "Italy", "Netherlands", "Portugal", "Spain"],
+    "Latin America": ["Mexico", "Guatemala", "Honduras", "El Salvador",
+      "Nicaragua", "Costa Rica", "Panama", "Colombia", "Venezuela", "Ecuador",
+      "Peru", "Brazil", "Bolivia", "Paraguay", "Chile", "Argentina", "Uruguay"],
+  };
+  // Qué ticker trae cada país: el hover no solo dice el %, también abre la
+  // lista de activos —de mayor a menor— para no tener que ir a buscarla a la
+  // tabla de "Detalle por activo" de más abajo. Un ETF regional se reparte en
+  // todos los países del continente, así que ese mismo ticker aparece en cada
+  // uno, aclarado con la región de la que viene.
+  const acumPorPais = {};
+  paises.forEach((x) => {
+    const region = CONTINENTES[x.etiqueta];
+    const destinos = region || [x.etiqueta];
+    const propios = (d.detalle || []).filter((a) => a.pais === x.etiqueta);
+    destinos.forEach((pais) => {
+      const acc = acumPorPais[pais] || (acumPorPais[pais] = { z: 0, lineas: [] });
+      acc.z += x.pct;
+      propios.forEach((a) => acc.lineas.push({
+        valor: a.valor_usd,
+        texto: region ? `${a.ticker} — ${usd(a.valor_usd)} (${x.etiqueta})` : `${a.ticker} — ${usd(a.valor_usd)}`,
+      }));
+    });
+  });
+  const ubicaciones = Object.keys(acumPorPais);
+  // La escala arranca en un tinte de `alerta` (el ámbar del tema), no en
+  // `panel`: `panel` es casi el fondo de la página, así que el país con menos
+  // peso quedaba como un contorno fantasma en vez de una porción tenue.
+  // `zmin: 0` fija el piso de la escala en cero real —si no, el país con
+  // menos peso se autoescala al mínimo de LA CARTERA y sale tan saturado
+  // como el que más pesa—.
+  const mapaDatos = [{
+    type: "choropleth", locationmode: "country names",
+    locations: ubicaciones, z: ubicaciones.map((p) => acumPorPais[p].z), zmin: 0,
+    text: ubicaciones.map((p) => `<b>${p}</b> — ${acumPorPais[p].z.toFixed(1)} %<br>`
+      + acumPorPais[p].lineas.sort((a, b) => b.valor - a.valor).map((l) => l.texto).join("<br>")),
+    hovertemplate: "%{text}<extra></extra>",
+    colorscale: [[0, rgba(c.alerta, 0.12)], [1, c.alerta]],
+    marker: { line: { color: c.borde, width: 0.5 } },
+    // Sin barra de escala: el hover ya dice el % de cada país, y sacarla le
+    // devuelve ese ancho al mapa —que además ya no tiene que dibujar la
+    // Antártida— así los países chicos de Europa se ven más grandes.
+    showscale: false,
+  }];
+  const mapaLayout = {
+    // El resto del mundo se dibuja igual, con el perímetro de cada país
+    // (`showcountries`) y de cada continente (`showcoastlines`): así se ve
+    // que un país queda sin colorear porque no hay inversión ahí, no porque
+    // falte el mapa entero. `lataxis.range` corta en -60°/65°: deja completa
+    // la Tierra del Fuego (~-55°, la punta sur de Argentina) y saca a la
+    // Antártida entera —su punto más al norte, la península, está a -63°—.
+    // El techo de 65° (no 85°) importa por otra razón, no geográfica sino de
+    // Mercator: cerca del polo la proyección infla la escala vertical sin
+    // límite, así que subir hasta 85° hacía un mapa "cuadrado" que no
+    // llenaba un panel ancho —el hueco lateral que quedaba era ESO, no un
+    // bug de layout— y agrandarlo con `scale` recortaba los costados en vez
+    // de estirarlos. Con el techo bajo, el mapa ya calza ancho y no hace
+    // falta ningún zoom.
+    geo: { bgcolor: "transparent", showframe: false,
+           showcoastlines: true, coastlinecolor: c.borde,
+           showcountries: true, countrycolor: c.borde,
+           showland: true, landcolor: rgba(c.borde, 0.35),
+           projection: { type: "mercator" }, lakecolor: "transparent",
+           lataxis: { range: [-60, 65] } },
+    margin: { t: 8, r: 8, b: 8, l: 8 },
+    // Arrastrar con el mouse en un mapa "geo" desplaza el centro (rota el
+    // globo, en la práctica lo saca de foco); `dragmode: false` lo apaga. El
+    // zoom con la rueda no pasa por `dragmode` —sigue andando, se habilita
+    // aparte en el `config` del gráfico con `scrollZoom`—.
+    dragmode: false,
+  };
+  const mapaConfig = { scrollZoom: true };
 
   // El alto no puede ser fijo: cada industria es una fila de 30 px como mínimo,
   // y una cartera con doce se salía del panel y se escribía encima del pie.
@@ -3252,6 +3415,11 @@ function Composicion({ d, cartera }) {
           );
         })}
       </div>
+      {LAB && (
+        <Plegable id={`mapamundi-${cartera}`} titulo={t("Mapamundi (lab)", "World map (lab)")}>
+          <Grafico datos={mapaDatos} layout={mapaLayout} alto={420} config={mapaConfig} />
+        </Plegable>
+      )}
       <Plegable id={`detalle-activo-${cartera}`} titulo={t("Detalle por activo", "Detail by asset")}>
         <div className="tabla-wrap"><table>
           <thead><tr><th>Ticker</th><th>{t("Nombre", "Name")}</th><th>{t("Tipo", "Type")}</th>
@@ -3890,8 +4058,6 @@ function Markowitz({ d, cartera, bench, extras }) {
         </div>
       </div>
 
-      <Seccion titulo={t("Black-Litterman · ¿Y si además uso los precios objetivo?",
-                         "Black-Litterman · What if I also use target prices?")} />
       <ObjetivosYBL cartera={cartera} extras={extras} d={d} bench={bench} />
     </>
   );
@@ -4544,6 +4710,7 @@ function ObjetivosYBL({ cartera, extras, d, bench }) {
   const [manuales, setManuales] = useState({});
   const [bl, setBl] = useState(null);
   const [editando, setEditando] = useState(null);
+  const [hrp, setHrp] = useState(null);
   const obj = extras?.objetivos;
 
   // BL corre solo, con las views de analistas, y se recalcula cuando el usuario
@@ -4559,6 +4726,16 @@ function ObjetivosYBL({ cartera, extras, d, bench }) {
     return () => { vivo = false; };
   }, [manuales, cartera, bench, extras?.bl]);
 
+  // HRP no toma views ni opiniones propias —solo la matriz de correlación—,
+  // así que se pide una sola vez por cartera y benchmark, sin depender de
+  // `manuales`. Lab hasta que se valide contra Markowitz y BL.
+  useEffect(() => {
+    if (!LAB) return;
+    let vivo = true;
+    api(`/api/hrp/${encodeURIComponent(cartera)}?benchmark=${bench}`).then((r) => vivo && setHrp(r));
+    return () => { vivo = false; };
+  }, [cartera, bench]);
+
   if (!obj) return <div className="cargando">{t("Buscando precios objetivo…", "Looking up target prices…")}</div>;
   if (obj.error) return <div className="aviso mal">{obj.error}</div>;
 
@@ -4571,70 +4748,86 @@ function ObjetivosYBL({ cartera, extras, d, bench }) {
 
   return (
     <>
-      <div className="panel">
-        <h3>{t("Precio objetivo y momento de entrada", "Target price and entry timing")}</h3>
-        <div className="tabla-wrap"><table>
-          <thead><tr><th>Ticker</th><th className="n">{t("Hoy", "Today")}</th><th className="n">{t("Objetivo", "Target")}</th>
-            <th className="n">Upside</th><th className="c">Momentum</th><th className="c">{t("Combinada", "Combined")}</th>
-            <th className="c">{t("Tu opinión", "Your view")}</th></tr></thead>
-          <tbody>{(obj.por_activo || []).map((x) => {
-            const mv = manuales[x.ticker];
-            return (
-              <tr key={x.ticker}>
-                <td className="mono">{x.ticker}</td>
-                <td className="n">{usd(x.actual)}</td>
-                <td className="n">{x.objetivo_medio ? usd(x.objetivo_medio) : "—"}</td>
-                <td className={"n " + signo(x.upside_pct)}>
-                  {x.upside_pct == null ? "—" : pct(x.upside_pct, 1)}</td>
-                <td><span className={"chip " + (x.momentum === "FAVORABLE" ? "ok"
-                      : x.momentum === "EVITAR" ? "mal"
-                      : x.momentum === "ESPERAR" ? "ojo" : "")}>{x.momentum ? senalLabel(x.momentum) : "—"}</span></td>
-                <td><span className={"chip " + (x.combinada === "COMPRAR" ? "ok"
-                      : x.combinada === "CARO" || x.combinada === "REDUCIR" ? "mal"
-                      : x.combinada === "ESPERAR GIRO" ? "ojo" : "")}>{senalLabel(x.combinada)}</span></td>
-                <td style={{ textAlign: "center" }}>
-                  {mv ? (
-                    <span style={{ display: "flex", gap: 6, alignItems: "center",
-                                   justifyContent: "center" }}>
-                      <span className="chip ojo">{mv.modo === "B2" ? t(`evento ${mv.meses} m`, `event ${mv.meses} m`) : t("propia", "own")}</span>
-                      <span className="mono" style={{ fontSize: 11.5 }}>{mv.bajo}–{mv.alto}</span>
-                      <button className="btn" style={{ padding: "1px 7px", fontSize: 11 }}
-                              onClick={() => borrar(x.ticker)}>✕</button>
-                    </span>
-                  ) : (
-                    <button className="btn" style={{ padding: "2px 9px", fontSize: 12 }}
-                            onClick={() => setEditando(x)}>{t("Fijar", "Set")}</button>)}
-                </td>
-              </tr>);
-          })}</tbody>
-        </table></div>
-        <div className="pie">
-          {t("El precio objetivo dice", "The target price says")} <b>{t("cuánto", "how much")}</b>{" "}
-          {t("puede valer; el momentum,", "it could be worth; momentum,")} <b>{t("cuándo", "when")}</b>.{" "}
-          {t("Un objetivo alto con la acción cayendo no es una compra: es esperar el giro. Si tenés una "
-            + "opinión propia sobre un papel —o si no hay cobertura de analistas, como pasa con las "
-            + "small caps argentinas— fijala vos y pisa al consenso.",
-            "A high target with the stock falling isn't a buy: it's waiting for the turn. If you have your "
-            + "own view on a stock —or if there's no analyst coverage, as happens with Argentine "
-            + "small caps— set it yourself and it overrides the consensus.")}
+      <Plegable id={`bl-${cartera}`} titulo={t("Black-Litterman · ¿Y si además uso los precios objetivo?",
+                                               "Black-Litterman · What if I also use target prices?")}>
+        {bl === "cargando" ? <div className="cargando">{t("Recalculando con tu opinión…", "Recalculating with your view…")}</div>
+         : !bl ? <div className="cargando">{t("Calculando Black-Litterman…", "Calculating Black-Litterman…")}</div>
+         : bl.error ? <div className="aviso mal">{bl.error}</div>
+         : <BlackLitterman bl={bl} actual={d.actual} />}
+
+        <div className="panel">
+          <h3>{t("Precio objetivo y momento de entrada", "Target price and entry timing")}</h3>
+          <div className="tabla-wrap"><table>
+            <thead><tr><th>Ticker</th><th className="n">{t("Hoy", "Today")}</th><th className="n">{t("Objetivo", "Target")}</th>
+              <th className="n">Upside</th><th className="c">Momentum</th><th className="c">{t("Combinada", "Combined")}</th>
+              <th className="c">{t("Tu opinión", "Your view")}</th></tr></thead>
+            <tbody>{(obj.por_activo || []).map((x) => {
+              const mv = manuales[x.ticker];
+              return (
+                <tr key={x.ticker}>
+                  <td className="mono">{x.ticker}</td>
+                  <td className="n">{usd(x.actual)}</td>
+                  <td className="n">{x.objetivo_medio ? usd(x.objetivo_medio) : "—"}</td>
+                  <td className={"n " + signo(x.upside_pct)}>
+                    {x.upside_pct == null ? "—" : pct(x.upside_pct, 1)}</td>
+                  <td><span className={"chip " + (x.momentum === "FAVORABLE" ? "ok"
+                        : x.momentum === "EVITAR" ? "mal"
+                        : x.momentum === "ESPERAR" ? "ojo" : "")}>{x.momentum ? senalLabel(x.momentum) : "—"}</span></td>
+                  <td><span className={"chip " + (x.combinada === "COMPRAR" ? "ok"
+                        : x.combinada === "CARO" || x.combinada === "REDUCIR" ? "mal"
+                        : x.combinada === "ESPERAR GIRO" ? "ojo" : "")}>{senalLabel(x.combinada)}</span></td>
+                  <td style={{ textAlign: "center" }}>
+                    {mv ? (
+                      <span style={{ display: "flex", gap: 6, alignItems: "center",
+                                     justifyContent: "center" }}>
+                        <span className="chip ojo">{mv.modo === "B2" ? t(`evento ${mv.meses} m`, `event ${mv.meses} m`) : t("propia", "own")}</span>
+                        <span className="mono" style={{ fontSize: 11.5 }}>{mv.bajo}–{mv.alto}</span>
+                        <button className="btn" style={{ padding: "1px 7px", fontSize: 11 }}
+                                onClick={() => borrar(x.ticker)}>✕</button>
+                      </span>
+                    ) : (
+                      <button className="btn" style={{ padding: "2px 9px", fontSize: 12 }}
+                              onClick={() => setEditando(x)}>{t("Fijar", "Set")}</button>)}
+                  </td>
+                </tr>);
+            })}</tbody>
+          </table></div>
+          <div className="pie">
+            {t("El precio objetivo dice", "The target price says")} <b>{t("cuánto", "how much")}</b>{" "}
+            {t("puede valer; el momentum,", "it could be worth; momentum,")} <b>{t("cuándo", "when")}</b>.{" "}
+            {t("Un objetivo alto con la acción cayendo no es una compra: es esperar el giro. Si tenés una "
+              + "opinión propia sobre un papel —o si no hay cobertura de analistas, como pasa con las "
+              + "small caps argentinas— fijala vos y pisa al consenso.",
+              "A high target with the stock falling isn't a buy: it's waiting for the turn. If you have your "
+              + "own view on a stock —or if there's no analyst coverage, as happens with Argentine "
+              + "small caps— set it yourself and it overrides the consensus.")}
+          </div>
         </div>
-      </div>
 
-      {editando && <EditorView activo={editando} onGuardar={guardar}
-                               onCerrar={() => setEditando(null)} />}
+        {editando && <EditorView activo={editando} onGuardar={guardar}
+                                 onCerrar={() => setEditando(null)} />}
+      </Plegable>
 
-      {bl === "cargando" ? <div className="cargando">{t("Recalculando con tu opinión…", "Recalculating with your view…")}</div>
-       : !bl ? <div className="cargando">{t("Calculando Black-Litterman…", "Calculating Black-Litterman…")}</div>
-       : bl.error ? <div className="aviso mal">{bl.error}</div>
-       : <BlackLitterman bl={bl} actual={d.actual} />}
+      {LAB && (
+        <Plegable id={`hrp-${cartera}`} titulo={t("Hierarchical Risk Parity · ¿Y si reparto por clustering, no por optimización?",
+                                                   "Hierarchical Risk Parity · What if I allocate by clustering, not optimization?")}>
+          {!hrp ? <div className="cargando">{t("Calculando HRP…", "Calculating HRP…")}</div>
+           : hrp.error ? <div className="aviso mal">{hrp.error}</div>
+           : <HRP d={hrp} />}
+        </Plegable>
+      )}
 
       {d && !d.error && (() => {
         const blOk = bl && bl !== "cargando" && !bl.error && bl.ret_bl_pct != null ? bl : null;
+        const hrpOk = LAB && hrp && !hrp.error ? hrp : null;
+        const n = 3 + (blOk ? 1 : 0) + (hrpOk ? 1 : 0);
+        const TITULOS = { 3: t("Las tres carteras, lado a lado", "The three portfolios, side by side"),
+                          4: t("Las cuatro carteras, lado a lado", "The four portfolios, side by side"),
+                          5: t("Las cinco carteras, lado a lado", "The five portfolios, side by side") };
         return (
           <>
-            <Seccion titulo={blOk ? t("Las cuatro carteras, lado a lado", "The four portfolios, side by side")
-                                   : t("Las tres carteras, lado a lado", "The three portfolios, side by side")} />
-            <RadarCarteras mk={d} bl={blOk} />
+            <Seccion titulo={TITULOS[n]} />
+            <RadarCarteras mk={d} bl={blOk} hrp={hrpOk} />
           </>
         );
       })()}
@@ -4789,6 +4982,61 @@ function BlackLitterman({ bl, actual }) {
           </div>
         </>
       )}
+    </>
+  );
+}
+
+/* Hierarchical Risk Parity — paso 3 (bisección recursiva). A diferencia de
+   Markowitz y Black-Litterman, no compara contra la cartera de hoy con un
+   "mejor/peor": HRP no persigue Sharpe ni un retorno objetivo, reparte el
+   riesgo bajando por el árbol de clusters. La comparación de verdad está en
+   RadarCarteras, no acá. */
+function HRP({ d }) {
+  const acc = d.acciones_hrp || [];
+  return (
+    <>
+      <div className="kpis">
+        <Kpi etiqueta={t("Retorno", "Return")} valor={pct(d.hrp.ret_pct)}
+             sub={t(`vs ${pct(d.actual.ret_pct)} de tu cartera`, `vs ${pct(d.actual.ret_pct)} of your portfolio`)} />
+        <Kpi etiqueta={t("Volatilidad", "Volatility")} valor={pct(d.hrp.vol_pct)}
+             sub={t(`vs ${pct(d.actual.vol_pct)} de tu cartera`, `vs ${pct(d.actual.vol_pct)} of your portfolio`)} />
+        <Kpi etiqueta="Sharpe" valor={num(d.hrp.sharpe, 3)}
+             sub={t(`vs ${num(d.actual.sharpe, 3)} de tu cartera`, `vs ${num(d.actual.sharpe, 3)} of your portfolio`)} />
+      </div>
+      <div className="panel">
+        <h3>{t("Qué operar según HRP", "What to trade according to HRP")}</h3>
+        {acc.length > 0 && (
+          <BulletPesos nota={t("El objetivo es el reparto de HRP: agrupa por correlación y da más peso "
+                               + "al lado de menor varianza, sin invertir la matriz de covarianza ni pedir "
+                               + "un retorno esperado.",
+                               "The target is HRP's allocation: it clusters by correlation and gives more "
+                               + "weight to the lower-variance side, without inverting the covariance matrix "
+                               + "or requiring an expected return.")}
+            filas={acc.map((a) => ({ nombre: a.ticker, hoy: a.peso_actual_pct,
+                                     objetivo: a.peso_objetivo_pct, monto: a.delta_usd }))} />)}
+        <div className="tabla-wrap"><table>
+          <thead><tr><th>Ticker</th><th className="n">{t("Hoy", "Today")}</th><th className="n">{t("Objetivo HRP", "HRP target")}</th>
+            <th className="n">{t("Monto", "Amount")}</th><th className="c">{t("Acción", "Action")}</th></tr></thead>
+          <tbody>{acc.map((a) => (
+            <tr key={a.ticker}>
+              <td className="mono">{a.ticker}</td>
+              <td className="n">{pct(a.peso_actual_pct, 1)}</td>
+              <td className="n">{pct(a.peso_objetivo_pct, 1)}</td>
+              <td className={"n " + signo(a.delta_usd)}>{usd(a.delta_usd)}</td>
+              <td><span className={"chip " + (a.accion === "COMPRAR" ? "ok" : a.accion === "VENDER" ? "mal" : "")}>{accionLabel(a.accion)}</span></td>
+            </tr>))}</tbody>
+        </table></div>
+        <div className="pie">
+          {t("HRP reparte el riesgo por clustering jerárquico (López de Prado): nunca invierte la "
+            + "matriz de covarianza, así que es más estable que Markowitz cuando los activos están "
+            + "muy correlacionados o hay poca historia de precios. A cambio, no busca el mejor Sharpe "
+            + "ni incorpora una vista de retorno esperado como Black-Litterman.",
+            "HRP allocates risk through hierarchical clustering (López de Prado): it never inverts "
+            + "the covariance matrix, so it's more stable than Markowitz when assets are highly "
+            + "correlated or there's little price history. In exchange, it doesn't seek the best "
+            + "Sharpe or incorporate an expected-return view like Black-Litterman.")}
+        </div>
+      </div>
     </>
   );
 }

@@ -17,7 +17,7 @@ from api import jobs, sim
 from core.data import bonistas
 from core.data.symbols import is_bond
 from core.io import store
-from core.models import (blacklitterman, bonds, capm, composicion, markowitz,
+from core.models import (blacklitterman, bonds, capm, composicion, hrp, markowitz,
                          momentum, montecarlo, portfolio, regimenes, risk,
                          targets)
 
@@ -150,6 +150,12 @@ def mk(nombre):
     cap = request.args.get("cap", type=float)
     return _simple(nombre, markowitz.optimizar,
                    request.args.get("benchmark"), cap)
+
+
+@bp.get("/hrp/<nombre>")
+def hrp_ep(nombre):
+    """Hierarchical Risk Parity: pesos por clustering, sin invertir la covarianza."""
+    return _simple(nombre, hrp.optimizar, request.args.get("benchmark"))
 
 
 @bp.get("/montecarlo/<nombre>")
