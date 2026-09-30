@@ -76,17 +76,18 @@ let SIM_ACTIVA = "";
 const MERCADOS = {
   AR: { bandera: "🇦🇷", nombre: "Argentina", nombre_en: "Argentina", simbolo: "$", moneda: "dólares",
         moneda_en: "dollars", bench: "MERVAL", locales: true,
+        vol: [25, 45],   // el Merval en dólares ronda 40 %: con 15/25 casi todo sería "Agresiva"
         pie: "Todos los valores en dólares, convertidos con el MEP de la fecha de cada operación.",
         // El MEP es jerga del mercado argentino y no se traduce (ver memoria
         // "Plan de traducción a inglés"): esta plaza sólo la ve quien invierte
         // desde acá, así que el pie queda igual en los dos idiomas.
         pie_en: "Todos los valores en dólares, convertidos con el MEP de la fecha de cada operación." },
   EU: { bandera: "🇪🇺", nombre: "Europa", nombre_en: "Europe", simbolo: "€", moneda: "euros",
-        moneda_en: "euros", bench: "STOXX600", locales: false,
+        moneda_en: "euros", bench: "STOXX600", locales: false, vol: [15, 25],
         pie: "Todos los valores en euros, convertidos con el EURUSD de cada fecha.",
         pie_en: "All values in euros, converted at the EURUSD rate of each date." },
   US: { bandera: "🇺🇸", nombre: "Estados Unidos", nombre_en: "United States", simbolo: "$",
-        moneda: "dólares", moneda_en: "dollars", bench: "SP500", locales: false,
+        moneda: "dólares", moneda_en: "dollars", bench: "SP500", locales: false, vol: [15, 25],
         pie: "Todos los valores en dólares.", pie_en: "All values in dollars." },
 };
 
@@ -497,7 +498,7 @@ function diaEtiqueta(iso) {
                                                           { day: "numeric", month: "short" });
 }
 
-function Kpi({ etiqueta, valor, sub, tono, ayuda }) {
+function Kpi({ etiqueta, valor, sub, tono, ayuda, nivel }) {
   const [abierto, setAbierto] = useState(false);
   return (
     <div className={"kpi " + (tono || "")}
@@ -511,6 +512,7 @@ function Kpi({ etiqueta, valor, sub, tono, ayuda }) {
         )}
       </div>
       <div className="val mono">{valor}</div>
+      {nivel && <div className={"nivel " + nivel[0]}>{t(nivel[1], nivel[2])}</div>}
       {sub && <div className="sub">{sub}</div>}
       {abierto && ayuda && (
         <div className="globo">
@@ -522,6 +524,53 @@ function Kpi({ etiqueta, valor, sub, tono, ayuda }) {
     </div>
   );
 }
+
+/* Nivel de un KPI para leerlo de un vistazo: [clase, es, en]. Los cortes son
+   convenciones de la industria (mercados líquidos), no teoría; los de Sharpe
+   y Calmar son los mismos que dice AYUDA. Con menos de un año de ruedas no
+   se clasifica: un "Excelente" sobre pocos datos engaña. */
+const NIVELES = {
+  mal:  ["mal",  "Malo", "Poor"],          debil: ["debil", "Débil", "Weak"],
+  ok:   ["ok",   "Aceptable", "Acceptable"], bien: ["bien", "Bueno", "Good"],
+  top:  ["top",  "Excelente", "Excellent"],
+};
+const CORTES = { sharpe: [0, 0.5, 1, 2], sortino: [0, 1, 2, 3], calmar: [0, 0.5, 1, 3], ir: [0, 0.25, 0.5, 1] };
+function nivelRatio(kpi, v, ruedas) {
+  if (v == null || ruedas < 250) return null;
+  // Una plaza puede pisar los cortes con `cortes: { sharpe: [...] }` en MERCADOS.
+  const i = (MERCADOS[MERCADO].cortes?.[kpi] || CORTES[kpi]).filter((c) => v >= c).length;   // 0..4
+  return NIVELES[["mal", "debil", "ok", "bien", "top"][i]];
+}
+/* Treynor no tiene escala propia: depende del índice. Se lo compara con el del
+   índice (su retorno sobre la tasa libre, beta = 1). */
+function nivelTreynor(c) {
+  if (!c || c.treynor == null || c.n_ruedas < 250) return null;
+  if (c.r2 < 0.2 || c.beta < 0.1) return ["gris", "No confiable", "Unreliable"];
+  const idx = c.retorno_benchmark_pct / 100 - c.rf;
+  if (c.treynor < 0) return NIVELES.mal;
+  if (c.treynor <= idx) return NIVELES.debil;
+  return c.treynor > 2 * idx ? NIVELES.top : NIVELES.bien;
+}
+function nivelVol(v) {
+  if (v == null) return null;
+  const [bajo, alto] = MERCADOS[MERCADO].vol;
+  return v <= bajo ? ["vol1", "Conservadora", "Conservative"]
+       : v <= alto ? ["vol2", "Moderada", "Moderate"] : ["vol3", "Agresiva", "Aggressive"];
+}
+
+// IR: mismos cortes de Grinold y Kahn (0,5 bueno, 1 excepcional). Sin índice que
+// explique la cartera el IR mide contra otra cosa: mismo "No confiable" que Treynor.
+function nivelIR(c) {
+  if (!c || c.information_ratio == null || c.n_ruedas < 250) return null;
+  if (c.r2 < 0.2) return ["gris", "No confiable", "Unreliable"];
+  return nivelRatio("ir", c.information_ratio, c.n_ruedas);
+}
+// Beta y R² con los cortes que el propio panel CAPM ya usaba (0,8 / 1,2 y 0,2 / 0,5).
+const nivelBeta = (b) => b == null ? null
+  : b < 0.8 ? ["vol1", "Defensiva", "Defensive"]
+  : b <= 1.2 ? ["vol2", "Neutra", "Neutral"] : ["vol3", "Agresiva", "Aggressive"];
+const nivelR2 = (r) => r == null ? null
+  : r >= 0.5 ? ["bien", "Alto", "High"] : r >= 0.2 ? ["ok", "Medio", "Medium"] : ["mal", "Bajo", "Low"];
 
 /* Explicaciones. Qué mide · cómo se lee · desde qué valor mirar con atención.
    Cada campo es [es, en]: se resuelve con t() en el render de Kpi, no acá —
@@ -552,11 +601,16 @@ const AYUDA = {
            "Like Sharpe, but it only penalizes downside volatility. A portfolio jumping up a lot in one day isn't a problem, and Sharpe treats it as if it were."],
     umbral: ["Suele ser mayor que el Sharpe. Si son parecidos, las caídas pesan tanto como las subas.",
              "Usually higher than Sharpe. If they're similar, drops weigh as much as rallies."] },
+  treynor: { que: ["Treynor", "Treynor"],
+    como: ["Cuánto retorno extra conseguís por cada unidad de riesgo de mercado (beta). Es como el Sharpe, pero en vez de la volatilidad total divide por el beta: solo cuenta el riesgo que no se puede diversificar.",
+           "How much extra return you get for each unit of market risk (beta). It's like Sharpe, but instead of total volatility it divides by beta: it only counts the risk that can't be diversified away."],
+    umbral: ["Se lee comparándolo con el Treynor del índice, que es su propio retorno sobre la tasa libre de riesgo (beta = 1). Si el tuyo es mayor, tu cartera paga mejor cada punto de riesgo de mercado. Con beta cercano a 0 o negativo el número no significa nada.",
+             "Read it against the index's own Treynor, which is its return above the risk-free rate (beta = 1). If yours is higher, your portfolio pays better for each point of market risk. With a beta near 0 or negative the number means nothing."] },
   vol: { que: ["Volatilidad anual", "Annual volatility"],
     como: ["Cuánto oscila la cartera. Es la banda dentro de la cual se mueve en un año normal.",
            "How much the portfolio swings. It's the band it moves within during a normal year."],
-    umbral: ["Hasta 15 % es conservadora, 15-25 % moderada, más de 25 % agresiva.",
-             "Up to 15 % is conservative, 15-25 % moderate, above 25 % aggressive."] },
+    umbral: ["En Argentina: hasta 25 % es conservadora, 25-45 % moderada, más de 45 % agresiva. En Europa y EE.UU.: 15 % y 25 %.",
+             "In Argentina: up to 25 % is conservative, 25-45 % moderate, above 45 % aggressive. In Europe and the US: 15 % and 25 %."] },
   var95: { que: ["Pérdida en un día malo", "Loss on a bad day"],
     como: ["De cada veinte ruedas, una es al menos así de mala. No es el peor caso: es el umbral a partir del cual empieza el 5 % peor.",
            "Out of every twenty sessions, one is at least this bad. It's not the worst case: it's the threshold where the worst 5 % begins."],
@@ -1153,6 +1207,7 @@ function Analisis({ cartera, recargar, sim, setSim }) {
 }
 
 function Panel({ tab, R, M, cartera, bench, recargar, lanzar, sim, setSim }) {
+  const capm = useCapm(cartera, bench, R.capm, R.benchmarks);
   const d = R[tab];
   if (M[tab]?.estado === "corriendo" || M[tab]?.estado === "en cola")
     return <div className="cargando">{t("Calculando", "Calculating")} {M[tab]?.nombre}…</div>;
@@ -1163,10 +1218,10 @@ function Panel({ tab, R, M, cartera, bench, recargar, lanzar, sim, setSim }) {
     posicion: <Posicion d={{ ...d, cartera_nombre: cartera }} cartera={cartera}
                         recargar={recargar} lanzar={lanzar} bench={bench} sim={sim} setSim={setSim}
                         extras={{ composicion: R.composicion, riesgo: R.riesgo,
-                                  momentum: R.momentum, capm: R.capm,
+                                  momentum: R.momentum, capm,
                                   correlaciones: R.correlaciones,
                                   evolucion: R.evolucion, benchmarks: R.benchmarks }} />,
-    riesgo: <Riesgo d={d} cartera={cartera} extras={{ stress: R.stress }} />,
+    riesgo: <Riesgo d={d} cartera={cartera} extras={{ stress: R.stress, capm }} />,
     markowitz: <Markowitz d={d} cartera={cartera} bench={bench}
                           extras={{ objetivos: R.objetivos, bl: R.blacklitterman,
                                     momentum: R.momentum }} />,
@@ -1398,7 +1453,7 @@ function Posicion({ d, cartera, recargar, lanzar, extras, bench, sim, setSim }) 
   return (
     <>
       {/* 1 · Cómo se comporta la cartera, antes que el detalle de qué tiene */}
-      {r && !r.error && <KpisRiesgo d={r} />}
+      {r && !r.error && <KpisRiesgo d={r} capm={extras?.capm} />}
 
       {/* 2 · Qué tengo */}
       <div className="kpis">
@@ -1580,7 +1635,7 @@ function Posicion({ d, cartera, recargar, lanzar, extras, bench, sim, setSim }) 
 
       {/* 5 · Cómo son los días */}
       <Seccion titulo={t("Cómo son los días de esta cartera", "What this portfolio's days look like")} />
-      {r && !r.error ? <Distribucion d={r} /> : <div className="cargando">{t("Calculando…", "Calculating…")}</div>}
+      {r && !r.error ? <Distribucion d={r} hoy={d.pnl_dia_pct} fecha={d.dia_fecha} /> : <div className="cargando">{t("Calculando…", "Calculating…")}</div>}
 
       {/* 6 · Contra qué se compara */}
       <Seccion titulo={t("¿Y contra el mercado?", "And against the market?")} />
@@ -2305,7 +2360,7 @@ function Seccion({ titulo }) {
 /* Distribución de retornos diarios, con las dos curvas teóricas y las barras
    pintadas por zona. Reemplaza a la versión que se armaba en el cliente: los
    ajustes salen del backend, que es donde está scipy. */
-function Distribucion({ d }) {
+function Distribucion({ d, hoy, fecha }) {
   const c = colores();
   const dist = d.distribucion;
   if (!dist || !dist.x) return <div className="aviso ojo">{t("Sin datos suficientes para la distribución.",
@@ -2319,6 +2374,14 @@ function Distribucion({ d }) {
   const linea = (x, color, ancho = 1.6) => ({
     type: "line", x0: x, x1: x, yref: "paper", y0: 0, y1: 0.93,
     line: { color, width: ancho, dash: "dash" } });
+
+  // La rueda de hoy contra el cierre anterior (la trae la valuación en vivo, así
+  // que se mueve en cada recálculo). Con el mercado cerrado la última rueda no
+  // es la de hoy y la marca lo dice con su fecha, igual que el KPI de resultado.
+  const hayHoy = hoy != null && Number.isFinite(hoy);
+  const dia = diaEtiqueta(fecha);
+  const etiquetaHoy = (dia === t("hoy", "today") ? t("Hoy", "Today") : t("Rueda del ", "Session of ") + dia)
+    + " " + (hoy > 0 ? "+" : "") + pct(hoy);
 
   return (
     <>
@@ -2339,13 +2402,24 @@ function Distribucion({ d }) {
               y: dist.tstudent, name: t(`t de Student (ν = ${dist.grados_libertad})`,
                                         `Student's t (ν = ${dist.grados_libertad})`),
               line: { color: c.acento, width: 2.4 } }] : []),
+            // Punto invisible: las shapes no cuentan para el rango, y un día fuera
+            // del histograma dejaría la línea fuera del cuadro.
+            ...(hayHoy ? [{ type: "scatter", mode: "markers", x: [hoy], y: [0], showlegend: false,
+              hoverinfo: "skip", marker: { opacity: 0 } }] : []),
           ]}
           layout={{
-            bargap: 0.02, margin: { t: 28 },
+            bargap: 0.02, margin: { t: hayHoy ? 48 : 28 },
             xaxis: { title: t("Retorno de un día", "One-day return"), ticksuffix: " %" },
             yaxis: { title: t("Cantidad de días", "Number of days") },
             shapes: [linea(d.var95_pct, c.alerta), linea(d.var99_pct, c.negativo),
-                     linea(dist.media_pct, c.texto3, 1)],
+                     linea(dist.media_pct, c.texto3, 1),
+                     // Línea de "hoy": --marca-actual, la marca de "dónde estás" de la paleta (yema
+                     // en claro, verde lima neón en oscuro), y un glow hecho de
+                     // dos trazos anchos y translúcidos detrás del núcleo. Plotly no tiene
+                     // sombra en las líneas, así que el resplandor son capas.
+                     ...(hayHoy ? [[11, 0.10], [6, 0.22], [2.4, 1]].map(([width, opacity]) => ({
+                       type: "line", x0: hoy, x1: hoy, yref: "paper", y0: 0, y1: 1, opacity,
+                       line: { color: c.marcaActual, width } })) : [])],
             // Las tres marcas caen en pocos puntos porcentuales, así que cada
             // una se ancla hacia afuera de su propia línea: centradas se
             // escribían una encima de la otra.
@@ -2355,7 +2429,10 @@ function Distribucion({ d }) {
               { x: d.var95_pct, y: 1, yref: "paper", text: t("día malo", "bad day"), showarrow: false,
                 font: { size: 10, color: c.alerta }, yanchor: "bottom", xanchor: "left" },
               { x: dist.media_pct, y: 1, yref: "paper", text: t("día promedio", "average day"), showarrow: false,
-                font: { size: 10, color: c.texto3 }, yanchor: "bottom", xanchor: "left" }] }} />
+                font: { size: 10, color: c.texto3 }, yanchor: "bottom", xanchor: "left" },
+              ...(hayHoy ? [{ x: hoy, y: 1, yref: "paper", text: `<b>${etiquetaHoy}</b>`, showarrow: false,
+                font: { size: 11, color: c.panel }, bgcolor: c.marcaActual, borderpad: 3,
+                yanchor: "bottom", yshift: 16, xanchor: hoy >= dist.media_pct ? "left" : "right" }] : [])] }} />
         <div className="pie">
           {t(`Cada barra es la cantidad de ruedas que terminaron con ese retorno, sobre `,
              `Each bar is the number of sessions that ended with that return, out of `)}
@@ -2552,26 +2629,36 @@ function TreemapSectores({ detalle, campo = "sector", alto = 300 }) {
   const suma = orden.reduce((a, [, s]) => a + s.valor, 0) || 1;
   if (!orden.length) return <div className="cargando">{t("Sin sectores clasificados.", "No classified sectors.")}</div>;
 
+  // Un treemap sin contornos: las cajas de una misma industria van pegadas y las
+  // de industrias distintas separadas por lo mínimo. El nombre de la industria se
+  // lee sobre la primera caja (sin porcentaje: ya está en "Por sector"). La altura
+  // sigue el peso, con un piso de una línea, y la altura total no crece más que
+  // lo que pide la cantidad de industrias.
+  const alturaMin = 32, sep = 3;
+  const total = Math.max(alto, orden.length * (alturaMin + sep));
   return (
-    <div className="lab-tree" style={{ height: alto }}>
-      {orden.map(([nombre, s], i) => (
-        <div className="sec" key={nombre} style={{ flex: s.valor }}>
-          <span className="rot" title={`${nombre} · ${usd(s.valor)}`}>
-            <u style={{ background: c.series[i % c.series.length] }} />
-            <b>{nombre}</b><i>{pct((s.valor / suma) * 100, 1)}</i>
-          </span>
-          <div className={"cajas" + (s.valor / suma < 0.09 ? " bajo" : "")}>
-            {s.items.sort((a, b) => b.valor_usd - a.valor_usd).map((x) => {
-              const w = (x.valor_usd / suma) * 100;
-              return (
-                <i key={x.ticker} className={w < 5 ? "chico" : ""}
-                   style={{ flex: x.valor_usd, background: c.series[i % c.series.length] }}
-                   title={`${x.ticker} · ${nombre} · ${usd(x.valor_usd)}`}>
-                  {x.ticker}<s>{pct(w, 1)}</s>
-                </i>);
-            })}
-          </div>
-        </div>))}
+    <div className="lab-tree" style={{ height: total }}>
+      {orden.map(([nombre, s], i) => {
+        const color = c.series[i % c.series.length];
+        return (
+          <div className="sec" key={nombre} title={`${nombre} · ${usd(s.valor)}`}
+               style={{ flex: s.valor, minHeight: alturaMin }}>
+            <span className="rot">{nombre}</span>
+            <div className="cajas">
+              {s.items.sort((a, b) => b.valor_usd - a.valor_usd).map((x) => {
+                const w = (x.valor_usd / suma) * 100;
+                // Angosta = menos de ~30 % de su industria: no entra "% ticker" en un renglón.
+                const angosta = x.valor_usd / s.valor < 0.3;
+                return (
+                  <i key={x.ticker} className={angosta ? "chico" : ""}
+                     style={{ flex: x.valor_usd, background: color }}
+                     title={`${x.ticker} · ${nombre} · ${usd(x.valor_usd)}`}>
+                    <span className="l"><s>{pct(w, 1)}</s><b>{x.ticker}</b></span>
+                  </i>);
+              })}
+            </div>
+          </div>);
+      })}
     </div>
   );
 }
@@ -3043,73 +3130,44 @@ function marcasTiempo(fechas, cada = 3, tope = 11) {
   return armar(12);
 }
 
-/* PNL-16 · el valor de la cartera con su curva, en lugar del KPI suelto. */
+/* PNL-16 · el valor de la cartera con su curva, en lugar del KPI suelto.
+   Título chico, cifra grande sin decimales, variación del último mes y un área
+   de yema que llega a los bordes, sin ejes. La yema es superficie, no tinta (ver
+   la paleta en index.html): acá es relleno, que es donde funciona. El detalle que
+   antes se dibujaba —la línea del capital puesto y los tramos en rojo— queda en
+   el tooltip como texto. */
 function ValorCartera({ ev, mep }) {
-  const c = colores();
   const v = ev.valor_usd || [];
   const puesto = ev.puesto_serie || [];
-  const W = 300, H = 74;
-  // La escala abraza las dos series: si el capital se sale del cuadro, el cruce
-  // se dibuja donde no está.
-  const todos = puesto.length === v.length ? v.concat(puesto) : v;
-  const mn = Math.min(...todos), mx = Math.max(...todos), rango = mx - mn || 1;
-  const y = (x) => H - 8 - ((x - mn) / rango) * (H - 22);
+  const W = 300, H = 100;
+  const mn = Math.min(...v), mx = Math.max(...v), rango = mx - mn || 1;
+  // Deja piso de yema debajo del mínimo y aire arriba del máximo.
+  const y = (x) => H - 26 - ((x - mn) / rango) * (H - 52);
   const px = (i) => (i / Math.max(1, v.length - 1)) * W;
-  const camino = (arr) => arr.map((x, i) => (i ? "L" : "M") +
-    px(i).toFixed(1) + "," + y(x).toFixed(1)).join(" ");
-  const d = camino(v);
-  const dCap = puesto.length === v.length ? camino(puesto) : null;
+  const linea = v.map((x, i) => (i ? "L" : "M") + px(i).toFixed(1) + "," + y(x).toFixed(1)).join(" ");
   const mesAtras = v[Math.max(0, v.length - 22)];
   const cambio = mesAtras ? (v[v.length - 1] / mesAtras - 1) * 100 : 0;
-  const bajoAgua = dCap && v[v.length - 1] < puesto[puesto.length - 1];
-  const marcas = marcasTiempo(ev.fechas, 3);
+  const bajoAgua = puesto.length === v.length && v[v.length - 1] < puesto[puesto.length - 1];
+  const moneda = MERCADOS[MERCADO].simbolo === "$" ? "US$" : MERCADOS[MERCADO].simbolo;
+  const cifra = Number(ev.valor_hoy_usd).toLocaleString(IDIOMA === "en" ? "en-US" : "es-AR",
+                                                          { maximumFractionDigits: 0 });
+  const detalle = [
+    MERCADOS[MERCADO].locales && mep ? `MEP $${mep}` : null,
+    puesto.length === v.length
+      ? t(`${bajoAgua ? "por debajo de" : "por encima de"} los ${usd(ev.puesto_neto_usd)} puestos`,
+          `${bajoAgua ? "below" : "above"} the ${usd(ev.puesto_neto_usd)} put in`) : null,
+  ].filter(Boolean).join(" · ");
 
   return (
-    <div className="panel lab-valor">
-      <h3>{t("Valor de cartera", "Portfolio value")}</h3>
-      <div className="cifra">{usd(ev.valor_hoy_usd)}</div>
-      <div className="pie" style={{ marginTop: 6 }}>
-        <span className={signo(cambio)}>{cambio >= 0 ? "▲" : "▼"} {pct(Math.abs(cambio), 1)}</span>
-        {" "}{t("en el último mes", "over the last month")}{MERCADOS[MERCADO].locales && mep ? ` · MEP $${mep}` : ""}
-        {dCap && <> · {t(bajoAgua ? "por debajo de" : "por encima de", bajoAgua ? "below" : "above")} {t("los", "the")}{" "}
-          {usd(ev.puesto_neto_usd)} {t("puestos", "put in")}</>}
+    <div className="panel lab-valor" title={detalle || undefined}>
+      <div className="et">{t("Valor de cartera", "Portfolio value")}</div>
+      <div className="cifra">{moneda} {cifra}</div>
+      <div className={"delta " + signo(cambio)}>
+        {cambio >= 0 ? "▲" : "▼"} {pct(Math.abs(cambio), 1)} {t("en el último mes", "over the last month")}
       </div>
-      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
-        <defs>
-          <linearGradient id="labvg" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0" stopColor={c.acento} stopOpacity=".30" />
-            <stop offset="1" stopColor={c.acento} stopOpacity="0" /></linearGradient>
-          {dCap && (<>
-            {/* Recortes contra la línea del capital: un umbral que se mueve no
-                se puede resolver con un degradé horizontal. */}
-            <clipPath id="labSobre"><path d={`${dCap} L${W},0 L0,0 Z`} /></clipPath>
-            <clipPath id="labBajo"><path d={`${dCap} L${W},${H} L0,${H} Z`} /></clipPath>
-            <linearGradient id="labvr" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0" stopColor={c.negativo} stopOpacity=".34" />
-              <stop offset="1" stopColor={c.negativo} stopOpacity=".05" /></linearGradient>
-          </>)}
-        </defs>
-        <g className="ejeT">
-          {marcas.map((m) => (
-            <line key={m.et} x1={m.pos * W} y1="0" x2={m.pos * W} y2={H} />))}
-        </g>
-        {dCap ? (<>
-          <path d={`${d} L${W},${H} L0,${H} Z`} fill="url(#labvg)" clipPath="url(#labSobre)" />
-          <path d={`${d} L${W},0 L0,0 Z`} fill="url(#labvr)" clipPath="url(#labBajo)" />
-          <path className="cap" d={dCap} />
-          <path d={d} fill="none" stroke={c.acento} strokeWidth="2" strokeLinejoin="round"
-                clipPath="url(#labSobre)" />
-          <path d={d} fill="none" stroke={c.negativo} strokeWidth="2" strokeLinejoin="round"
-                clipPath="url(#labBajo)" />
-        </>) : (<>
-          <path d={`${d} L${W},${H} L0,${H} Z`} fill="url(#labvg)" />
-          <path d={d} fill="none" stroke={c.acento} strokeWidth="2" strokeLinejoin="round" />
-        </>)}
+      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" aria-hidden="true">
+        <path className="area" d={`${linea} L${W},${H} L0,${H} Z`} />
       </svg>
-      <div className="lab-ejeT">
-        {marcas.map((m) => (
-          <span key={m.et} style={{ left: `${(m.pos * 100).toFixed(2)}%` }}>{m.et}</span>))}
-      </div>
     </div>
   );
 }
@@ -3397,7 +3455,9 @@ function Composicion({ d, cartera }) {
   const alto = Math.max(300, 34 * industrias);
   return (
     <>
-      <div className="fila f3">
+      {/* Siempre los tres al lado (ver .comp3 en index.html): con auto-fit, si no
+          entraban, el tercero quedaba solo abajo y estirado. */}
+      <div className="fila comp3">
         {cortes.map(([k, titulo]) => {
           // El corte por sector pasa a treemap: la dona dice cuánto pesa cada
           // sector, pero no qué papel lo trae.
@@ -3459,7 +3519,7 @@ function Composicion({ d, cartera }) {
 function Riesgo({ d, cartera, extras }) {
   return (
     <>
-      <KpisRiesgo d={d} />
+      <KpisRiesgo d={d} capm={extras.capm} />
       <ZonasRiesgo d={d} />
       <Seccion titulo={t("¿Cuándo se disparó el riesgo?", "When did risk spike?")} />
       <RiesgoEvolucion cartera={cartera} />
@@ -3477,14 +3537,47 @@ function Riesgo({ d, cartera, extras }) {
   );
 }
 
-function KpisRiesgo({ d }) {
+/* Un solo CAPM para toda la pantalla, contra el índice del selector `bench`
+   (que se pone solo en el que mejor explica la cartera, ver Analisis). El job
+   trae el índice de la plaza; si `bench` es otro se pide ése. La sección CAPM y
+   los KPI leen este mismo resultado, así no pueden contradecirse. Devuelve null
+   mientras calcula. También avisa el índice recomendado: vive acá y no en Capm
+   porque Capm no está montado en todas las pestañas. */
+function useCapm(cartera, bench, job, todos) {
+  const [d, setD] = useState(null);
+  useEffect(() => {
+    if (job && job.benchmark === bench) { setD(job); return; }
+    setD(null);
+    if (!job && bench === MERCADOS[MERCADO].bench) return;   // el job está por llegar
+    let vivo = true;
+    api(`/api/capm/${encodeURIComponent(cartera)}?benchmark=${bench}`).then((x) => vivo && setD(x));
+    return () => { vivo = false; };
+  }, [bench, cartera, job]);
+  useEffect(() => {
+    if (todos?.recomendado)
+      window.dispatchEvent(new CustomEvent("pa:indice", { detail: todos.recomendado }));
+  }, [todos]);
+  return d;
+}
+
+function KpisRiesgo({ d, capm }) {
+  const n = d.n_ruedas;
   return (
     <div className="kpis">
       <Kpi etiqueta="Sharpe" valor={num(d.sharpe, 3)} ayuda={AYUDA.sharpe}
-           tono={d.sharpe > 1 ? "pos" : d.sharpe < 0.5 ? "neg" : ""} sub={d.rf_label} />
-      <Kpi etiqueta="Sortino" valor={num(d.sortino, 3)} ayuda={AYUDA.sortino} />
-      <Kpi etiqueta="Calmar" valor={num(d.calmar, 3)} ayuda={AYUDA.calmar} />
-      <Kpi etiqueta={t("Volatilidad", "Volatility")} valor={pct(d.volatilidad_anual_pct)} ayuda={AYUDA.vol} />
+           nivel={nivelRatio("sharpe", d.sharpe, n)} sub={d.rf_label} />
+      <Kpi etiqueta="Sortino" valor={num(d.sortino, 3)} ayuda={AYUDA.sortino}
+           nivel={nivelRatio("sortino", d.sortino, n)} />
+      {!capm?.error && (capm
+        ? <Kpi etiqueta="Treynor" valor={num(capm.treynor, 3)} ayuda={AYUDA.treynor}
+               nivel={nivelTreynor(capm)}
+               sub={`vs ${capm.benchmark_nombre} · R² ${num(capm.r2, 2)}`} />
+        : <Kpi etiqueta="Treynor" valor="…" ayuda={AYUDA.treynor}
+               sub={t("buscando el índice que la explica", "finding the index that explains it")} />)}
+      <Kpi etiqueta="Calmar" valor={num(d.calmar, 3)} ayuda={AYUDA.calmar}
+           nivel={nivelRatio("calmar", d.calmar, n)} />
+      <Kpi etiqueta={t("Volatilidad", "Volatility")} valor={pct(d.volatilidad_anual_pct)} ayuda={AYUDA.vol}
+           nivel={nivelVol(d.volatilidad_anual_pct)} />
       <Kpi etiqueta={t("Día malo", "Bad day")} valor={usd(d.var95_usd)} tono="neg" ayuda={AYUDA.var95}
            sub={pct(d.var95_pct) + t(" · 1 de cada 20", " · 1 in 20")} />
       <Kpi etiqueta={t("Día muy malo", "Very bad day")} valor={usd(d.cvar95_usd)} tono="neg" ayuda={AYUDA.cvar}
@@ -4489,32 +4582,8 @@ function DistribucionFinal({ d, corriendo }) {
 }
 
 /* ── Benchmark (CAPM) ── */
-function Capm({ d: inicial, cartera, bench, todos }) {
+function Capm({ d, cartera, todos }) {
   const c = colores();
-  const [d, setD] = useState(inicial);
-  // El selector global manda: si cambia, se recalcula contra ese índice.
-  useEffect(() => {
-    if (bench === (d?.benchmark || MERCADOS[MERCADO].bench)) return;
-    setD(null);
-    api(`/api/capm/${encodeURIComponent(cartera)}?benchmark=${bench}`).then(setD);
-  }, [bench, cartera]);
-
-  // Los tres índices se comparan solos, y vienen con el lote de modelos: pedirlos
-  // aparte repetía el CAPM que el lote ya había corrido —son tres índices y uno
-  // de ellos es el mismo— y competía con él por el procesador. Con un R² bajo,
-  // saber cuál de los tres explica la cartera es justamente lo que hay que
-  // mirar: dejarlo detrás de un botón era esconder la respuesta a la advertencia
-  // que da el panel de arriba.
-  //
-  // El índice recomendado no sirve de nada si el resto de la pantalla se sigue
-  // midiendo contra otro. Se avisa por evento y no por props: el selector vive
-  // tres componentes más arriba, y es el mismo canal que la app ya usa para
-  // hablar de abajo hacia arriba.
-  useEffect(() => {
-    if (todos?.recomendado) {
-      window.dispatchEvent(new CustomEvent("pa:indice", { detail: todos.recomendado }));
-    }
-  }, [todos]);
   if (!d) return <div className="cargando">{t("Comparando contra el índice…", "Comparing against the index…")}</div>;
   if (d.error) return <div className="aviso mal">{d.error}</div>;
   const nivel = d.diagnostico_r2?.nivel;
@@ -4536,12 +4605,13 @@ function Capm({ d: inicial, cartera, bench, todos }) {
   return (
     <>
       <div className="kpis">
-        <Kpi etiqueta="Beta" valor={num(d.beta, 3)} ayuda={AYUDA.beta} sub={d.benchmark_nombre} />
+        <Kpi etiqueta="Beta" valor={num(d.beta, 3)} ayuda={AYUDA.beta} sub={d.benchmark_nombre}
+             nivel={nivelBeta(d.beta)} />
         <Kpi etiqueta={t("Alpha anual", "Annual alpha")} valor={pct(d.alpha_anual_pct)} tono={signo(d.alpha_anual_pct)} ayuda={AYUDA.alpha} />
-        <Kpi etiqueta="R²" valor={num(d.r2, 3)} ayuda={AYUDA.r2}
-             tono={nivel === "alto" ? "pos" : nivel === "bajo" ? "neg" : ""} />
-        <Kpi etiqueta="Treynor" valor={num(d.treynor, 3)} />
-        <Kpi etiqueta="Information ratio" valor={num(d.information_ratio, 3)} />
+        <Kpi etiqueta="R²" valor={num(d.r2, 3)} ayuda={AYUDA.r2} nivel={nivelR2(d.r2)} />
+        <Kpi etiqueta="Treynor" valor={num(d.treynor, 3)} ayuda={AYUDA.treynor} nivel={nivelTreynor(d)} />
+        <Kpi etiqueta="Information ratio" valor={num(d.information_ratio, 3)} nivel={nivelIR(d)}
+             sub={t("tracking error ", "tracking error ") + pct(d.tracking_error_pct, 1)} />
         <Kpi etiqueta={t("Cartera vs índice", "Portfolio vs index")} valor={pct(d.retorno_cartera_pct)}
              sub={t(`índice ${pct(d.retorno_benchmark_pct)}`, `index ${pct(d.retorno_benchmark_pct)}`)}
              tono={d.retorno_cartera_pct > d.retorno_benchmark_pct ? "pos" : "neg"} />
