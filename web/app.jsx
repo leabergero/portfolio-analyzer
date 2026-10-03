@@ -1535,7 +1535,7 @@ function Posicion({ d, cartera, recargar, lanzar, extras, bench, sim, setSim }) 
             <th onClick={() => ordenarPor("buy_date")} style={{ cursor: "pointer" }}>{t("Compra", "Purchase")}</th>
             <th className="n" title={t("Cantidad", "Quantity")} onClick={() => ordenarPor("qty")} style={{ cursor: "pointer" }}>{t("Cant.", "Qty.")}</th>
             <th className="n" onClick={() => ordenarPor("buy_price_usd")} style={{ cursor: "pointer" }}>{t("Precio compra", "Buy price")}</th>
-            <th className="n" onClick={() => ordenarPor("precio_usd")} style={{ cursor: "pointer" }}>{t("Precio hoy", "Price today")}</th>
+            <th className="n" onClick={() => ordenarPor("precio_usd")} style={{ cursor: "pointer", color: "var(--alerta)" }}>{t("Precio hoy", "Price today")}</th>
             <th className="n" onClick={() => ordenarPor("valor_usd")} style={{ cursor: "pointer" }}>{t("Valor", "Value")}</th>
             <th className="n" title={dia} onClick={() => ordenarPor("pnl_dia_usd")} style={{ cursor: "pointer" }}>{hoy}</th>
             <th className="n" title={dia} onClick={() => ordenarPor("pnl_dia_pct")} style={{ cursor: "pointer" }}>{hoy} %</th>
@@ -1555,7 +1555,7 @@ function Posicion({ d, cartera, recargar, lanzar, extras, bench, sim, setSim }) 
               <td className="mono">{f.buy_date}</td>
               <td className="n">{num(f.qty, 0)}</td>
               <td className="n">{usd(f.buy_price_usd, 4)}</td>
-              <td className="n">{f.precio_usd == null ? "—" : (
+              <td className="n" style={{ color: "var(--alerta)" }}>{f.precio_usd == null ? "—" : (
                 <>{usd(f.precio_usd, 4)}{f.precio_estimado && (
                   // Cocos no publica la cuotaparte de un fondo que no tenés hoy
                   // en la cuenta conectada. Se muestra el PPC para que la
