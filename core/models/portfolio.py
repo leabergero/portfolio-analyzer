@@ -552,7 +552,7 @@ def evolucion(posiciones, trades=None, n_ruedas: int = 30) -> dict:
 
     # ── Un solo formato para lo abierto y lo cerrado ──────────────────────────
     # (ticker, qty, desde, hasta|None, costo_usd, ingreso_usd|None)
-    tramos, dividendos, sin_serie = [], [], set()
+    tramos, dividendos, sin_serie, fci_aparte = [], [], set(), set()
 
     precios_ref = precios_actuales(posiciones)
     lotes = valuar(posiciones, precios_ref)["posiciones"]
@@ -582,10 +582,13 @@ def evolucion(posiciones, trades=None, n_ruedas: int = 30) -> dict:
         # retiro que nunca existieron como movimiento: inflaba el capital movido
         # un 36 % y corría la TIR tres puntos, de −4,29 % a −1,33 %.
         #
-        # Sale por el mismo camino que todo lo que no se puede valuar, y por eso
-        # la pantalla lo nombra: está en el resultado realizado, no en la curva.
+        # Se saltea ESE registro y nada más, y la pantalla lo nombra: está en el
+        # resultado realizado, no en la curva. Marcar el ticker entero —como
+        # se hacía— sacaba también la tenencia abierta del fondo: KARIN perdía
+        # los 1.153 USD de COCORMA del valor de cartera, MAMI los 530 de
+        # COCOUSDPA.
         if t.get("tipo") == "fci":
-            sin_serie.add(ticker)
+            fci_aparte.add(ticker)
             continue
         tramos.append((ticker, t["qty"], t["buy_date"], t["sell_date"], costo, ingreso))
 
@@ -781,6 +784,7 @@ def evolucion(posiciones, trades=None, n_ruedas: int = 30) -> dict:
         "valor_hoy_usd": round(float(tenencias.iloc[-1]), 2),
         "cerradas": sum(1 for x in tramos if x[3]),
         "sin_serie": sorted(sin_serie),
+        "fci_aparte": sorted(fci_aparte),
         "bajo_agua": bajo_agua,
         "resultado_serie": [round(float(v), 2) for v in resultado],
         "valor_usd": [round(float(v), 2) for v in tenencias],

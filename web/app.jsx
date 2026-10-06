@@ -2820,6 +2820,12 @@ function RendimientoTotal({ ev }) {
           {t("Sin serie de precios y fuera de la cuenta:", "No price series, and out of the account:")}{" "}
           <b>{ev.sin_serie.join(", ")}</b>.
         </div>)}
+      {ev.fci_aparte?.length > 0 && (
+        <div className="pie" style={{ marginTop: 6 }}>
+          {t("El resultado de los FCI va en el realizado, no en la curva:",
+             "FCI results are in the realized P&L, not in the curve:")}{" "}
+          <b>{ev.fci_aparte.join(", ")}</b>.
+        </div>)}
       <svg viewBox="0 0 300 34" preserveAspectRatio="none"
            style={{ width: "100%", height: 40, marginTop: 12, display: "block" }}>
         <defs>

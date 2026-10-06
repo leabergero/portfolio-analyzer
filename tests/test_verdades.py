@@ -843,6 +843,34 @@ def test_un_fci_en_dolares_vale_su_cuotaparte_en_dolares():
     assert str(serie.index[-1].date()) == "2026-10-05", "con la fecha del fondo"
 
 
+def test_el_resultado_de_un_fci_no_saca_su_tenencia_del_valor():
+    """El resultado importado de un FCI sale de la curva; la tenencia abierta, no.
+
+    Para dejar afuera el registro del resultado se marcaba el ticker entero, y
+    con él se iba la tenencia que sigue abierta: KARIN perdía los 1.153 USD de
+    COCORMA del valor de cartera, MAMI los 530 de COCOUSDPA.
+    """
+    import pandas as pd
+    from core.data import sources
+    evolucion = require("core.models.portfolio", "evolucion")
+    fechas = pd.date_range("2026-09-01", periods=10, freq="B")
+    series = {"AAA": pd.Series(10.0, index=fechas), "FONDO": pd.Series(2.0, index=fechas[-1:])}
+    pos = [{"ticker": "AAA", "buy_date": "2026-09-01", "buy_price": 10.0, "qty": 10, "currency": "USD"},
+           {"ticker": "FONDO", "buy_date": "2026-09-01", "buy_price": 2.0, "qty": 50, "currency": "USD"}]
+    fci = {"ticker": "FONDO", "tipo": "fci", "buy_date": "2025-01-01", "sell_date": "2026-08-01",
+           "buy_price": 900.0, "sell_price": 800.0, "qty": 1, "buy_comm": 0.0, "sell_comm": 0.0,
+           "moneda": "USD", "pnl": -100.0}
+    antes = sources.precios_base
+    try:
+        sources.precios_base = lambda t, *a, **k: series.get(t.upper(), pd.Series(dtype=float))
+        sin, con = evolucion(pos, []), evolucion(pos, [fci])
+    finally:
+        sources.precios_base = antes
+    assert casi(sin["valor_hoy_usd"], 200.0), sin
+    assert casi(con["valor_hoy_usd"], 200.0), "el resultado del FCI no se lleva la tenencia"
+    assert con["fci_aparte"] == ["FONDO"] and "FONDO" not in con["sin_serie"]
+
+
 def test_el_csv_propio_lleva_dividendos_y_cerradas():
     """Exportar es respaldar TODO: si no, cada reimportación pierde lo cargado a mano.
 
@@ -1336,7 +1364,7 @@ def test_el_resultado_de_un_fci_no_entra_al_flujo_de_la_evolucion():
         "Ni plata que salió: es el saldo de cientos de movimientos repartidos en años."
     assert marcado["resultado_usd"] == solo["resultado_usd"], \
         "La curva de la cartera no se mueve por un fondo que no puede valuar."
-    assert "FONDO" in marcado["sin_serie"], \
+    assert "FONDO" in marcado["fci_aparte"], \
         "Y se dice en pantalla: queda fuera de la curva, no desaparece sin aviso."
 
     # El contraste: sin la marca, el mismo registro contamina el flujo. Es
