@@ -762,6 +762,25 @@ def test_un_dividendo_cargado_a_mano_tapa_un_solo_cobro_del_broker():
     assert [c["instrumento"] for c in x["sin_tenencia"]] == ["KO"], "lo que la cartera no tiene, no entra"
 
 
+def test_la_x_de_una_cerrada_borra_esa_y_solo_esa():
+    """El navegador manda 162 y el archivo guarda 162.0.
+
+    Comparados como texto no coincidían: la ✕ respondía "borré 0" y la
+    operación seguía ahí (KARIN, 2026-10-06). Y la misma operación cargada dos
+    veces —del CSV propio en pesos y de Cocos en dólares— se distingue por
+    precio y lote: borrar una no puede llevarse la otra.
+    """
+    _coincide = require("core.io.store", "_coincide")
+    csv = {"ticker": "JPM.BA", "buy_date": "2025-09-16", "sell_date": "2026-01-26",
+           "buy_price": 30620.0, "sell_price": 30040.0, "qty": 162.0, "lote": "propio:KARIN.csv"}
+    cocos = {**csv, "buy_price": 20.923986, "sell_price": 20.299312, "qty": 162, "lote": "cocos-ops"}
+    clave = {"ticker": "JPM.BA", "buy_date": "2025-09-16", "sell_date": "2026-01-26",
+             "qty": 162, "buy_price": 30620, "sell_price": 30040, "lote": "propio:KARIN.csv"}
+    assert _coincide(csv, clave), "162 y 162.0 son la misma cantidad"
+    assert not _coincide(cocos, clave), "la copia de Cocos no se borra con la ✕ de la otra"
+    assert _coincide({"ticker": "X", "qty": 1.0}, {"ticker": "X", "qty": 1}), "sin lote también"
+
+
 def test_el_csv_propio_lleva_dividendos_y_cerradas():
     """Exportar es respaldar TODO: si no, cada reimportación pierde lo cargado a mano.
 

@@ -1915,8 +1915,13 @@ function PnlRealizado({ real, cartera, recargar, fciTrades, hayFci, conFci, setC
   // `tr` (trade) y no `t`: `t()` es el traductor global, y esta función entera
   // recorre trades. Nombrarlo `t` acá los haría chocar apenas se necesitara
   // traducir algo dentro de un .map/.filter/.reduce de trades.
+  // Precios y lote distinguen dos copias de la misma operación cargadas de
+  // fuentes distintas (el CSV propio en pesos y Cocos en dólares): sin ellos,
+  // la ✕ de una borraba las dos.
   const claveTrade = (tr) => JSON.stringify({ ticker: tr.ticker, buy_date: tr.buy_date,
-                                             sell_date: tr.sell_date, qty: tr.qty });
+                                             sell_date: tr.sell_date, qty: tr.qty,
+                                             buy_price: tr.buy_price, sell_price: tr.sell_price,
+                                             lote: tr.lote });
   const borrar = (tr) => {
     if (porBorrar !== claveTrade(tr)) { setPorBorrar(claveTrade(tr)); return; }
     setPorBorrar(null);

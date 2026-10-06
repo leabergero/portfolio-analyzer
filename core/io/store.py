@@ -435,14 +435,28 @@ def agregar_realizado(nombre: str, trades: list, lote: str = None) -> dict:
             "total": len(existentes)}
 
 
+def _coincide(t: dict, filtro: dict) -> bool:
+    """Cada campo del filtro contra el registro, comparado como lo que es.
+
+    El navegador manda la cantidad como 162 y el archivo la guarda como 162.0:
+    comparadas como texto no son iguales, y la ✕ de una operación cerrada
+    respondía "borré 0" sin decir nada (KARIN, 2026-10-06).
+    """
+    def igual(a, b):
+        try:
+            return abs(float(a) - float(b)) < 1e-9
+        except (TypeError, ValueError):
+            return str("" if a is None else a) == str(b)
+    return all(igual(t.get(k, ""), v) for k, v in filtro.items())
+
+
 def quitar_realizado(nombre: str, filtro: dict) -> int:
     """Saca los registros que coinciden con todos los campos de `filtro`."""
     datos = _leer(_realizado())
     existentes = datos.get(nombre, [])
     if not filtro:
         return 0
-    quedan = [t for t in existentes
-              if not all(str(t.get(k, "")) == str(v) for k, v in filtro.items())]
+    quedan = [t for t in existentes if not _coincide(t, filtro)]
     datos[nombre] = quedan
     _escribir(_realizado(), datos)
     return len(existentes) - len(quedan)
@@ -453,8 +467,7 @@ def editar_dividendo(nombre: str, filtro: dict, importe: float) -> int:
     datos = _leer(_realizado())
     n = 0
     for t in datos.get(nombre, []):
-        if t.get("tipo") == "dividendo" and \
-                all(str(t.get(k, "")) == str(v) for k, v in filtro.items()):
+        if t.get("tipo") == "dividendo" and _coincide(t, filtro):
             qty = float(t.get("qty") or 1)
             t.update(sell_price=round(importe / qty, 6), pnl=round(importe, 4),
                      estimado=False, editado=True)
