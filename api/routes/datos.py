@@ -1,6 +1,6 @@
 """Datos transversales: MEP, validación de tickers, comparación y conectores."""
 
-from flask import Blueprint, Response, jsonify, request
+from flask import Blueprint, Response, jsonify, request, send_file
 
 from api import sim
 from core.broker import cocos, inviu, sesion, vault
@@ -597,6 +597,21 @@ def cocos_dividendos():
                 if t.get("lote") == cocos.LOTE_DIVIDENDOS) if not res else 0
     return jsonify({"ok": True, "cartera": cartera, **x, **res, "importados_antes": antes,
                     "sin_papel": r["sin_papel"], "cortado": r["cortado"]})
+
+
+@bp.get("/logo/<ticker>")
+def logo(ticker):
+    """El logo del papel, 32×32. Se baja la primera vez y queda guardado."""
+    import re
+    from core.data import logos
+    if not re.fullmatch(r"[A-Za-z0-9.\-]{1,20}", ticker):
+        return jsonify({"error": "Ticker inválido."}), 400
+    archivo = logos.ruta(ticker)
+    if not archivo:
+        return jsonify({"error": "Sin logo."}), 404
+    r = send_file(archivo, mimetype="image/png")
+    r.headers["Cache-Control"] = "public, max-age=604800"
+    return r
 
 
 @bp.get("/cocos/fondos")

@@ -26,6 +26,8 @@ data/vault/
 data/secreto_sesion
 # carteras de los usuarios de la web, una carpeta por identidad de Google
 data/usuarios/
+# logos de los papeles: se bajan solos la primera vez que se piden
+data/logos/
 # backups de carteras y realizado
 data/*.bak*
 # y los que uno se guarda a mano en la raíz: son carteras, o sea datos de alguien

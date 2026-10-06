@@ -1544,7 +1544,7 @@ function Posicion({ d, cartera, recargar, lanzar, extras, bench, sim, setSim }) 
           </tr></thead>
           <tbody>{filasOrdenadas.map((f, i) => (
             <tr key={i}>
-              <td className="mono textochip">{f.ticker}
+              <td className="mono textochip">{f.ticker}<LogoTicker ticker={f.ticker} />
                 {f.es_bono && <span className="chip" style={{marginLeft:6}}>{t("bono", "bond")}</span>}
                 {f.sim && <span className="chip ojo" style={{marginLeft:6}}
                                 title={t("Simulada: no está en tu cartera", "Simulated: not in your portfolio")}>
@@ -1723,6 +1723,14 @@ function CalendarioRealizado({ real }) {
       </div>
     </div>
   );
+}
+
+// El logo del papel a la derecha del ticker. El server lo baja la primera vez;
+// si no hay, la imagen se esconde y no deja un ícono roto.
+function LogoTicker({ ticker }) {
+  return <img src={`/api/logo/${encodeURIComponent(ticker)}`} alt="" width={16} height={16}
+              loading="lazy" onError={(e) => { e.currentTarget.style.display = "none"; }}
+              style={{ marginLeft: 6, verticalAlign: "-3px", borderRadius: 3 }} />;
 }
 
 // Lo que traería Cocos, separado en lo que entra, lo que reemplaza y lo que no.
@@ -2104,7 +2112,7 @@ function PnlRealizado({ real, cartera, recargar, fciTrades, hayFci, conFci, setC
                   <th className="n">{t("Resultado USD", "Result USD")}</th></tr></thead>
                 <tbody>{[...detalladas].sort((a, b) => (a.sell_date < b.sell_date ? 1 : -1)).map((tr, i) => (
                   <tr key={i}>
-                    <td className="mono">{tr.ticker}{tr.tipo === "dividendo" && (tr.estimado
+                    <td className="mono">{tr.ticker}<LogoTicker ticker={tr.ticker} />{tr.tipo === "dividendo" && (tr.estimado
                       ? <span className="chip ojo" style={{ marginLeft: 6, minWidth: 0, whiteSpace: "nowrap" }}
                               title={t(`${tr.notes}. Corregí el importe con lo que cobraste.`,
                                        `${tr.notes}. Correct the amount with what you actually collected.`)}>
@@ -2172,7 +2180,7 @@ function PnlRealizado({ real, cartera, recargar, fciTrades, hayFci, conFci, setC
                   <th className="n">{t("Resultado en dólares", "Result in dollars")}</th></tr></thead>
                 <tbody>{porTicker.map((x) => (
                   <tr key={x.ticker}>
-                    <td className="mono">{x.ticker}{x.fci &&
+                    <td className="mono">{x.ticker}<LogoTicker ticker={x.ticker} />{x.fci &&
                       <span className="chip" style={{ marginLeft: 6, minWidth: 0 }}>fci</span>}
                       {x.caucion &&
                       <span className="chip" style={{ marginLeft: 6, minWidth: 0 }}>caución</span>}</td>
