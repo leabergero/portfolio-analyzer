@@ -143,7 +143,10 @@ def d_ticker(symbol: str) -> str:
     sym = base_symbol(symbol)
     if sym in ON_D_TICKER:
         return ON_D_TICKER[sym]
-    return sym[:-1] + "D" if sym.endswith("O") else sym + "D"
+    # Una ON tiene cinco caracteres (DNC7O, MGCTO, T643O). Sin ese tope, un
+    # CEDEAR que termina en O también perdía la O: KO salía "KD" y el
+    # importador de Cocos cargaba Coca-Cola como KD.BA, que no existe (KARIN).
+    return sym[:-1] + "D" if sym.endswith("O") and len(sym) >= 5 else sym + "D"
 
 
 # ── Clasificación ─────────────────────────────────────────────────────────────

@@ -230,6 +230,9 @@ def test_d_ticker_de_on_reemplaza_la_o_final():
     assert d_ticker("RUCDO") == "RUCDD"
     assert d_ticker("TLCTO") == "TLCTD"
     assert d_ticker("VSCXO") == "VSCXD"
+    assert d_ticker("DHS9O") == "DHS9D", "ON fuera de la tabla: igual pierde la O"
+    assert d_ticker("KO") == "KOD", "Coca-Cola es un CEDEAR, no una ON: KD no existe"
+    assert d_ticker("MO") == "MOD"
 
 
 def test_soberano_agrega_d_al_final():
