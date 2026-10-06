@@ -2110,6 +2110,19 @@ function PnlRealizado({ real, cartera, recargar, fciTrades, hayFci, conFci, setC
                                        `${tr.notes}. Correct the amount with what you actually collected.`)}>
                                 {t("div est.", "div est.")}</span>
                       : <span className="chip ok" style={{ marginLeft: 6, minWidth: 0 }}>{t("div", "div")}</span>)}
+                      {tr.tipo === "renta" && (
+                        <span className="chip ok" style={{ marginLeft: 6, minWidth: 0 }}
+                              title={t("Renta o amortización cobrada", "Income or amortization collected")}>
+                          {t("renta", "income")}</span>)}
+                      {/* De qué broker vino; sin marca, la cargaste vos (a mano o por CSV). */}
+                      {/^(cocos|inviu)-/.test(tr.lote || "") && (() => {
+                        const broker = tr.lote.startsWith("cocos") ? "Cocos" : "Inviu";
+                        // Fondo claro propio: el azul oscuro de Cocos se pierde en modo oscuro.
+                        return <img src={`img/${broker.toLowerCase()}.png`} alt={broker} width={14} height={14}
+                                    title={t(`Importada de ${broker}`, `Imported from ${broker}`)}
+                                    style={{ marginLeft: 6, verticalAlign: "-2px", background: "#fff",
+                                             borderRadius: 3, padding: 1 }} />;
+                      })()}
                       <button className={"eliminar" + (porBorrar === claveTrade(tr) ? " arm" : "")}
                               onMouseLeave={() => porBorrar === claveTrade(tr) && setPorBorrar(null)}
                               onClick={() => borrar(tr)}

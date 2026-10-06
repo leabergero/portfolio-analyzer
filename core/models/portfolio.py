@@ -290,8 +290,12 @@ def pnl_realizado(trades) -> dict:
         moneda = (t.get("moneda") or sources.ticker_currency(ticker)).upper()
         # La escala la fija el precio más grande de la operación: si uno de los
         # dos vino en cero (un dividendo) no puede decidir por los dos.
-        div = sources.divisor_nominal(
-            ticker, max(abs(t["buy_price"] or 0), abs(t["sell_price"] or 0)))
+        # Una renta, un dividendo o una caución no tienen precio por lámina: son
+        # la plata cobrada. Dividirla por 100 dejaba la amortización de AL30D
+        # (331,84 USD) en 3,32, y a INVIU le faltaban 1.241 USD de rentas.
+        div = 1.0 if t.get("tipo") in ("renta", "dividendo", "caucion") else \
+            sources.divisor_nominal(
+                ticker, max(abs(t["buy_price"] or 0), abs(t["sell_price"] or 0)))
         compra, venta = t["buy_price"] / div, t["sell_price"] / div
         c_compra, c_venta = t.get("buy_comm", 0) / div, t.get("sell_comm", 0) / div
         mep_c = mep_v = None

@@ -781,6 +781,21 @@ def test_la_x_de_una_cerrada_borra_esa_y_solo_esa():
     assert _coincide({"ticker": "X", "qty": 1.0}, {"ticker": "X", "qty": 1}), "sin lote también"
 
 
+def test_la_renta_de_un_bono_no_se_divide_por_100():
+    """Una amortización es plata cobrada, no un precio por lámina.
+
+    El importador de Inviu guarda cada renta con qty 1 y el importe como
+    precio. Para un bono, cualquier precio ≥ 5 se toma como "cada 100
+    nominales" y se divide: la amortización de AL30D de 331,84 USD sumaba 3,32,
+    y a INVIU le faltaban 1.241 USD de rentas en el realizado.
+    """
+    pnl_realizado = require("core.models.portfolio", "pnl_realizado")
+    renta = {"ticker": "AL30D", "tipo": "renta", "buy_date": "2025-07-10",
+             "sell_date": "2025-07-10", "buy_price": 0.0, "sell_price": 331.84, "qty": 1,
+             "buy_comm": 0.0, "sell_comm": 0.0, "moneda": "USD", "pnl": 331.84}
+    assert casi(pnl_realizado([renta])["total_usd"], 331.84), "la amortización entra entera"
+
+
 def test_el_csv_propio_lleva_dividendos_y_cerradas():
     """Exportar es respaldar TODO: si no, cada reimportación pierde lo cargado a mano.
 
