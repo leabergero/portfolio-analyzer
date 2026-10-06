@@ -2822,8 +2822,10 @@ function RendimientoTotal({ ev }) {
         </div>)}
       {ev.fci_aparte?.length > 0 && (
         <div className="pie" style={{ marginTop: 6 }}>
-          {t("El resultado de los FCI va en el realizado, no en la curva:",
-             "FCI results are in the realized P&L, not in the curve:")}{" "}
+          {t("Los FCI son la caja: suman al valor de cartera pero no a la curva ni a la TIR. "
+             + "Su resultado está en Posiciones cerradas:",
+             "FCIs are the cash: they add to the portfolio value but not to the curve or the IRR. "
+             + "Their result is in Closed positions:")}{" "}
           <b>{ev.fci_aparte.join(", ")}</b>.
         </div>)}
       <svg viewBox="0 0 300 34" preserveAspectRatio="none"

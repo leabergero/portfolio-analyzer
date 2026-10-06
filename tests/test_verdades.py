@@ -871,6 +871,35 @@ def test_el_resultado_de_un_fci_no_saca_su_tenencia_del_valor():
     assert con["fci_aparte"] == ["FONDO"] and "FONDO" not in con["sin_serie"]
 
 
+def test_un_fci_suma_al_valor_pero_no_a_la_tir():
+    """El FCI es la caja de la cartera: la TIR mide si conviene invertir en bolsa.
+
+    Su tenencia es una foto fechada en el último movimiento, y entraba a la
+    curva como plata puesta ese día: COCOUSDPA, 13.879 USD puestos hoy y
+    ganados en cero días, llevaba la TIR de KARIN de 11,6 % a 14,9 %. Su valor
+    sí tiene que sumar al de la cartera, o no coincide con el broker.
+    """
+    import pandas as pd
+    from core.data import sources
+    evolucion = require("core.models.portfolio", "evolucion")
+    fechas = pd.date_range("2026-01-01", periods=80, freq="B")
+    series = {"AAA": pd.Series([10.0 + i * 0.05 for i in range(80)], index=fechas),
+              "FONDO": pd.Series(1.06, index=fechas[-1:])}
+    accion = {"ticker": "AAA", "buy_date": "2026-01-01", "buy_price": 10.0, "qty": 100, "currency": "USD"}
+    fondo = {"ticker": "FONDO", "buy_date": str(fechas[-1].date()), "buy_price": 1.0, "qty": 1000,
+             "currency": "USD", "source": sources.SOURCE_FCI}
+    antes = sources.precios_base
+    try:
+        sources.precios_base = lambda t, *a, **k: series.get(t.upper(), pd.Series(dtype=float))
+        sin, con = evolucion([accion], []), evolucion([accion, fondo], [])
+    finally:
+        sources.precios_base = antes
+    assert con["tir_anual_pct"] == sin["tir_anual_pct"], "el FCI no mueve la TIR"
+    assert con["rendimiento_pct"] == sin["rendimiento_pct"], "ni el rendimiento"
+    assert casi(con["valor_hoy_usd"], sin["valor_hoy_usd"] + 1060.0, 1e-6), "pero suma al valor"
+    assert "FONDO" in con["fci_aparte"], "y se dice en pantalla"
+
+
 def test_el_csv_propio_lleva_dividendos_y_cerradas():
     """Exportar es respaldar TODO: si no, cada reimportación pierde lo cargado a mano.
 

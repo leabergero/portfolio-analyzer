@@ -556,7 +556,19 @@ def evolucion(posiciones, trades=None, n_ruedas: int = 30) -> dict:
 
     precios_ref = precios_actuales(posiciones)
     lotes = valuar(posiciones, precios_ref)["posiciones"]
+    # Un FCI es la caja de la cartera, no una decisión de bolsa: no entra a la
+    # curva ni a las tasas, que miden si conviene invertir en bolsa. Además su
+    # tenencia es una foto fechada en el último movimiento: COCOUSDPA entraba
+    # como 13.879 USD puestos hoy y ganados en cero días, y la TIR de KARIN
+    # daba 14,9 % en vez de 11,6 %. Su valor sí suma al de la cartera: es plata
+    # tuya y tiene que coincidir con el broker.
+    fci = {str(p["ticker"]).upper() for p in posiciones if p.get("source") == _src.SOURCE_FCI}
+    valor_fci = 0.0
     for l in lotes:
+        if l["ticker"].upper() in fci:
+            valor_fci += l.get("valor_usd") or 0.0
+            fci_aparte.add(l["ticker"].upper())
+            continue
         if l["costo_usd"] is None or not l["buy_date"]:
             continue
         tramos.append((l["ticker"], l["qty"], l["buy_date"], None, l["costo_usd"], None))
@@ -781,7 +793,8 @@ def evolucion(posiciones, trades=None, n_ruedas: int = 30) -> dict:
         "aportado_usd": round(float(flujo[flujo > 0].sum()), 2),
         "retirado_usd": round(float(-flujo[flujo < 0].sum()), 2),
         "dividendos_usd": round(float(caja.iloc[-1]), 2),
-        "valor_hoy_usd": round(float(tenencias.iloc[-1]), 2),
+        "valor_hoy_usd": round(float(tenencias.iloc[-1]) + valor_fci, 2),
+        "valor_fci_usd": round(valor_fci, 2),
         "cerradas": sum(1 for x in tramos if x[3]),
         "sin_serie": sorted(sin_serie),
         "fci_aparte": sorted(fci_aparte),
