@@ -432,9 +432,6 @@ const dec = (v) => {
    separadores. Sin esto, un campo de texto acepta letras. */
 const soloNum = (v) => String(v).replace(/[^\d.,-]/g, "");
 
-// Lo que está en evaluación se ve sólo con ?lab=1. Se borra al aprobarse.
-const LAB = new URLSearchParams(location.search).has("lab");
-
 /* Lee la paleta del CSS para que los gráficos sigan el tema. */
 function colores() {
   const c = getComputedStyle(document.documentElement);
@@ -2102,7 +2099,7 @@ function PnlRealizado({ real, cartera, recargar, fciTrades, hayFci, conFci, setC
                   <th className="n">{t("Resultado USD", "Result USD")}</th></tr></thead>
                 <tbody>{[...detalladas].sort((a, b) => (a.sell_date < b.sell_date ? 1 : -1)).map((tr, i) => (
                   <tr key={i}>
-                    <td className="mono">{tr.ticker}{tr.tipo === "dividendo" && (LAB && tr.estimado
+                    <td className="mono">{tr.ticker}{tr.tipo === "dividendo" && (tr.estimado
                       ? <span className="chip ojo" style={{ marginLeft: 6, minWidth: 0, whiteSpace: "nowrap" }}
                               title={t(`${tr.notes}. Corregí el importe con lo que cobraste.`,
                                        `${tr.notes}. Correct the amount with what you actually collected.`)}>
@@ -2130,7 +2127,7 @@ function PnlRealizado({ real, cartera, recargar, fciTrades, hayFci, conFci, setC
                           {num((tr.mep_venta / tr.mep_compra - 1) * 100, 1)} %
                         </div></> : "—"}</td>
                     <td className={"n " + signo(tr.pnl_origen)}>
-                      {LAB && tr.tipo === "dividendo" && editando?.clave === claveTrade(tr) ? (
+                      {tr.tipo === "dividendo" && editando?.clave === claveTrade(tr) ? (
                         <input type="text" inputMode="decimal" autoFocus value={editando.valor}
                                style={{ width: 90, textAlign: "right" }} aria-label={t("Importe neto cobrado", "Net amount collected")}
                                onChange={(e) => setEditando({ ...editando, valor: soloNum(e.target.value) })}
@@ -2138,7 +2135,7 @@ function PnlRealizado({ real, cartera, recargar, fciTrades, hayFci, conFci, setC
                                                    if (e.key === "Escape") setEditando(null); }}
                                onBlur={() => setEditando(null)} />
                       ) : <>{num(tr.pnl_origen, 2)} {tr.moneda}</>}
-                      {LAB && tr.tipo === "dividendo" && editando?.clave !== claveTrade(tr) && (
+                      {tr.tipo === "dividendo" && editando?.clave !== claveTrade(tr) && (
                         <button className="eliminar editar" title={t("Corregir el importe neto cobrado", "Correct the net amount collected")}
                                 onClick={() => setEditando({ clave: claveTrade(tr),
                                                              valor: String(tr.pnl_origen ?? "") })}>✎</button>)}</td>
@@ -2233,7 +2230,7 @@ function PnlRealizado({ real, cartera, recargar, fciTrades, hayFci, conFci, setC
               + `prorated over what was open.`)} {ganadores} {t("de", "out of")} {porTicker.length}{" "}
             {t("tickers cerraron en verde.", "tickers closed in the green.")}
           </div>)}
-          {detalle !== "fci" && LAB && (
+          {detalle !== "fci" && (
             <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginTop: 10 }}>
               <button className="btn" onClick={traerYahoo} disabled={yahoo?.yendo}>
                 {yahoo?.yendo ? t("Buscando dividendos…", "Looking up dividends…")
@@ -2250,14 +2247,14 @@ function PnlRealizado({ real, cartera, recargar, fciTrades, hayFci, conFci, setC
                         "No new dividends: the ones that were due are already loaded.")}
                 </span>)}
             </div>)}
-          {detalle !== "fci" && LAB && (
+          {detalle !== "fci" && (
             <div style={{ marginTop: 10 }}>
               <button className="btn" onClick={() => traerCocos(false)} disabled={cocosDiv?.yendo}>
                 {cocosDiv?.yendo ? t("Leyendo Cocos…", "Reading Cocos…")
                                  : t("Traer dividendos de Cocos", "Fetch dividends from Cocos")}</button>
               {cocosDiv && !cocosDiv.yendo && <DividendosCocos r={cocosDiv} aplicar={() => traerCocos(true)} />}
             </div>)}
-          {detalle !== "fci" && LAB && (
+          {detalle !== "fci" && (
             <div className="pie">
               {IDIOMA === "en" ? (<>
                 Yahoo gives the <b>gross</b> dividend per stock and its ex-dividend date; it's
@@ -5932,7 +5929,7 @@ function Carteras({ carteras, recargar, cartera, setCartera }) {
     setSel(n); setMsg(null);
     const m = carteras.find((x) => x.nombre === n);
     setPlazaFija(m?.mercado_fijado ? m.mercado : "");
-    setRet(LAB ? await api(`/api/carteras/${encodeURIComponent(n)}/retenciones`) : {});
+    setRet(await api(`/api/carteras/${encodeURIComponent(n)}/retenciones`));
     setRegistro(null);
     setFilas(await api(`/api/carteras/${encodeURIComponent(n)}`));
   };
@@ -5944,12 +5941,10 @@ function Carteras({ carteras, recargar, cartera, setCartera }) {
     const p = await api(`/api/carteras/${encodeURIComponent(sel)}/mercado`, {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ mercado: plazaFija || null }) });
-    if (LAB) {
-      const rr = await api(`/api/carteras/${encodeURIComponent(sel)}/retenciones`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(ret) });
-      if (rr.error) { setMsg({ mal: rr.error }); return; }
-    }
+    const rr = await api(`/api/carteras/${encodeURIComponent(sel)}/retenciones`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(ret) });
+    if (rr.error) { setMsg({ mal: rr.error }); return; }
     setMsg({ ok: t(`Guardadas ${r.guardadas} posiciones · se mide desde `
                  + `${MERCADOS[p.mercado || plazaActiva].nombre}`
                  + `${p.mercado_fijado ? "" : " (deducido de los activos)"}.`,
@@ -6071,7 +6066,7 @@ function Carteras({ carteras, recargar, cartera, setCartera }) {
               "It sets the currency for every number, the risk-free rate and the "
               + "index it opens with.")}
           </div>
-          {LAB && (<>
+          <>
             <div className="tabla-wrap" style={{ maxWidth: 520, margin: "10px 0 2px" }}><table>
               <thead><tr><th>{t("Retención", "Withholding")}</th><th className="n">{t("Acciones", "Stocks")}</th>
                 <th className="n">CEDEARs</th><th className="n">{t("Bonos", "Bonds")}</th></tr></thead>
@@ -6133,7 +6128,7 @@ function Carteras({ carteras, recargar, cartera, setCartera }) {
                   + "cerradas con ✎.", "means that dividend is recorded at gross: fix it in Closed positions with ✎.")}
               </div>
             </details>
-          </>)}
+          </>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "8px 0 12px" }}>
             <button className="btn primario" onClick={guardar}>{t("Guardar", "Save")}</button>
             <button className="btn" onClick={() => setFilas((f) => [...f, {
