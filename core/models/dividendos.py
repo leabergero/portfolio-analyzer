@@ -143,8 +143,8 @@ def estimar(lotes: list, pagos: dict, retenciones: dict, existentes: list = (),
     return salida
 
 
-def proponer(posiciones: list, realizadas: list, retenciones: dict) -> list:
-    """Arma los lotes de la cartera —abiertos y cerrados— y estima sus dividendos."""
+def _lotes(posiciones: list, realizadas: list) -> list:
+    """Los lotes de la cartera, abiertos y cerrados: quién tuvo qué y cuándo."""
     lotes = []
     for p in posiciones:
         lotes.append({"ticker": str(p["ticker"]).upper(), "buy_date": p.get("buy_date") or "",
@@ -154,6 +154,12 @@ def proponer(posiciones: list, realizadas: list, retenciones: dict) -> list:
             continue
         lotes.append({"ticker": t["ticker"].upper(), "buy_date": t["buy_date"],
                       "sell_date": t["sell_date"], "qty": t["qty"], "source": None})
+    return lotes
+
+
+def proponer(posiciones: list, realizadas: list, retenciones: dict) -> list:
+    """Arma los lotes de la cartera —abiertos y cerrados— y estima sus dividendos."""
+    lotes = _lotes(posiciones, realizadas)
 
     # Los bonos pagan renta, no dividendos, y yfinance no la tiene; un FCI no paga.
     clases, pagos = {}, {}
@@ -169,6 +175,78 @@ def proponer(posiciones: list, realizadas: list, retenciones: dict) -> list:
 
     existentes = [t for t in realizadas if t.get("tipo") == "dividendo"]
     return estimar([l for l in lotes if l["buy_date"]], pagos, retenciones, existentes)
+
+
+def _tenencia(lotes: list, ticker: str, dia: str) -> float:
+    return sum(float(l["qty"]) for l in lotes if l["ticker"] == ticker
+               and l["buy_date"] and l["buy_date"] < dia
+               and (not l["sell_date"] or l["sell_date"] >= dia))
+
+
+def del_broker(cobros: list, posiciones: list, realizadas: list, lote: str) -> dict:
+    """Los cobros que acreditó el broker, cruzados contra lo que la cartera tiene.
+
+    cobros  [{instrumento, fecha (de pago), moneda, importe neto}]
+
+    El broker da el instrumento (`AAPL`) y la plata, no la especie ni la
+    cantidad: las dos salen de la cartera, del papel que tenía en ese momento.
+    Sin la cantidad, `registro` no puede rearmar el bruto.
+
+    Contra lo ya cargado se aparea uno a uno, el más cercano primero: lo cargado
+    a mano suele llevar la fecha ex-dividendo, hasta un mes y pico antes del
+    pago (VALE: 34 días), y GGAL paga todos los meses —sin el uno a uno, un
+    mismo dividendo a mano taparía dos cobros—. Lo cargado a mano se respeta;
+    lo estimado de Yahoo se reemplaza por lo cobrado.
+
+    Devuelve nuevos, estimados (a quitar), ya_cargados y sin_tenencia.
+    """
+    lotes = _lotes(posiciones, realizadas)
+    previos = [t for t in realizadas if t.get("tipo") == "dividendo" and t.get("lote") != lote]
+    tickers = {l["ticker"] for l in lotes}
+
+    salida = {"nuevos": [], "estimados": [], "ya_cargados": [], "sin_tenencia": []}
+    candidatos = []
+    for c in cobros:
+        # Cobra quien tenía el papel al ex-dividendo, que cae antes del pago.
+        antes = (date.fromisoformat(c["fecha"]) - timedelta(days=30)).isoformat()
+        tenencia = max(((t, _tenencia(lotes, t, d)) for t in tickers
+                        if base_symbol(t) == c["instrumento"] for d in (c["fecha"], antes)),
+                       key=lambda x: x[1], default=(None, 0))
+        if not tenencia[1]:
+            salida["sin_tenencia"].append(c)
+            continue
+        c = {**c, "ticker": tenencia[0], "qty": tenencia[1]}
+        pago = date.fromisoformat(c["fecha"])
+        for i, t in enumerate(previos):
+            dias = (pago - date.fromisoformat(t["sell_date"])).days
+            if base_symbol(t["ticker"]) == c["instrumento"] and -3 <= dias <= 45:
+                candidatos.append((abs(dias), i, c))
+        candidatos.append((99, -1, c))          # centinela: el cobro sin pareja
+
+    usados, resueltos = set(), set()
+    for _, i, c in sorted(candidatos, key=lambda x: x[0]):
+        if id(c) in resueltos or (i >= 0 and i in usados):
+            continue
+        resueltos.add(id(c))
+        previo = previos[i] if i >= 0 else None
+        if previo is not None:
+            usados.add(i)
+        if previo is not None and not previo.get("estimado"):
+            salida["ya_cargados"].append({**c, "cargado": previo["pnl"],
+                                          "cargado_fecha": previo["sell_date"],
+                                          "cargado_ticker": previo["ticker"]})
+            continue
+        if previo is not None:
+            salida["estimados"].append(previo)
+        salida["nuevos"].append({
+            "ticker": c["ticker"], "tipo": "dividendo",
+            "buy_date": c["fecha"], "sell_date": c["fecha"],
+            "buy_price": 0.0, "sell_price": round(c["importe"] / c["qty"], 6),
+            "qty": round(c["qty"], 6), "buy_comm": 0.0, "sell_comm": 0.0,
+            "pnl": round(c["importe"], 4), "moneda": c["moneda"],
+            "notes": f"Cocos · {c['instrumento']} · neto acreditado",
+        })
+    return salida
 
 
 def registro(realizadas: list) -> list:

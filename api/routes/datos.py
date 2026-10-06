@@ -567,6 +567,38 @@ def cocos_importar_cerradas():
                     "tickers": sorted({x["ticker"] for x in van})})
 
 
+@bp.post("/cocos/dividendos")
+def cocos_dividendos():
+    """Los dividendos que acreditó el broker, contra los de ESTA cartera.
+
+    Sin `aplicar` sólo muestra qué pasaría. Con `aplicar`, entran los nuevos y
+    salen los estimados de Yahoo que un cobro real reemplaza; lo cargado a mano
+    no se toca.
+    """
+    r = cocos.dividendos()
+    if r.get("error"):
+        return jsonify(r), 502
+    cartera, error = _cartera_para(r.get("cuenta"))
+    if error:
+        return error
+    from core.models import dividendos
+    x = dividendos.del_broker(r["cobros"], store.cargar(cartera),
+                              store.cargar_realizado(cartera), cocos.LOTE_DIVIDENDOS)
+    res = {}
+    if (request.json or {}).get("aplicar"):
+        for t in x["estimados"]:
+            store.quitar_realizado(cartera, {"ticker": t["ticker"], "sell_date": t["sell_date"],
+                                             "lote": dividendos.LOTE})
+        res = store.agregar_realizado(cartera, x["nuevos"], lote=cocos.LOTE_DIVIDENDOS)
+        if r.get("cuenta"):
+            store.asociar_cuenta(r["cuenta"], cartera)
+    # Volver a traerlos reemplaza lo de la vez anterior: se avisa cuánto había.
+    antes = sum(1 for t in store.cargar_realizado(cartera)
+                if t.get("lote") == cocos.LOTE_DIVIDENDOS) if not res else 0
+    return jsonify({"ok": True, "cartera": cartera, **x, **res, "importados_antes": antes,
+                    "sin_papel": r["sin_papel"], "cortado": r["cortado"]})
+
+
 @bp.get("/cocos/fondos")
 def cocos_fondos():
     return jsonify(cocos.fondos_disponibles())

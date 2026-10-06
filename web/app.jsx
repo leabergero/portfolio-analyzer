@@ -1728,6 +1728,35 @@ function CalendarioRealizado({ real }) {
   );
 }
 
+// Lo que traería Cocos, separado en lo que entra, lo que reemplaza y lo que no.
+function DividendosCocos({ r, aplicar }) {
+  if (r.error) return <div className="pie">{r.error}</div>;
+  const plata = (x) => `${num(x.importe ?? x.pnl, 2)} ${x.moneda}`;
+  const distintos = r.ya_cargados.filter((x) => Math.abs(x.importe - x.cargado) > 0.01 * x.importe + 0.005);
+  if (r.aplicado) return (
+    <div className="pie">{r.agregados} {t("dividendos de Cocos en la cartera", "Cocos dividends in the portfolio")}
+      {r.estimados.length ? ` · ${r.estimados.length} ${t("estimados de Yahoo reemplazados", "Yahoo estimates replaced")}` : ""}.</div>);
+  return (
+    <div className="pie">
+      <b>{r.nuevos.length}</b> {r.nuevos.length === 1 ? t("nuevo", "new") : t("nuevos", "new")}
+      {r.nuevos.length > 0 && <>: {r.nuevos.map((x) => `${x.ticker} ${x.sell_date} ${plata(x)}`).join(" · ")}</>}.{" "}
+      {r.estimados.length > 0 && <>{t("Reemplazan", "They replace")} {r.estimados.length} {t("estimados de Yahoo.", "Yahoo estimates.")} </>}
+      {r.ya_cargados.length} {t("ya estaban cargados a mano y no se tocan", "were already loaded by hand and stay as they are")}
+      {distintos.length > 0 && <>; {t("con otro importe", "with a different amount")}:{" "}
+        {distintos.map((x) => `${x.ticker} ${x.fecha} Cocos ${plata(x)} vs ${num(x.cargado, 2)} ${t("cargado", "loaded")}`).join(" · ")}</>}.
+      {r.sin_tenencia.length > 0 && <> {t("Sin ese papel en la cartera", "Not held in this portfolio")}:{" "}
+        {r.sin_tenencia.map((x) => `${x.instrumento} ${x.fecha} ${plata(x)}`).join(" · ")}.</>}
+      {r.sin_papel.length > 0 && <> {r.sin_papel.length} {t("cobros viejos no dicen de qué papel son: van a mano.",
+                                                         "old payments don't say which stock they're from: load them by hand.")}</>}
+      {r.importados_antes > 0 && <> {t("Reemplaza los", "Replaces the")} {r.importados_antes} {t("traídos antes.", "fetched before.")}</>}
+      {(r.nuevos.length > 0 || r.importados_antes > 0) && (
+        <div style={{ marginTop: 8 }}>
+          <button className="btn" onClick={aplicar}>
+            {t(`Importar ${r.nuevos.length} a ${r.cartera}`, `Import ${r.nuevos.length} into ${r.cartera}`)}</button>
+        </div>)}
+    </div>);
+}
+
 function AltaDividendo({ cartera, recargar }) {
   const linea = (base) => ({ ticker: base?.ticker || "", fecha: "", importe: "",
                              qty: base?.qty || "", por_accion: base?.por_accion ?? true,
@@ -1917,6 +1946,16 @@ function PnlRealizado({ real, cartera, recargar, fciTrades, hayFci, conFci, setC
                         { method: "POST" });
     setYahoo(r);
     if (r.agregados) recargar();
+  };
+  // Dividendos que acreditó Cocos: primero se mira qué pasaría, después se aplica.
+  const [cocosDiv, setCocosDiv] = useState(null);
+  const traerCocos = async (aplicar) => {
+    setCocosDiv({ yendo: true });
+    const r = await api("/api/cocos/dividendos", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cartera, aplicar }) });
+    setCocosDiv({ ...r, aplicado: aplicar });
+    if (aplicar && r.ok) recargar();
   };
   const trades = real.trades || [];
   // Un FCI viaja con la marca de su lote: es un resultado ya cerrado como
@@ -2210,6 +2249,13 @@ function PnlRealizado({ real, cartera, recargar, fciTrades, hayFci, conFci, setC
                     : t("No hay dividendos nuevos: los que tocaban ya están cargados.",
                         "No new dividends: the ones that were due are already loaded.")}
                 </span>)}
+            </div>)}
+          {detalle !== "fci" && LAB && (
+            <div style={{ marginTop: 10 }}>
+              <button className="btn" onClick={() => traerCocos(false)} disabled={cocosDiv?.yendo}>
+                {cocosDiv?.yendo ? t("Leyendo Cocos…", "Reading Cocos…")
+                                 : t("Traer dividendos de Cocos", "Fetch dividends from Cocos")}</button>
+              {cocosDiv && !cocosDiv.yendo && <DividendosCocos r={cocosDiv} aplicar={() => traerCocos(true)} />}
             </div>)}
           {detalle !== "fci" && LAB && (
             <div className="pie">

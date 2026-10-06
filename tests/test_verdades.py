@@ -733,6 +733,35 @@ def test_la_moneda_del_dividendo_manda_sobre_la_del_ticker():
         f"declarado en pesos tiene que pasar por el MEP: {en_pesos} vs {sin_moneda}"
 
 
+def test_un_dividendo_cargado_a_mano_tapa_un_solo_cobro_del_broker():
+    """GGAL paga todos los meses y lo cargado a mano lleva la fecha ex-dividendo.
+
+    Con una ventana de un mes y sin aparear uno a uno, el dividendo a mano de
+    agosto tapaba también el cobro de septiembre (29 días después) y ese cobro
+    no entraba nunca. Lo estimado de Yahoo, en cambio, cede ante lo cobrado.
+    """
+    del_broker = require("core.models.dividendos", "del_broker")
+    pos = [{"ticker": "GGAL.BA", "buy_date": "2025-01-02", "qty": 30},
+           {"ticker": "AAPLD.BA", "buy_date": "2025-01-02", "qty": 54}]
+    div = lambda tk, f, pnl, **x: {"ticker": tk, "tipo": "dividendo", "buy_date": f,  # noqa: E731
+                                   "sell_date": f, "pnl": pnl, **x}
+    real = [div("GGAL.BA", "2025-08-12", 644.88),
+            div("AAPLD.BA", "2025-08-11", 0.40, estimado=True, lote="yfinance:dividendos")]
+    cobros = [{"instrumento": "GGAL", "fecha": "2025-08-12", "moneda": "ARS", "importe": 644.88},
+              {"instrumento": "GGAL", "fecha": "2025-09-10", "moneda": "ARS", "importe": 610.35},
+              {"instrumento": "AAPL", "fecha": "2025-08-18", "moneda": "USD", "importe": 0.45},
+              {"instrumento": "KO", "fecha": "2025-08-18", "moneda": "USD", "importe": 1.0}]
+    x = del_broker(cobros, pos, real, "cocos-dividendos")
+
+    assert [c["fecha"] for c in x["ya_cargados"]] == ["2025-08-12"], "agosto ya estaba"
+    assert sorted(n["sell_date"] for n in x["nuevos"]) == ["2025-08-18", "2025-09-10"], \
+        "septiembre entra, y el cobro real de AAPL reemplaza al estimado"
+    assert [e["ticker"] for e in x["estimados"]] == ["AAPLD.BA"]
+    aapl = next(n for n in x["nuevos"] if n["ticker"] == "AAPLD.BA")
+    assert casi(aapl["qty"], 54) and aapl["moneda"] == "USD", "la cantidad sale de la cartera"
+    assert [c["instrumento"] for c in x["sin_tenencia"]] == ["KO"], "lo que la cartera no tiene, no entra"
+
+
 def test_el_csv_propio_lleva_dividendos_y_cerradas():
     """Exportar es respaldar TODO: si no, cada reimportación pierde lo cargado a mano.
 

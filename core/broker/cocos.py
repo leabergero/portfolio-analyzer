@@ -854,6 +854,44 @@ def _resultados_realizados(movs: list) -> dict:
 #      en que la compra y la venta son las dos en pesos.
 
 LOTE_OPERACIONES = "cocos-ops"
+LOTE_DIVIDENDOS = "cocos-dividendos"
+
+
+def dividendos():
+    """Los dividendos en efectivo que acreditó el broker, netos de retenciones.
+
+    Cocos los anota como DIVIDEND con el papel en `issuer` —no en `ticker`, que
+    dice `EXT` cuando el cobro es en dólares cable—. No entran:
+
+      · los que traen títulos en `ticker` (dividendo en acciones, split): ya los
+        reparte `operaciones()`;
+      · los "Cargos", negativos, que el broker cuelga del mismo tipo;
+      · los que no dicen de qué papel son (hasta 2025 el broker no lo informaba
+        en los cobros en dólares): se cuentan aparte para cargarlos a mano.
+
+    Dos cobros del mismo papel el mismo día son un solo dividendo (VALE pagó
+    0,85 + 1,51 el 2026-03-12).
+    """
+    hist = _historial_completo()
+    if hist.get("error"):
+        return hist
+    juntos, sin_papel = {}, []
+    for m in hist["movimientos"]:
+        importe = m.get("amount") or 0
+        if (m.get("movementType") != "DIVIDEND" or m.get("labelConcept") != "Dividendos"
+                or importe <= 0 or (m.get("ticker") or "EXT") != "EXT"):
+            continue
+        moneda = "ARS" if m.get("currency") == "ARS" else "USD"
+        instrumento = ((m.get("issuer") or {}).get("ticker") or "").upper()
+        if not instrumento:
+            sin_papel.append({"fecha": m.get("fecha"), "moneda": moneda, "importe": importe})
+            continue
+        clave = (instrumento, m.get("fecha"), moneda)
+        juntos[clave] = juntos.get(clave, 0) + importe
+    cobros = [{"instrumento": i, "fecha": f, "moneda": mon, "importe": round(v, 4)}
+              for (i, f, mon), v in sorted(juntos.items(), key=lambda x: x[0][1])]
+    return {"cobros": cobros, "sin_papel": sin_papel, "cortado": hist["cortado"],
+            "cuenta": _est().get("cuenta")}
 
 
 def clave_operacion(x: dict) -> str:
