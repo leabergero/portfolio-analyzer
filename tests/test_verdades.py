@@ -821,6 +821,28 @@ def test_el_costo_de_un_fci_en_dolares_es_lo_suscripto():
     assert casi(lote["buy_price"] * lote["qty"], 13879.0, 0.01), "el costo es lo que pusiste"
 
 
+def test_un_fci_en_dolares_vale_su_cuotaparte_en_dolares():
+    """Un fondo en dólares es plata líquida: su valor tiene que ser exacto.
+
+    Iba a pesos con el MEP de Cocos y volvía con el de la app: COCOUSDPA de
+    KARIN quedaba hasta 0,8 % corrido de lo que el broker tiene para pagar.
+    La cuotaparte en dólares que publica el fondo va tal cual, sin MEP.
+    """
+    from core.broker import cocos
+    from core.data import cache, mep
+    _fci_usd = require("core.data.sources", "_fci_usd")
+    antes = cocos.cuotaparte_fci, mep.a_usd, cache.guardar_precios
+    try:
+        cocos.cuotaparte_fci = lambda t: ("2026-10-05", 1.059726, "USD")
+        mep.a_usd = lambda *a, **k: (_ for _ in ()).throw(AssertionError("no pasa por el MEP"))
+        cache.guardar_precios = lambda *a, **k: None
+        serie = _fci_usd("ZZPRUEBAUSD")
+    finally:
+        cocos.cuotaparte_fci, mep.a_usd, cache.guardar_precios = antes
+    assert casi(float(serie.iloc[-1]), 1.059726), "la cuotaparte publicada, tal cual"
+    assert str(serie.index[-1].date()) == "2026-10-05", "con la fecha del fondo"
+
+
 def test_el_csv_propio_lleva_dividendos_y_cerradas():
     """Exportar es respaldar TODO: si no, cada reimportación pierde lo cargado a mano.
 

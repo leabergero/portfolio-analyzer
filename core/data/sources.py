@@ -363,19 +363,37 @@ def _fci_usd(ticker: str) -> pd.Series:
     from core.data import mep as mep_mod
 
     hoy = date.today()
-    # Cocos informa la cuotaparte en pesos, también la de los fondos en dólares.
-    ars = cocos.precio_fci(ticker)
-    # Un FCI se valúa a T-1: la cuotaparte que publica el broker es la del cierre
-    # anterior, no la de hoy. Fecharla hoy la convertía con el MEP de hoy —pesos
-    # de un día, tipo de cambio de otro— y dejaba el punto cacheado un día
-    # adelantado, que es el mismo error que traía la app con los cierres.
-    fecha = _ultima_rueda((hoy - timedelta(days=1)).isoformat())
+    punto = lambda v, f: pd.DataFrame({"Close": [float(v)]}, index=[pd.Timestamp(f)])  # noqa: E731
+    # Un fondo en dólares se valúa con la cuotaparte en dólares que publica
+    # Cocos, tal cual: es plata líquida con la que se paga, tiene que dar
+    # exacto. Antes iba a pesos con el MEP de Cocos y volvía con el de la app,
+    # y COCOUSDPA de KARIN quedaba 0,3-0,8 % corrido.
+    clave_usd = f"{ticker}:USD"
+    oficial = cocos.cuotaparte_fci(ticker)
+    if oficial and oficial[2] == "USD":
+        cache.guardar_precios(clave_usd, punto(oficial[1], oficial[0]))
+        return pd.Series([oficial[1]], index=[pd.Timestamp(oficial[0])])
+
+    if oficial:
+        # En pesos, con la fecha que publica el fondo y no una supuesta.
+        ars, fecha = oficial[1], date.fromisoformat(oficial[0])
+    else:
+        # Cocos informa la cuotaparte en pesos, también la de los fondos en dólares.
+        ars = cocos.precio_fci(ticker)
+        # Un FCI se valúa a T-1: la cuotaparte que publica el broker es la del
+        # cierre anterior, no la de hoy. Fecharla hoy la convertía con el MEP de
+        # hoy —pesos de un día, tipo de cambio de otro— y dejaba el punto
+        # cacheado un día adelantado, el mismo error que traía la app con los cierres.
+        fecha = _ultima_rueda((hoy - timedelta(days=1)).isoformat())
 
     if ars:
-        cache.guardar_precios(ticker, pd.DataFrame({"Close": [float(ars)]},
-                                                   index=[pd.Timestamp(fecha)]))
+        cache.guardar_precios(ticker, punto(ars, fecha))
     else:
-        # Sin broker: la última que se llegó a ver, con su fecha real.
+        # Sin broker: la última vista. La de un fondo en dólares, en dólares.
+        df = cache.leer_precios(clave_usd, "1900-01-01", hoy.isoformat())
+        if "Close" in df.columns and not df["Close"].dropna().empty:
+            s = df["Close"].dropna()
+            return pd.Series([float(s.iloc[-1])], index=[s.index[-1]])
         df = cache.leer_precios(ticker, "1900-01-01", hoy.isoformat())
         s = df["Close"].dropna() if "Close" in df.columns else pd.Series(dtype=float)
         if s.empty:

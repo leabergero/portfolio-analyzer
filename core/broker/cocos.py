@@ -26,7 +26,7 @@ from datetime import date
 import pandas as pd
 
 from core.broker import _cocos_patch, sesion, vault
-from core.data import mep
+from core.data import cache, mep
 
 # ── Uno por request, no uno por proceso ───────────────────────────────────────
 # El cliente del broker y su estado eran globales de módulo, y estuvo bien
@@ -711,12 +711,14 @@ def fci_tracking():
         # El broker cotiza en pesos también los fondos en dólares; las
         # suscripciones y rescates de este bloque están en la moneda del fondo,
         # así que el precio tiene que venir a la misma moneda antes de valuar.
-        # Se convierte con el MEP de la app, igual que el resto de la cartera.
-        # Cocos armó el precio con el suyo, y está bien que así sea: la
-        # diferencia entre fuentes (~0,3 %) es una decisión tomada, no una
-        # deuda — no cablear `get_dolar_mep_info()` para emparejarlas.
+        # Un fondo en dólares es plata líquida y tiene que dar exacto: va la
+        # cuotaparte en dólares que publica el fondo (decidido 2026-10-06; antes
+        # se aceptaba el ~0,3 % de ir y volver por pesos con dos MEP distintos).
+        # Sin ella, pesos al MEP de la app.
         if precio and f["moneda"] and f["moneda"] != "ARS":
-            precio = mep.a_usd(precio, hoy) or 0
+            oficial = cuotaparte_fci(tk)
+            precio = (oficial[1] if oficial and oficial[2] == f["moneda"]
+                      else mep.a_usd(precio, hoy) or 0)
         valor = (ten.get("cantidad") or 0) * precio
         resultado = valor + f["rescatado"] - f["suscrito"]
         f.update({
@@ -1063,6 +1065,38 @@ def _control_posiciones(abiertos: list) -> list:
 
 
 # ── Participaciones en FCI, como lotes de cartera ─────────────────────────────
+
+def cuotaparte_fci(ticker: str):
+    """(fecha, cuotaparte, moneda) que publica Cocos, en la moneda del fondo.
+
+    Es la cuotaparte con la que Cocos valúa la tenencia: la de un fondo en
+    dólares viene en dólares, sin pasar por pesos ni por ningún MEP. Sale del
+    historial del fondo (cada 1000 cuotapartes, como todo lo de FCI) y no hace
+    falta tener el fondo en la cuenta. None si no es un fondo de Cocos o no hay
+    sesión: queda la vía de `precio_fci`.
+    """
+    if _c() is None:
+        return None
+    sesion = _c().client.session
+    try:
+        # Ticker → (securityId, moneda). No es dato de nadie: se guarda un día.
+        fondos = cache.leer_respuesta("cocos:fci:ids", 24)
+        if not fondos:
+            fondos = {f["ticker"]: [f["securityId"], f.get("currency")] for f in
+                      sesion.get("https://api.cocos.capital/api/fci/cocos-funds",
+                                 timeout=20).json()}
+            cache.guardar_respuesta("cocos:fci:ids", fondos)
+        sid = (fondos.get(ticker.upper()) or [None])[0]
+        if not sid:
+            return None
+        h = sesion.get(f"https://api.cocos.capital/api/fci/{sid}/history",
+                       params={"period": "15D"}, timeout=20).json()
+        ultimo = h["data"][-1]
+        return (ultimo["date"], float(ultimo["value"]) / _FACTOR_FCI,
+                (h.get("displayCurrency") or fondos[ticker.upper()][1] or "ARS").upper())
+    except Exception:
+        return None
+
 
 def precio_fci(ticker: str):
     """Última cuotaparte de un FCI, en pesos (que es como la informa Cocos).
