@@ -799,6 +799,28 @@ def test_la_renta_de_un_bono_no_se_divide_por_100():
     assert casi(pnl_realizado([renta])["total_usd"], 331.84), "la amortización entra entera"
 
 
+def test_el_costo_de_un_fci_en_dolares_es_lo_suscripto():
+    """Cocos da el PPC de un fondo en dólares en pesos, con el MEP de cada aporte.
+
+    Pasarlo a dólares con el MEP de hoy achicaba el costo un 10 % y la
+    ganancia de COCOUSDPA (KARIN) salía +1.848 USD en vez de +555. Sin
+    rescates, el costo es lo suscripto en dólares sobre las cuotapartes.
+    """
+    from core.broker import cocos
+    tenencias_fci = require("core.broker.cocos", "tenencias_fci")
+    antes = cocos.posiciones, cocos.fci_tracking
+    try:
+        cocos.posiciones = lambda: [{"instrument_type": "FCI", "short_ticker": "COCOUSDPA",
+                                     "quantity": 13548.46528813, "average_price": 1427.0}]
+        cocos.fci_tracking = lambda: {"fci": [{"ticker": "COCOUSDPA", "moneda": "USD",
+                                               "suscrito": 13879.0, "n_resc": 0,
+                                               "hasta": "2026-10-06"}]}
+        lote = tenencias_fci()["lotes"][0]
+    finally:
+        cocos.posiciones, cocos.fci_tracking = antes
+    assert casi(lote["buy_price"] * lote["qty"], 13879.0, 0.01), "el costo es lo que pusiste"
+
+
 def test_el_csv_propio_lleva_dividendos_y_cerradas():
     """Exportar es respaldar TODO: si no, cada reimportación pierde lo cargado a mano.
 

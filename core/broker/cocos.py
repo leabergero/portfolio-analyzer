@@ -1116,7 +1116,20 @@ def tenencias_fci():
         f = fondos.get(tk, {})
         moneda = (f.get("moneda") or "ARS").upper()
         fecha = f.get("hasta") or date.today().isoformat()
-        precio = ppc if moneda == "ARS" else mep.a_usd(ppc, fecha)
+        if moneda == "ARS":
+            precio = ppc
+        elif f.get("suscrito") and not f.get("n_resc"):
+            # El PPC de un fondo en dólares viene en pesos, armado con el MEP de
+            # cada suscripción; dividirlo por el de hoy achica el costo lo que
+            # subió el dólar desde entonces. COCOUSDPA de KARIN: 0,9205 en vez
+            # de 1,0244 por cuotaparte, y +1.848 USD de resultado contra los
+            # +555 que da el broker. Sin rescates, lo suscripto en dólares es
+            # el costo exacto.
+            precio = f["suscrito"] / cantidad
+        else:
+            # ponytail: con rescates no se sabe qué cuotapartes salieron sin las
+            # cantidades de cada movimiento; queda la conversión aproximada.
+            precio = mep.a_usd(ppc, fecha)
         if not precio:
             continue
         lotes.append({
