@@ -62,9 +62,12 @@ EVENTOS = [
     ("2023-12-20", "AR", "DNU de desregulación"),
     ("2024-06-28", "AR", "Se aprueba la Ley Bases"),
     ("2024-07-15", "AR", "Fin del dólar blend para exportadores"),
-    ("2025-04-11", "AR", "Nuevo acuerdo con el FMI; se flexibiliza el cepo"),
+    ("2024-07-31", "MUNDO", "El Banco de Japón sube la tasa; se desarma el carry trade"),
     ("2025-04-02", "MUNDO", "Aranceles generalizados de EE.UU."),
+    ("2025-04-11", "AR", "Nuevo acuerdo con el FMI; se flexibiliza el cepo"),
     ("2026-06-13", "MUNDO", "Escalada Irán–Israel; salta el petróleo"),
+    ("2026-09-16", "MUNDO", "La Fed vuelve a subir tasas, a 3,75–4 %"),
+    ("2026-09-18", "MUNDO", "El Banco de Japón sube la tasa a 1,25 %, máximo desde 1995"),
 ]
 
 

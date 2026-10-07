@@ -272,7 +272,7 @@ const LIBRES_EN = {
 const libre = (s) => (s == null ? s : t(s, LIBRES_EN[s] || s));
 
 // EVENTOS (regimenes.py) y ESCENARIOS de stress-test (risk.py): catálogos
-// fijos y acotados —28 eventos macro, 8 crisis reales—, no texto generado por
+// fijos y acotados —32 eventos macro, 10 crisis reales—, no texto generado por
 // usuario. Mismo criterio que LIBRES_EN: diccionario exacto, cae a español
 // si el backend agrega uno nuevo que todavía no está acá.
 const EVENTOS_EN = {
@@ -305,6 +305,9 @@ const EVENTOS_EN = {
   "Nuevo acuerdo con el FMI; se flexibiliza el cepo": "New IMF agreement; capital controls eased",
   "Aranceles generalizados de EE.UU.": "Sweeping US tariffs",
   "Escalada Irán–Israel; salta el petróleo": "Iran–Israel escalation; oil spikes",
+  "El Banco de Japón sube la tasa; se desarma el carry trade": "The Bank of Japan raises rates; the carry trade unwinds",
+  "La Fed vuelve a subir tasas, a 3,75–4 %": "The Fed raises rates again, to 3.75–4 %",
+  "El Banco de Japón sube la tasa a 1,25 %, máximo desde 1995": "The Bank of Japan raises rates to 1.25 %, highest since 1995",
 };
 const eventoDescripcion = (s) => (s == null ? s : t(s, EVENTOS_EN[s] || s));
 const ALCANCE_EN = { AR: "AR", MUNDO: "WORLD" };
@@ -323,6 +326,11 @@ const ESCENARIOS_EN = {
   "Suba agresiva de tasas; caen los bonos emergentes": "Aggressive rate hikes; emerging bonds fall",
   "Devaluación del 54 %; los bonos en dólares suben": "54 % devaluation; dollar bonds rise",
   "Israel ataca Irán y amenaza el estrecho: crudo +20 %": "Israel strikes Iran and threatens the strait: crude +20 %",
+  "Suba del Banco de Japón 2024": "Bank of Japan hike 2024", "Suba de la Fed 2026": "Fed hike 2026",
+  "Sube la tasa y se desarma el carry trade del yen: Nikkei −12 % en un día":
+    "Rates go up and the yen carry trade unwinds: Nikkei −12 % in one day",
+  "Primera suba desde 2023, a 3,75–4 %; Japón sube a 1,25 % dos días después":
+    "First hike since 2023, to 3.75–4 %; Japan hikes to 1.25 % two days later",
 };
 const escenarioLabel = (s) => (s == null ? s : t(s, ESCENARIOS_EN[s] || s));
 
@@ -3819,7 +3827,12 @@ function RiesgoActivos({ cartera }) {
 function RiesgoEvolucion({ cartera }) {
   const c = colores();
   const [d, setD] = useState(null);
-  useEffect(() => { setD(null); api(`/api/riesgo/${encodeURIComponent(cartera)}/rolling`).then(setD); }, [cartera]);
+  const [activo, setActivo] = useState("");
+  useEffect(() => { setActivo(""); }, [cartera]);
+  useEffect(() => {
+    setD(null);
+    api(`/api/riesgo/${encodeURIComponent(cartera)}/rolling?activo=${encodeURIComponent(activo)}`).then(setD);
+  }, [cartera, activo]);
   if (!d) return <div className="cargando">{t("Calculando la ventana móvil…", "Calculating the rolling window…")}</div>;
   if (d.error) return <div className="aviso mal">{d.error}</div>;
 
@@ -3836,7 +3849,12 @@ function RiesgoEvolucion({ cartera }) {
   return (
     <>
       <div className="panel">
-        <h3>{t("Pérdida en un día malo, a lo largo del tiempo", "Loss on a bad day, over time")}</h3>
+        <h3 style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          {t("Pérdida en un día malo, a lo largo del tiempo", "Loss on a bad day, over time")}
+          <select value={activo} onChange={(e) => setActivo(e.target.value)} style={{ marginLeft: "auto" }}>
+            <option value="">{t("Toda la cartera", "Whole portfolio")}</option>
+            {(d.activos || []).map((a) => <option key={a} value={a}>{a}</option>)}
+          </select></h3>
         <Grafico alto={400}
           datos={[
             { type: "scatter", mode: "lines", name: t("día malo (VaR 95 %)", "bad day (VaR 95 %)"),
@@ -3885,7 +3903,7 @@ function RiesgoEvolucion({ cartera }) {
             <th className="n">{t("Día malo por entonces", "Bad day back then")}</th></tr></thead>
           <tbody>{ev.slice().reverse().map((e, i) => (
             <tr key={i}><td className="mono">{e.fecha}</td>
-              <td><span className="chip">{alcanceLabel(e.alcance)}</span></td><td>{eventoDescripcion(e.descripcion)}</td>
+              <td><span className="chip" style={{ color: e.alcance === "AR" ? c.series[3] : c.series[4] }}>{alcanceLabel(e.alcance)}</span></td><td>{eventoDescripcion(e.descripcion)}</td>
               <td className="n neg">{pct(cercano(e.fecha))}</td></tr>))}</tbody>
         </table></div>
       </div>
@@ -5299,7 +5317,7 @@ function Regimenes({ d, cartera }) {
             <th>{t("Evento", "Event")}</th></tr></thead>
           <tbody>{(d.eventos || []).slice().reverse().map((e, i) => (
             <tr key={i}><td className="mono">{e.fecha}</td>
-              <td><span className="chip">{alcanceLabel(e.alcance)}</span></td><td>{eventoDescripcion(e.descripcion)}</td></tr>))}</tbody>
+              <td><span className="chip" style={{ color: e.alcance === "AR" ? c.series[3] : c.series[4] }}>{alcanceLabel(e.alcance)}</span></td><td>{eventoDescripcion(e.descripcion)}</td></tr>))}</tbody>
         </table></div>
         <div className="pie">{d.nota_eventos}</div>
       </div>

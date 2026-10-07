@@ -106,7 +106,8 @@ def riesgo_activos(nombre):
 @bp.get("/riesgo/<nombre>/rolling")
 def riesgo_rolling(nombre):
     """VaR en ventana móvil con los eventos macro superpuestos."""
-    return _simple(nombre, risk.var_rolling, request.args.get("ventana", 21, type=int))
+    return _simple(nombre, risk.var_rolling, request.args.get("ventana", 21, type=int),
+                   request.args.get("activo"))
 
 
 @bp.get("/riesgo/<nombre>/cambiario")

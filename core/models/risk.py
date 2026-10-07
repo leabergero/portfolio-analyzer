@@ -343,6 +343,10 @@ ESCENARIOS = [
      "descripcion": "Devaluación del 54 %; los bonos en dólares suben"},
     {"nombre": "Tensión en Ormuz", "desde": "2025-06-13", "hasta": "2025-06-24",
      "descripcion": "Israel ataca Irán y amenaza el estrecho: crudo +20 %"},
+    {"nombre": "Suba del Banco de Japón 2024", "desde": "2024-07-30", "hasta": "2024-08-05",
+     "descripcion": "Sube la tasa y se desarma el carry trade del yen: Nikkei −12 % en un día"},
+    {"nombre": "Suba de la Fed 2026", "desde": "2026-09-15", "hasta": "2026-09-30",
+     "descripcion": "Primera suba desde 2023, a 3,75–4 %; Japón sube a 1,25 % dos días después"},
 ]
 
 
@@ -517,12 +521,13 @@ def por_activo(posiciones, benchmark: str = None) -> dict:
 
 # ── VaR rolling ───────────────────────────────────────────────────────────────
 
-def var_rolling(posiciones, ventana: int = 21) -> dict:
+def var_rolling(posiciones, ventana: int = 21, activo: str = None) -> dict:
     """VaR y CVaR 95 % en ventana móvil, con los eventos macro superpuestos.
 
     Un VaR único resume toda la historia en un número y esconde que el riesgo
     de la cartera cambió: la serie muestra cuándo se disparó y —con el
-    calendario al lado— qué estaba pasando.
+    calendario al lado— qué estaba pasando. Con `activo`, la serie es la de
+    ese papel solo, para ver si el pico de la cartera vino de él.
     """
     from core.models.portfolio import matriz_retornos, value_weights
     from core.models.regimenes import EVENTOS
@@ -537,6 +542,10 @@ def var_rolling(posiciones, ventana: int = 21) -> dict:
     valor_total = sum(float(p.get("qty", 0)) * precios[t]
                       for p in posiciones
                       for t in [str(p["ticker"]).upper()] if t in precios)
+    activo = (activo or "").upper()
+    if activo in tickers:
+        cartera = ret_df[activo].to_numpy()
+        valor_total *= float(w[tickers.index(activo)])
 
     serie = []
     for i in range(ventana, len(cartera)):
@@ -552,7 +561,8 @@ def var_rolling(posiciones, ventana: int = 21) -> dict:
 
     desde, hasta = serie[0]["fecha"], serie[-1]["fecha"]
     return {
-        "serie": serie, "ventana_ruedas": ventana,
+        "serie": serie, "ventana_ruedas": ventana, "activos": tickers,
+        "activo": activo if activo in tickers else None,
         "valor_total": round(valor_total, 2),
         "eventos": [{"fecha": f, "alcance": a, "descripcion": d}
                     for f, a, d in EVENTOS if desde <= f <= hasta],
