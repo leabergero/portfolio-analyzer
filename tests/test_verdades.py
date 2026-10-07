@@ -754,7 +754,7 @@ def test_un_dividendo_cargado_a_mano_tapa_un_solo_cobro_del_broker():
               {"instrumento": "GGAL", "fecha": "2025-09-10", "moneda": "ARS", "importe": 610.35},
               {"instrumento": "AAPL", "fecha": "2025-08-18", "moneda": "USD", "importe": 0.45},
               {"instrumento": "KO", "fecha": "2025-08-18", "moneda": "USD", "importe": 1.0}]
-    x = del_broker(cobros, pos, real, "cocos-dividendos")
+    x = del_broker(cobros, pos, real)
 
     assert [c["fecha"] for c in x["ya_cargados"]] == ["2025-08-12"], "agosto ya estaba"
     assert sorted(n["sell_date"] for n in x["nuevos"]) == ["2025-08-18", "2025-09-10"], \
@@ -763,6 +763,13 @@ def test_un_dividendo_cargado_a_mano_tapa_un_solo_cobro_del_broker():
     aapl = next(n for n in x["nuevos"] if n["ticker"] == "AAPLD.BA")
     assert casi(aapl["qty"], 54) and aapl["moneda"] == "USD", "la cantidad sale de la cartera"
     assert [c["instrumento"] for c in x["sin_tenencia"]] == ["KO"], "lo que la cartera no tiene, no entra"
+
+    # Una segunda importación: lo traído de Cocos la vez anterior ya está en la
+    # cartera y no se vuelve a ofrecer para tildar.
+    real += [dict(n, lote="cocos-dividendos") for n in x["nuevos"]]
+    y = del_broker(cobros, pos, real)
+    assert y["nuevos"] == [], "nada de lo que ya está se puede volver a importar"
+    assert len(y["ya_cargados"]) == 3
 
 
 def test_la_x_de_una_cerrada_borra_esa_y_solo_esa():

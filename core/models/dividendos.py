@@ -183,7 +183,7 @@ def _tenencia(lotes: list, ticker: str, dia: str) -> float:
                and (not l["sell_date"] or l["sell_date"] >= dia))
 
 
-def del_broker(cobros: list, posiciones: list, realizadas: list, lote: str) -> dict:
+def del_broker(cobros: list, posiciones: list, realizadas: list) -> dict:
     """Los cobros que acreditó el broker, cruzados contra lo que la cartera tiene.
 
     cobros  [{instrumento, fecha (de pago), moneda, importe neto}]
@@ -195,13 +195,14 @@ def del_broker(cobros: list, posiciones: list, realizadas: list, lote: str) -> d
     Contra lo ya cargado se aparea uno a uno, el más cercano primero: lo cargado
     a mano suele llevar la fecha ex-dividendo, hasta un mes y pico antes del
     pago (VALE: 34 días), y GGAL paga todos los meses —sin el uno a uno, un
-    mismo dividendo a mano taparía dos cobros—. Lo cargado a mano se respeta;
-    lo estimado de Yahoo se reemplaza por lo cobrado.
+    mismo dividendo a mano taparía dos cobros—. Lo que ya está en la cartera
+    —a mano o traído antes de Cocos— se respeta y no se vuelve a ofrecer; lo
+    estimado de Yahoo se reemplaza por lo cobrado.
 
     Devuelve nuevos, estimados (a quitar), ya_cargados y sin_tenencia.
     """
     lotes = _lotes(posiciones, realizadas)
-    previos = [t for t in realizadas if t.get("tipo") == "dividendo" and t.get("lote") != lote]
+    previos = [t for t in realizadas if t.get("tipo") == "dividendo"]
     tickers = {l["ticker"] for l in lotes}
 
     salida = {"nuevos": [], "estimados": [], "ya_cargados": [], "sin_tenencia": []}
@@ -237,7 +238,8 @@ def del_broker(cobros: list, posiciones: list, realizadas: list, lote: str) -> d
                                           "cargado_ticker": previo["ticker"]})
             continue
         if previo is not None:
-            salida["estimados"].append(previo)
+            # `por`: el cobro que lo reemplaza, para quitarlo sólo si ese se importa.
+            salida["estimados"].append({**previo, "por": f"{c['ticker']}|{c['fecha']}"})
         salida["nuevos"].append({
             "ticker": c["ticker"], "tipo": "dividendo",
             "buy_date": c["fecha"], "sell_date": c["fecha"],

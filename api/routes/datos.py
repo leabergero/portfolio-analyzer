@@ -571,9 +571,10 @@ def cocos_importar_cerradas():
 def cocos_dividendos():
     """Los dividendos que acreditó el broker, contra los de ESTA cartera.
 
-    Sin `aplicar` sólo muestra qué pasaría. Con `aplicar`, entran los nuevos y
-    salen los estimados de Yahoo que un cobro real reemplaza; lo cargado a mano
-    no se toca.
+    Sin `aplicar` sólo muestra qué pasaría. Con `aplicar`, entran los nuevos
+    elegidos en `solo` (claves de `cocos.clave_operacion`; sin `solo`, todos) y
+    salen los estimados de Yahoo que esos reemplazan. Lo que ya está en la
+    cartera, a mano o traído antes, no se ofrece ni se toca.
     """
     r = cocos.dividendos()
     if r.get("error"):
@@ -582,20 +583,26 @@ def cocos_dividendos():
     if error:
         return error
     from core.models import dividendos
-    x = dividendos.del_broker(r["cobros"], store.cargar(cartera),
-                              store.cargar_realizado(cartera), cocos.LOTE_DIVIDENDOS)
+    x = dividendos.del_broker(r["cobros"], store.cargar(cartera), store.cargar_realizado(cartera))
+    for n in x["nuevos"]:
+        n["clave"] = cocos.clave_operacion(n)
     res = {}
-    if (request.json or {}).get("aplicar"):
+    cuerpo = request.json or {}
+    if cuerpo.get("aplicar"):
+        solo = cuerpo.get("solo")
+        van = [n for n in x["nuevos"] if solo is None or n["clave"] in set(solo)]
+        elegidos = {f"{n['ticker']}|{n['sell_date']}" for n in van}
         for t in x["estimados"]:
-            store.quitar_realizado(cartera, {"ticker": t["ticker"], "sell_date": t["sell_date"],
-                                             "lote": dividendos.LOTE})
-        res = store.agregar_realizado(cartera, x["nuevos"], lote=cocos.LOTE_DIVIDENDOS)
+            if t["por"] in elegidos:
+                store.quitar_realizado(cartera, {"ticker": t["ticker"], "sell_date": t["sell_date"],
+                                                 "lote": dividendos.LOTE})
+        x["estimados"] = [t for t in x["estimados"] if t["por"] in elegidos]
+        # Se suman sin pisar el lote: lo traído antes y lo que no se eligió quedan como están.
+        res = store.agregar_realizado(cartera, [{k: v for k, v in n.items() if k != "clave"}
+                                                | {"lote": cocos.LOTE_DIVIDENDOS} for n in van])
         if r.get("cuenta"):
             store.asociar_cuenta(r["cuenta"], cartera)
-    # Volver a traerlos reemplaza lo de la vez anterior: se avisa cuánto había.
-    antes = sum(1 for t in store.cargar_realizado(cartera)
-                if t.get("lote") == cocos.LOTE_DIVIDENDOS) if not res else 0
-    return jsonify({"ok": True, "cartera": cartera, **x, **res, "importados_antes": antes,
+    return jsonify({"ok": True, "cartera": cartera, **x, **res,
                     "sin_papel": r["sin_papel"], "cortado": r["cortado"]})
 
 
@@ -934,10 +941,40 @@ def _inviu_rentas() -> dict:
     return {"movimientos": salida}
 
 
+def _inviu_rentas_en(cartera: str, movimientos: list) -> list:
+    """Marca `ya` en las rentas y amortizaciones que la cartera ya tiene.
+
+    Cuenta lo traído antes y lo cargado a mano como dividendo: mismo papel y
+    hasta 5 días de diferencia, uno a uno, para que dos cupones del mismo bono
+    no se tapen con un solo registro.
+    """
+    from datetime import date
+    from core.data.symbols import base_symbol, strip_ba
+    base = lambda t: base_symbol(strip_ba(t or "")).upper()             # noqa: E731
+    previos = [t for t in store.cargar_realizado(cartera) if t.get("tipo") in ("renta", "dividendo")] \
+        if cartera in store.nombres() else []
+    usados = set()
+    for m in movimientos:
+        if m["tipo"] not in ("Renta", "Amortización"):
+            continue
+        m["ya"] = False
+        for i, t in enumerate(previos):
+            if i not in usados and base(t["ticker"]) == base(m["ticker"]) and \
+                    abs((date.fromisoformat(t["sell_date"]) - date.fromisoformat(m["fecha"][:10])).days) <= 5:
+                usados.add(i)
+                m["ya"] = True
+                break
+    return movimientos
+
+
 @bp.get("/inviu/rentas")
 def inviu_rentas():
-    """Depósitos/retiros (informativo) + rentas/amortizaciones (importables)."""
-    return jsonify(_inviu_rentas())
+    """Depósitos/retiros (informativo) + rentas/amortizaciones (importables),
+    con las que ya están en `cartera` marcadas."""
+    r = _inviu_rentas()
+    if not r.get("error"):
+        _inviu_rentas_en(request.args.get("cartera", ""), r["movimientos"])
+    return jsonify(r)
 
 
 @bp.get("/inviu/evolucion")
@@ -1146,14 +1183,19 @@ def inviu_importar_rentas():
     if error:
         return error
 
+    # Sólo las elegidas en `solo` (movementId; sin `solo`, todas) y nunca las
+    # que la cartera ya tiene.
+    solo = (request.json or {}).get("solo")
     trades = [{
         "ticker": m["ticker"], "buy_date": m["fecha"], "sell_date": m["fecha"],
         "buy_price": 0.0, "sell_price": round(m["monto"], 6), "qty": 1,
         "buy_comm": 0.0, "sell_comm": 0.0, "moneda": m["moneda"],
-        "pnl": round(m["monto"], 4), "tipo": "renta",
-    } for m in r["movimientos"] if m["tipo"] in ("Renta", "Amortización")]
+        "pnl": round(m["monto"], 4), "tipo": "renta", "lote": inviu.LOTE_RENTAS,
+    } for m in _inviu_rentas_en(cartera, r["movimientos"])
+        if m["tipo"] in ("Renta", "Amortización") and not m["ya"]
+        and (solo is None or m["movementId"] in solo)]
 
-    res = store.agregar_realizado(cartera, trades, lote=inviu.LOTE_RENTAS)
+    res = store.agregar_realizado(cartera, trades)
     if cuenta:
         store.asociar_cuenta(cuenta, cartera)
     return jsonify({"ok": True, "cartera": cartera, **res,

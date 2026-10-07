@@ -1733,31 +1733,51 @@ function LogoTicker({ ticker }) {
               style={{ marginLeft: 6, verticalAlign: "-3px", borderRadius: 3 }} />;
 }
 
-// Lo que traería Cocos, separado en lo que entra, lo que reemplaza y lo que no.
+// Lo que traería Cocos: una lista con tildes de lo nuevo —para dejar afuera lo
+// que se cargó a mano con otra fecha— y, sin tilde posible, lo que ya está.
 function DividendosCocos({ r, aplicar }) {
+  const [fuera, setFuera] = useState(new Set());
   if (r.error) return <div className="pie">{r.error}</div>;
   const plata = (x) => `${num(x.importe ?? x.pnl, 2)} ${x.moneda}`;
-  const distintos = r.ya_cargados.filter((x) => Math.abs(x.importe - x.cargado) > 0.01 * x.importe + 0.005);
   if (r.aplicado) return (
     <div className="pie">{r.agregados} {t("dividendos de Cocos en la cartera", "Cocos dividends in the portfolio")}
       {r.estimados.length ? ` · ${r.estimados.length} ${t("estimados de Yahoo reemplazados", "Yahoo estimates replaced")}` : ""}.</div>);
+  const alternar = (k) => { const s = new Set(fuera); s.has(k) ? s.delete(k) : s.add(k); setFuera(s); };
+  const van = r.nuevos.filter((x) => !fuera.has(x.clave));
+  const filas = [...r.nuevos.map((x) => ({ ...x, fecha: x.sell_date, importe: x.pnl,
+                                       estimado: r.estimados.some((e) => e.por === `${x.ticker}|${x.sell_date}`) })),
+                 ...r.ya_cargados.map((x) => ({ ...x, ya: true }))]
+    .sort((a, b) => b.fecha.localeCompare(a.fecha));
   return (
     <div className="pie">
-      <b>{r.nuevos.length}</b> {r.nuevos.length === 1 ? t("nuevo", "new") : t("nuevos", "new")}
-      {r.nuevos.length > 0 && <>: {r.nuevos.map((x) => `${x.ticker} ${x.sell_date} ${plata(x)}`).join(" · ")}</>}.{" "}
-      {r.estimados.length > 0 && <>{t("Reemplazan", "They replace")} {r.estimados.length} {t("estimados de Yahoo.", "Yahoo estimates.")} </>}
-      {r.ya_cargados.length} {t("ya estaban cargados a mano y no se tocan", "were already loaded by hand and stay as they are")}
-      {distintos.length > 0 && <>; {t("con otro importe", "with a different amount")}:{" "}
-        {distintos.map((x) => `${x.ticker} ${x.fecha} Cocos ${plata(x)} vs ${num(x.cargado, 2)} ${t("cargado", "loaded")}`).join(" · ")}</>}.
+      {filas.length > 0 && (
+        <div className="tabla-wrap" style={{ margin: "8px 0" }}><table>
+          <thead><tr><th>{t("Papel", "Stock")}</th><th>{t("Pago", "Paid")}</th>
+            <th className="n">Cocos</th><th>{t("En la cartera", "In the portfolio")}</th></tr></thead>
+          <tbody>{filas.map((x) => (
+            <tr key={(x.ya ? "y" : "n") + x.ticker + x.fecha}
+                style={x.ya || fuera.has(x.clave) ? { opacity: .5 } : undefined}>
+              <td className="mono">
+                <label style={{ display: "inline-flex", alignItems: "center", gap: 6,
+                                cursor: x.ya ? "default" : "pointer" }}>
+                  <input type="checkbox" disabled={x.ya} checked={!x.ya && !fuera.has(x.clave)}
+                         onChange={() => alternar(x.clave)} />
+                  {x.ticker}</label></td>
+              <td className="mono">{x.fecha}</td>
+              <td className="n">{plata(x)}</td>
+              <td>{x.ya ? `${t("ya está", "already there")}: ${x.cargado_fecha} ${num(x.cargado, 2)}`
+                        : x.estimado ? t("reemplaza el estimado de Yahoo", "replaces the Yahoo estimate") : ""}</td>
+            </tr>))}</tbody>
+        </table></div>)}
       {r.sin_tenencia.length > 0 && <> {t("Sin ese papel en la cartera", "Not held in this portfolio")}:{" "}
         {r.sin_tenencia.map((x) => `${x.instrumento} ${x.fecha} ${plata(x)}`).join(" · ")}.</>}
       {r.sin_papel.length > 0 && <> {r.sin_papel.length} {t("cobros viejos no dicen de qué papel son: van a mano.",
                                                          "old payments don't say which stock they're from: load them by hand.")}</>}
-      {r.importados_antes > 0 && <> {t("Reemplaza los", "Replaces the")} {r.importados_antes} {t("traídos antes.", "fetched before.")}</>}
-      {(r.nuevos.length > 0 || r.importados_antes > 0) && (
+      {r.nuevos.length === 0 && <> {t("No hay dividendos nuevos para importar.", "No new dividends to import.")}</>}
+      {r.nuevos.length > 0 && (
         <div style={{ marginTop: 8 }}>
-          <button className="btn" onClick={aplicar}>
-            {t(`Importar ${r.nuevos.length} a ${r.cartera}`, `Import ${r.nuevos.length} into ${r.cartera}`)}</button>
+          <button className="btn" disabled={!van.length} onClick={() => aplicar(van.map((x) => x.clave))}>
+            {t(`Importar ${van.length} a ${r.cartera}`, `Import ${van.length} into ${r.cartera}`)}</button>
         </div>)}
     </div>);
 }
@@ -1959,11 +1979,11 @@ function PnlRealizado({ real, cartera, recargar, fciTrades, hayFci, conFci, setC
   };
   // Dividendos que acreditó Cocos: primero se mira qué pasaría, después se aplica.
   const [cocosDiv, setCocosDiv] = useState(null);
-  const traerCocos = async (aplicar) => {
+  const traerCocos = async (aplicar, solo) => {
     setCocosDiv({ yendo: true });
     const r = await api("/api/cocos/dividendos", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ cartera, aplicar }) });
+      body: JSON.stringify({ cartera, aplicar, solo }) });
     setCocosDiv({ ...r, aplicado: aplicar });
     if (aplicar && r.ok) recargar();
   };
@@ -2278,7 +2298,7 @@ function PnlRealizado({ real, cartera, recargar, fciTrades, hayFci, conFci, setC
               <button className="btn" onClick={() => traerCocos(false)} disabled={cocosDiv?.yendo}>
                 {cocosDiv?.yendo ? t("Leyendo Cocos…", "Reading Cocos…")
                                  : t("Traer dividendos de Cocos", "Fetch dividends from Cocos")}</button>
-              {cocosDiv && !cocosDiv.yendo && <DividendosCocos r={cocosDiv} aplicar={() => traerCocos(true)} />}
+              {cocosDiv && !cocosDiv.yendo && <DividendosCocos r={cocosDiv} aplicar={(solo) => traerCocos(true, solo)} />}
             </div>)}
           {detalle !== "fci" && (
             <div className="pie">
@@ -7244,13 +7264,18 @@ function MiInviu() {
         setOps(o);
         if (o.cartera) setDestino(o.cartera);
       });
-      api("/api/inviu/rentas").then(setRentas);
       api("/api/inviu/caucion").then(setCaucion);
       api("/api/inviu/evolucion").then(setEvolucion);
       api("/api/inviu/flujo-proyectado").then(setFlujoProyectado);
     });
   };
   useEffect(() => { cargar(); }, []);
+  // Las rentas se cruzan contra la cartera destino: las que ya tiene vienen
+  // marcadas `ya` y no se pueden tildar.
+  const [rentasFuera, setRentasFuera] = useState(new Set());
+  const leerRentas = () => api(`/api/inviu/rentas?cartera=${encodeURIComponent(destino)}`)
+    .then((r) => { setRentas(r); setRentasFuera(new Set()); });
+  useEffect(() => { if (conectado) leerRentas(); }, [conectado, destino]);
 
   // Igual que en Cocos: arranca con las cerradas que la cartera ya tiene
   // destildadas, para no contar el mismo resultado dos veces.
@@ -7272,7 +7297,8 @@ function MiInviu() {
 
   const importarRentas = () => {
     setImpRentas({ estado: "yendo" });
-    post("/api/inviu/rentas/importar", { cartera: destino }).then(setImpRentas);
+    post("/api/inviu/rentas/importar", { cartera: destino, solo: rentasElegidas.map((m) => m.movementId) })
+      .then((r) => { setImpRentas(r); if (r.ok) leerRentas(); });
   };
 
   const [impCaucion, setImpCaucion] = useState(null);
@@ -7296,7 +7322,13 @@ function MiInviu() {
   const efectivoArs = port?.available?.["24HS"]?.ARS?.amount ?? null;
   const efectivoUsd = port?.available?.["24HS"]?.USD?.amount ?? null;
   const rentasImportables = (rentas?.movimientos || [])
-    .filter((m) => m.tipo === "Renta" || m.tipo === "Amortización");
+    .filter((m) => (m.tipo === "Renta" || m.tipo === "Amortización") && !m.ya);
+  const rentasElegidas = rentasImportables.filter((m) => !rentasFuera.has(m.movementId));
+  const alternarRenta = (id) => {
+    const s = new Set(rentasFuera);
+    s.has(id) ? s.delete(id) : s.add(id);
+    setRentasFuera(s);
+  };
   const cuantasCerradas = (ops?.cerrados || []).filter((c) => !fuera.has(c.clave)).length;
   const mon = (o, dec = 2) => o?.amount == null ? "—"
     : o.currency === "ARS" ? ars(o.amount, dec) : num(o.amount, dec) + " " + (o.currency || "");
@@ -7577,9 +7609,15 @@ function MiInviu() {
               <div className="tabla-wrap"><table>
                 <thead><tr><th>Fecha</th><th>Tipo</th><th>Ticker</th><th className="n">Monto</th></tr></thead>
                 <tbody>{rentas.movimientos.map((m, i) => (
-                  <tr key={i}>
-                    <td className="mono">{m.fecha}</td>
-                    <td>{m.tipo}</td>
+                  <tr key={i} style={m.ya || rentasFuera.has(m.movementId) ? { opacity: .5 } : undefined}>
+                    <td className="mono">
+                      {"ya" in m && (
+                        <input type="checkbox" style={{ marginRight: 6 }} disabled={m.ya || !destino}
+                               checked={!m.ya && !!destino && !rentasFuera.has(m.movementId)}
+                               title={m.ya ? `Ya está en ${destino}` : undefined}
+                               onChange={() => alternarRenta(m.movementId)} />)}
+                      {m.fecha}</td>
+                    <td>{m.tipo}{m.ya && <span className="chip" style={{ marginLeft: 6, minWidth: 0 }}>ya en cartera</span>}</td>
                     <td className="mono">{m.ticker}</td>
                     <td className="n">{m.moneda === "ARS" ? ars(m.monto, 2)
                       : num(m.monto, 2) + " " + m.moneda}</td>
@@ -7600,14 +7638,14 @@ function MiInviu() {
                     <option value="">elegí una…</option>
                     {(ops?.carteras || []).map((n) => <option key={n} value={n}>{n}</option>)}
                   </select>
-                  <button className="btn" disabled={!destino || impRentas?.estado === "yendo"}
+                  <button className="btn" disabled={!destino || !rentasElegidas.length
+                                                    || impRentas?.estado === "yendo"}
                           onClick={importarRentas}>
                     {impRentas?.estado === "yendo" ? "Importando…"
-                      : `Importar ${rentasImportables.length} rentas/amortizaciones`}
+                      : `Importar ${rentasElegidas.length} rentas/amortizaciones`}
                   </button>
                   {impRentas?.ok && <span className="ok" style={{ fontSize: 12 }}>
-                    Listo: {impRentas.agregados} en {impRentas.cartera}
-                    {impRentas.reemplazados ? ` (pisó ${impRentas.reemplazados})` : ""}.
+                    Listo: {impRentas.agregados} en {impRentas.cartera}.
                   </span>}
                   {impRentas?.error && <span className="mal" style={{ fontSize: 12 }}>{impRentas.error}</span>}
                 </div>
