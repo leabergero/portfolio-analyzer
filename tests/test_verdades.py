@@ -2996,6 +2996,34 @@ def test_cierre_de_mitad_de_rueda_no_queda_congelado():
         f"con la caché vencida contra el cierre real tiene que pedir de nuevo y traer 5.97, salió {with_ttl['Close'].iloc[-1]}"
 
 
+def test_un_ticker_sin_fuente_con_precios_sueltos_no_se_reintenta_en_cada_pedido():
+    """COCORMA tiene cuatro cierres sueltos en la caché y ni Yahoo ni BYMA lo
+    tienen. Como la caché no estaba vacía nunca se marcaba "sin serie", y cada
+    pedido volvía a salir: 26 s por fondo, dos veces por análisis (KARIN).
+    """
+    import pandas as pd
+
+    from core.data import cache, sources
+
+    guardado, salidas = {}, []
+    cacheado = pd.DataFrame({"Close": [1.0]}, index=pd.DatetimeIndex(["2026-09-10"], name="fecha"))
+    originales = (cache.leer_respuesta, cache.guardar_respuesta, cache.leer_precios,
+                  sources._de_yfinance, sources._de_byma)
+    cache.leer_respuesta = lambda clave, ttl_horas=24, default=None: guardado.get(clave, default)
+    cache.guardar_respuesta = lambda clave, valor, ttl_horas=24: guardado.__setitem__(clave, valor)
+    cache.leer_precios = lambda *a, **k: cacheado
+    sources._de_yfinance = lambda *a, **k: salidas.append("yf") or pd.DataFrame()
+    sources._de_byma = lambda *a, **k: salidas.append("byma") or pd.DataFrame()
+    try:
+        for _ in range(3):
+            sources.precios("COCORMA", hasta="2026-10-07")
+    finally:
+        (cache.leer_respuesta, cache.guardar_respuesta, cache.leer_precios,
+         sources._de_yfinance, sources._de_byma) = originales
+
+    assert salidas == ["yf", "byma"], f"sale una vez y no vuelve a salir, salió {salidas}"
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

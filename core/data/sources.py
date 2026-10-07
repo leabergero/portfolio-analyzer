@@ -208,6 +208,12 @@ def precios(ticker: str, desde: str = None, hasta: str = None,
     # Sin fuente disponible: lo que haya en la caché es mejor que nada.
     cacheado = cache.leer_precios(ticker, desde, hasta)
     if not cacheado.empty or usar_cocos:
+        # Se anota el intento: con unos precios sueltos en la caché nunca se
+        # marcaba "sin serie" y cada pedido volvía a salir. Un FCI de Cocos
+        # —COCORMA, cuatro cierres guardados— pagaba 2 s de Yahoo y 24 s de
+        # BYMA en cada uno (KARIN, Objetivos 50 s, 2026-10-07).
+        if not cacheado.empty and not fallo_red:
+            cache.guardar_respuesta(f"fresco:{ticker}", True)
         return cacheado
     spot = _spot_yfinance(ticker)
     # Solo se anota como muerto el que contestó y no tenía nada. Si la fuente

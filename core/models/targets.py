@@ -326,8 +326,13 @@ def analizar(posiciones) -> dict:
     from core.models import momentum as mom
 
     momentos = {m["ticker"]: m for m in mom.analizar(posiciones).get("por_activo", [])}
+    from core.data.symbols import SOURCE_FCI
+
     salida = []
-    for ticker in sorted({str(p["ticker"]).upper() for p in posiciones}):
+    # Un FCI money market no tiene consenso de analistas: buscarlo costaba
+    # ~25 s por fondo sin traer nada.
+    for ticker in sorted({str(p["ticker"]).upper() for p in posiciones
+                          if p.get("source") != SOURCE_FCI}):
         r = objetivo(ticker)
         señal_mom = momentos.get(ticker, {}).get("señal")
         r["momentum"] = señal_mom

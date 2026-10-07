@@ -146,7 +146,13 @@ const api = async (ruta, opciones) => {
   if (SIM_ACTIVA) o.headers = { ...(o.headers || {}), "X-Sim": SIM_ACTIVA };
   o.headers = { ...(o.headers || {}), "X-Mercado": MERCADO };
 
-  const r = await fetch(ruta, o);
+  // Si se corta la conexión (la notebook se durmió, cambió la red) `fetch`
+  // rechaza y nadie llama al setState: la pantalla quedaba en "Calculando…"
+  // para siempre (KARIN, Riesgo, 2026-10-07). Vuelve como cualquier error.
+  let r;
+  try { r = await fetch(ruta, o); }
+  catch { return { error: t("Se cortó la conexión con el servidor. Recargá la página.",
+                            "The connection to the server dropped. Reload the page.") }; }
 
   // Cocos renovó el token: el servidor devuelve un sobre nuevo y hay que
   // quedárselo, o la próxima request va con el viejo y no entra.

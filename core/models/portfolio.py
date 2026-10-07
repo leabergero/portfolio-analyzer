@@ -375,7 +375,9 @@ def matriz_retornos(posiciones, desde=None, hasta=None):
     retornos, precios = {}, {}
     for p in posiciones:
         t = str(p["ticker"]).upper()
-        if t in retornos:
+        # Un FCI money market es la caja: no se optimiza ni se le mide riesgo
+        # de mercado. Hasta ahora quedaba afuera sólo por tener < 30 ruedas.
+        if t in retornos or p.get("source") == sources.SOURCE_FCI:
             continue
         s = sources.precios_base(t, desde=desde, hasta=hasta, source=p.get("source") or None)
         if len(s) < 30:
