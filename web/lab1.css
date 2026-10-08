@@ -1,0 +1,324 @@
+/* ═══ LAB 1 · Terminal ═══════════════════════════════════════════════════════
+   Se carga sólo con ?lab=1 (ver `LAB` en app.jsx). Misma familia que el
+   terminal de flujos-globales: fondo casi negro, Fira Sans para leer y Fira
+   Code para cada número, color reservado al dato.
+
+   La regla que ordena todo: **el verde es ganancia y nada más**. En producción
+   el acento (pestaña elegida, botón primario, enlaces) es el mismo verde que un
+   resultado positivo, así que la interfaz "gana" todo el tiempo y un número
+   verde compite con una pestaña verde. Acá lo que se toca es azul; verde y
+   rojo quedan para la plata. */
+@import url("https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Fira+Sans:wght@400;500;600;700&display=swap");
+
+:root[data-lab="1"] {
+  --fondo:#0A0C10; --panel:#11141A; --panel-2:#181C24; --borde:#262C38; --borde-suave:#1C212B;
+  --texto:#E7EAF0; --texto-2:#A9B1C1; --texto-3:#7D8799;
+  --acento:#5AA2FF; --acento-2:#7DB6FF; --acento-suave:#13233A;
+  --positivo:#2FD49A; --negativo:#FF5D6E; --alerta:#F2B544;
+  --destaque:#F2B544; --destaque-suave:#2A2112;
+  --sombra:none;
+  --serie-1:#3FC1B0; --serie-2:#F2B544; --serie-3:#5AA2FF; --serie-4:#FF7AA2;
+  --serie-5:#A78BFA; --serie-6:#67D4E6; --serie-7:#C9D46A; --serie-8:#94A3B8;
+  --marca-actual:#F2B544; --marca-optima:#2FD49A;
+  --fuente-graf:"Fira Sans",sans-serif;
+  --mono:"Fira Code",ui-monospace,Menlo,monospace;
+  --lateral:232px;
+  color-scheme:dark;
+}
+/* El claro es secundario pero completo: gris azulado frío, como papel de
+   terminal impreso. Mismas reglas: azul se toca, verde/rojo es plata. */
+:root[data-lab="1"][data-theme="light"] {
+  --fondo:#EEF1F5; --panel:#FFFFFF; --panel-2:#F3F5F8; --borde:#D5DBE4; --borde-suave:#E5E9EF;
+  --texto:#111827; --texto-2:#3D4656; --texto-3:#5B6678;
+  --acento:#1F63D6; --acento-2:#3B7BE8; --acento-suave:#E3ECFB;
+  --positivo:#0B7F55; --negativo:#C8233A; --alerta:#9A5A00;
+  --destaque:#F2B544; --destaque-suave:#FBEFD2;
+  --serie-1:#0A7C6E; --serie-2:#B26B00; --serie-3:#1F63D6; --serie-4:#C2255C;
+  --serie-5:#7048E8; --serie-6:#0B7C94; --serie-7:#6F7A12; --serie-8:#5B6B80;
+  --marca-actual:#B26B00; --marca-optima:#0B7F55;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: light) {
+  :root[data-lab="1"]:not([data-theme]) {
+    --fondo:#EEF1F5; --panel:#FFFFFF; --panel-2:#F3F5F8; --borde:#D5DBE4; --borde-suave:#E5E9EF;
+    --texto:#111827; --texto-2:#3D4656; --texto-3:#5B6678;
+    --acento:#1F63D6; --acento-2:#3B7BE8; --acento-suave:#E3ECFB;
+    --positivo:#0B7F55; --negativo:#C8233A; --alerta:#9A5A00;
+    --destaque:#F2B544; --destaque-suave:#FBEFD2;
+    --serie-1:#0A7C6E; --serie-2:#B26B00; --serie-3:#1F63D6; --serie-4:#C2255C;
+    --serie-5:#7048E8; --serie-6:#0B7C94; --serie-7:#6F7A12; --serie-8:#5B6B80;
+    --marca-actual:#B26B00; --marca-optima:#0B7F55;
+    color-scheme:light;
+  }
+}
+
+[data-lab="1"] body{font:14px/1.5 "Fira Sans",system-ui,sans-serif;letter-spacing:.005em}
+[data-lab="1"] .mono,[data-lab="1"] td.n,[data-lab="1"] th.n{font-family:var(--mono)}
+[data-lab="1"] :focus-visible{outline:2px solid var(--acento);outline-offset:2px}
+[data-lab="1"] ::selection{background:var(--acento-suave)}
+
+/* ── Navegación lateral ──
+   Una columna fija en vez de dos filas arriba: la barra de producción más las
+   pestañas se comían 130 px de alto en cada pantalla, y el alto es lo que
+   escasea en un dashboard; el ancho sobra. */
+[data-lab="1"] .barra-lab{position:fixed;inset:0 auto 0 0;width:var(--lateral);z-index:50;
+  background:var(--panel);border-right:1px solid var(--borde);display:flex;flex-direction:column;
+  gap:22px;padding:18px 12px 14px;overflow-y:auto}
+[data-lab="1"] .bl-marca{font-weight:700;font-size:15px;letter-spacing:-.01em;padding:0 10px}
+[data-lab="1"] .bl-marca span{color:var(--acento)}
+[data-lab="1"] .bl-fecha{display:none}
+[data-lab="1"] .bl-grupo{display:flex;flex-direction:column;gap:2px}
+[data-lab="1"] .bl-t{font-size:10.5px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--texto-3);padding:0 10px 6px}
+[data-lab="1"] .bl-item,[data-lab="1"] .bl-cartera,[data-lab="1"] .bl-tema{display:flex;align-items:center;
+  gap:10px;width:100%;min-height:36px;padding:7px 10px;border:0;border-radius:7px;background:transparent;
+  color:var(--texto-2);font:inherit;font-size:13.5px;text-align:left;cursor:pointer;
+  transition:background .15s,color .15s}
+[data-lab="1"] .bl-item:hover,[data-lab="1"] .bl-cartera:hover,[data-lab="1"] .bl-tema:hover{
+  background:var(--panel-2);color:var(--texto)}
+[data-lab="1"] .bl-item.on{background:var(--acento-suave);color:var(--texto);font-weight:500;
+  box-shadow:inset 2px 0 0 var(--acento)}
+[data-lab="1"] .bl-item.on .ico{stroke:var(--acento)}
+[data-lab="1"] .ico{width:17px;height:17px;flex:none;fill:none;stroke:currentColor;stroke-width:1.8;
+  stroke-linecap:round;stroke-linejoin:round}
+[data-lab="1"] .bl-cartera{font-family:var(--mono);font-size:12.5px}
+[data-lab="1"] .bl-cartera.on{color:var(--texto);background:var(--panel-2)}
+[data-lab="1"] .bl-cartera.on::after{content:"";margin-left:auto;width:6px;height:6px;border-radius:50%;
+  background:var(--acento)}
+[data-lab="1"] .bl-plaza{font-size:9.5px;letter-spacing:.06em;color:var(--texto-3);border:1px solid var(--borde);
+  border-radius:4px;padding:1px 4px;line-height:1.3}
+[data-lab="1"] .bl-pie{margin-top:auto;padding-top:12px;border-top:1px solid var(--borde-suave);
+  display:flex;flex-direction:column;gap:6px}
+[data-lab="1"] .bl-tema{font-size:12.5px;color:var(--texto-3)}
+
+@media (min-width:641px){
+  [data-lab="1"] .hoja,[data-lab="1"] footer{margin-left:var(--lateral)}
+  [data-lab="1"] .hoja{max-width:none;padding:20px 28px 28px}
+  [data-lab="1"] .tabs{margin-top:-20px}
+  [data-lab="1"] footer{max-width:none;padding:16px 28px 28px}
+}
+@media (min-width:641px) and (max-width:1023px){
+  /* Tablet: la columna se reduce a íconos. */
+  :root[data-lab="1"]{--lateral:64px}
+  [data-lab="1"] .barra-lab{padding:16px 8px}
+  [data-lab="1"] .bl-marca,[data-lab="1"] .bl-t,[data-lab="1"] .bl-item span,
+  [data-lab="1"] .bl-tema span{display:none}
+  [data-lab="1"] .bl-item,[data-lab="1"] .bl-tema{justify-content:center;padding:9px 0}
+  [data-lab="1"] .bl-cartera{justify-content:center;padding:7px 0;font-size:10px}
+  [data-lab="1"] .bl-cartera .bl-plaza{display:none}
+  [data-lab="1"] .bl-cartera.on::after{display:none}
+  [data-lab="1"] .bl-cartera span{overflow:hidden;text-overflow:ellipsis;max-width:48px}
+}
+
+/* ── Pestañas de análisis: fijas arriba, sin la barra encima ── */
+[data-lab="1"] .tabs{top:0;margin:0 -28px 16px;padding:12px 28px 0;background:color-mix(in srgb,var(--fondo) 88%,transparent);
+  backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border-bottom-color:var(--borde-suave)}
+[data-lab="1"] .tab{font-size:13.5px;color:var(--texto-3);padding:10px 14px;border-bottom-width:2px;
+  transition:color .15s}
+[data-lab="1"] .tab:hover{color:var(--texto)}
+[data-lab="1"] .tab.on{color:var(--texto);border-bottom-color:var(--acento);font-weight:600}
+[data-lab="1"] .pin.listo{background:var(--texto-3);opacity:.5}
+[data-lab="1"] .tab.on .pin.listo{background:var(--acento);opacity:1}
+
+/* ── Superficies ── sin sombra; capas por tono y un borde fino. */
+[data-lab="1"] .panel{border-radius:10px;border-color:var(--borde-suave);padding:16px 18px}
+[data-lab="1"] .panel h3{font-size:13px;font-weight:600;letter-spacing:.01em;color:var(--texto)}
+[data-lab="1"] .fila{gap:12px;margin-bottom:12px}
+[data-lab="1"] .seccion{margin:30px 0 12px!important}
+[data-lab="1"] .seccion h3{font-size:11px!important;font-weight:600;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--texto-3)}
+[data-lab="1"] .seccion > div{background:var(--borde-suave)!important}
+
+/* Las explicaciones largas: dos líneas y un clic para leer el resto. Están
+   para aprender a leer el panel, no para releerlas cada mañana. */
+[data-lab="1"] .panel > .pie{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;
+  overflow:hidden;cursor:pointer;transition:color .15s}
+[data-lab="1"] .panel > .pie:hover{color:var(--texto-2)}
+[data-lab="1"] .panel > .pie.abierta{display:block;-webkit-line-clamp:unset}
+[data-lab="1"] .pie{font-size:12px;color:var(--texto-3)}
+
+/* ── Resumen: la tira de cifras de arriba ── */
+[data-lab="1"] .res-frase{display:none}
+[data-lab="1"] .resumen{margin:4px 0 16px}
+[data-lab="1"] .res-cifras{display:grid;grid-template-columns:1.6fr repeat(5,1fr);
+  background:var(--panel);border:1px solid var(--borde-suave);border-radius:10px;overflow:hidden}
+[data-lab="1"] .res-fig{padding:16px 18px;border-left:1px solid var(--borde-suave);min-width:0}
+[data-lab="1"] .res-fig:first-child{border-left:0}
+[data-lab="1"] .res-fig .et{font-size:10.5px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--texto-3)}
+[data-lab="1"] .res-fig .val{font-size:19px;font-weight:500;margin-top:6px;white-space:nowrap;
+  letter-spacing:-.02em}
+[data-lab="1"] .res-fig .sub{font-size:11.5px;color:var(--texto-3);margin-top:3px}
+[data-lab="1"] .res-fig.grande .val{font-size:32px;font-weight:600;margin-top:2px}
+[data-lab="1"] .res-fig.grande{background:linear-gradient(180deg,var(--acento-suave),transparent 85%)}
+@media (max-width:1180px){
+  [data-lab="1"] .res-cifras{grid-template-columns:repeat(3,1fr)}
+  [data-lab="1"] .res-fig.grande{grid-column:1/-1}
+  [data-lab="1"] .res-fig:nth-child(n+2){border-top:1px solid var(--borde-suave)}
+  [data-lab="1"] .res-fig:nth-child(2),[data-lab="1"] .res-fig:nth-child(5){border-left:0}
+}
+@media (max-width:640px){
+  [data-lab="1"] .res-cifras{grid-template-columns:1fr 1fr}
+  [data-lab="1"] .res-fig{border-left:0!important}
+  [data-lab="1"] .res-fig:nth-child(even){border-left:1px solid var(--borde-suave)!important}
+}
+
+/* ── KPIs ── en grupos con nombre, sin tarjeta por cifra: una celda por KPI
+   dentro de una sola franja, como la línea de un monitor. */
+[data-lab="1"] .kpi-grupos{display:grid;grid-template-columns:minmax(0,4fr) minmax(0,5.4fr);gap:12px;margin-bottom:16px}
+[data-lab="1"] .kpi-grupo h4{margin:0 0 7px;font-size:10.5px;font-weight:600;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--texto-3)}
+[data-lab="1"] .kpi-grupo .kpis{margin:0;gap:0;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));
+  background:var(--panel);border:1px solid var(--borde-suave);border-radius:10px}
+[data-lab="1"] .kpi-grupo .kpi{border:0;border-radius:0;background:transparent;
+  border-left:1px solid var(--borde-suave)}
+[data-lab="1"] .kpi-grupo .kpi:first-child{border-left:0}
+@media (max-width:1180px){[data-lab="1"] .kpi-grupos{grid-template-columns:1fr}}
+[data-lab="1"] .kpis{gap:10px}
+[data-lab="1"] .kpi{border-color:var(--borde-suave);padding:12px 14px}
+[data-lab="1"] .kpi .et{font-size:10.5px;letter-spacing:.1em;white-space:nowrap}
+[data-lab="1"] .kpi .val{font-family:var(--mono);font-size:18px;font-weight:500;letter-spacing:-.02em}
+[data-lab="1"] .kpi .nivel{font-size:11.5px;font-weight:500}
+[data-lab="1"] .kpi .sub{font-size:11.5px}
+[data-lab="1"] .ayuda{border-color:var(--borde);color:var(--texto-3)}
+[data-lab="1"] .ayuda:hover{border-color:var(--acento);color:var(--acento)}
+[data-lab="1"] .globo{border-color:var(--borde);box-shadow:0 16px 40px -12px rgba(0,0,0,.6)}
+
+/* El valor ya está en el resumen: la tarjeta queda como el gráfico del valor. */
+[data-lab="1"] .lab-valor .cifra,[data-lab="1"] .lab-valor .delta{display:none}
+[data-lab="1"] .lab-valor svg{top:44px;height:calc(100% - 44px)}
+[data-lab="1"] .lab-valor .area{fill:var(--acento);opacity:.22}
+[data-lab="1"] .lab-valor{min-height:200px}
+[data-lab="1"] .lab-tirgrande b{font-family:var(--mono);font-size:28px;font-weight:500}
+
+/* ── Tablas ── densas, cabecera pegada, fila que se ilumina al pasar. */
+[data-lab="1"] table{font-size:13px}
+[data-lab="1"] th{background:transparent;font-size:10.5px;letter-spacing:.1em;color:var(--texto-3);
+  border-bottom:1px solid var(--borde);padding:8px 10px}
+[data-lab="1"] td{border-bottom-color:var(--borde-suave);padding:8px 10px}
+[data-lab="1"] tbody tr{transition:background .12s}
+[data-lab="1"] tbody tr:hover{background:var(--panel-2)}
+[data-lab="1"] td.mono{font-family:var(--mono);font-weight:500}
+
+/* ── Controles ── */
+[data-lab="1"] select,[data-lab="1"] input[type=text],[data-lab="1"] input[type=number],
+[data-lab="1"] input[type=email],[data-lab="1"] input[type=password]{background:var(--panel-2);
+  border-color:var(--borde);border-radius:7px;min-height:34px}
+[data-lab="1"] .btn{background:var(--panel-2);border-color:var(--borde);border-radius:7px;min-height:32px;
+  transition:border-color .15s,background .15s}
+[data-lab="1"] .btn:hover{border-color:var(--acento);background:var(--acento-suave)}
+[data-lab="1"] .btn.primario{background:var(--acento);border-color:var(--acento);color:#06101F}
+[data-lab="1"] .btn.primario:hover{background:var(--acento-2)}
+/* Simular: sigue siendo la acción distinta de la pantalla, pero sin el brillo
+   que barre cada tres segundos — en una pantalla de números, lo que se mueve
+   solo se lleva la mirada aunque no haya pasado nada. */
+[data-lab="1"] .lab-neon{background:var(--acento);color:#06101F;box-shadow:none;border-radius:7px;
+  font-family:inherit}
+[data-lab="1"] .lab-neon::after{display:none}
+[data-lab="1"] .lab-neon:hover{background:var(--acento-2);transform:none;box-shadow:none}
+[data-lab="1"] .lab-trazo{background:var(--acento-suave);color:var(--acento)}
+[data-lab="1"] .lab-trazo rect{stroke:var(--acento)}
+[data-lab="1"] .lab-barrido{border-radius:7px;color:var(--acento);border-color:var(--acento)}
+[data-lab="1"] .lab-barrido::before{background:var(--acento)}
+[data-lab="1"] .lab-estados{color:var(--acento);border-color:var(--borde)}
+[data-lab="1"] .lab-estados.listo{color:var(--positivo);border-color:color-mix(in srgb,var(--positivo) 50%,transparent);
+  background:transparent}
+
+/* Chips: el veredicto como etiqueta llena y suave, no un óvalo de contorno. */
+[data-lab="1"] .chip{border:0;border-radius:5px;font-family:var(--mono);font-size:10.5px;letter-spacing:.06em;
+  padding:3px 9px;background:color-mix(in srgb,currentColor 14%,transparent)}
+[data-lab="1"] .chip.ok{color:var(--positivo)} [data-lab="1"] .chip.mal{color:var(--negativo)}
+[data-lab="1"] .chip.ojo{color:var(--alerta)}
+
+[data-lab="1"] .aviso{border-radius:0 8px 8px 0;font-size:13px;background:var(--panel)}
+[data-lab="1"] .aviso.ok{background:color-mix(in srgb,var(--positivo) 9%,var(--panel));border-left-color:var(--positivo)}
+[data-lab="1"] .aviso.ojo{background:color-mix(in srgb,var(--alerta) 10%,var(--panel));border-left-color:var(--alerta)}
+[data-lab="1"] .aviso.mal{background:color-mix(in srgb,var(--negativo) 9%,var(--panel))}
+
+/* Progreso de los modelos y spinner: azul, que es "trabajando", no "ganando". */
+[data-lab="1"] .lab-pasos{border-color:var(--borde-suave)}
+[data-lab="1"] .lab-pasos .hecho{box-shadow:none}
+[data-lab="1"] .lab-pasos .n.on{box-shadow:none}
+[data-lab="1"] .cargando::before{background:var(--acento);box-shadow:none;width:18px;height:18px}
+
+[data-lab="1"] .lab-sim{border-color:var(--alerta);background:color-mix(in srgb,var(--alerta) 7%,var(--panel));
+  box-shadow:inset 3px 0 0 var(--alerta)}
+
+[data-lab="1"] footer{border-top-color:var(--borde-suave);font-size:12px}
+[data-lab="1"] footer a{color:var(--texto-2)}
+
+/* Teléfono: la barra móvil de siempre, con la paleta del lab. */
+[data-lab="1"] .barra-m,[data-lab="1"] .barra-m-cartera{background:var(--panel)}
+[data-lab="1"] .menu-m-item.on{background:var(--acento-suave);color:var(--acento)}
+@media (max-width:640px){
+  [data-lab="1"] .tabs{top:52px;margin:0 -20px 14px;padding:8px 20px 0;overflow-x:auto;flex-wrap:nowrap}
+  [data-lab="1"] .tab{white-space:nowrap}
+  [data-lab="1"] .kpi-grupo .kpis{grid-template-columns:1fr 1fr}
+  [data-lab="1"] .kpi-grupo .kpi{border-left:0;border-top:1px solid var(--borde-suave)}
+  [data-lab="1"] .kpi-grupo .kpi:nth-child(even){border-left:1px solid var(--borde-suave)}
+  [data-lab="1"] .kpi-grupo .kpi:nth-child(-n+2){border-top:0}
+}
+
+/* ═══ Columna escondida e interruptor Simple / Completa ═══════════════════════
+   La vista simple son las preguntas del lab 6 (sus estilos, en lab5.css, se
+   cargan junto con esta hoja). */
+
+/* ── Columna escondida ──
+   Queda una franja de 10 px en el borde: el mouse que llega ahí la abre, y se
+   vuelve a ir al salir. Abierta flota encima del contenido (no lo empuja: que
+   la página salte cada vez que el mouse pasa por el borde sería peor). Con el
+   alfiler queda fija y entonces sí ocupa su lugar, como en el lab 1. */
+@media (min-width:641px){
+  [data-lab="1"]:not([data-lateral-fija]) .barra-lab{transform:translateX(calc(10px - 100%));
+    transition:transform .2s ease-out,box-shadow .2s;box-shadow:none}
+  [data-lab="1"]:not([data-lateral-fija]) .barra-lab > *{opacity:0;transition:opacity .12s}
+  [data-lab="1"]:not([data-lateral-fija]) .barra-lab:hover,
+  [data-lab="1"]:not([data-lateral-fija]) .barra-lab:focus-within,
+  [data-lab="1"]:not([data-lateral-fija]) .barra-lab.abierta{transform:none;
+    box-shadow:0 0 0 1px var(--borde),0 24px 60px -12px rgba(0,0,0,.45)}
+  [data-lab="1"] .barra-lab:hover > *,[data-lab="1"] .barra-lab:focus-within > *,
+  [data-lab="1"] .barra-lab.abierta > *{opacity:1}
+  [data-lab="1"]:not([data-lateral-fija]) .barra-lab::after{content:"";position:absolute;right:3px;top:50%;
+    width:3px;height:44px;margin-top:-22px;border-radius:2px;background:var(--borde)}
+  [data-lab="1"]:not([data-lateral-fija]) .barra-lab:hover::after,
+  [data-lab="1"] .barra-lab.abierta::after{display:none}
+
+  [data-lab="1"]:not([data-lateral-fija]) .hoja,
+  [data-lab="1"]:not([data-lateral-fija]) footer{margin-left:0}
+  [data-lab="1"]:not([data-lateral-fija]) .hoja{padding-left:68px;max-width:1500px}
+  [data-lab="1"]:not([data-lateral-fija]) .tabs{margin-left:-68px;padding-left:68px}
+}
+@media (max-width:640px){ .bl-boton,.bl-fijar{display:none!important} }
+
+.bl-boton{position:fixed;top:14px;left:16px;z-index:49;width:38px;height:38px;display:grid;place-items:center;
+  border:1px solid var(--borde);border-radius:9px;background:var(--panel);color:var(--texto-2);cursor:pointer;
+  transition:color .15s,border-color .15s}
+.bl-boton:hover{color:var(--texto);border-color:var(--acento)}
+.bl-marca{display:flex;align-items:center;gap:4px}
+.bl-fijar{margin-left:auto;width:28px;height:28px;display:grid;place-items:center;border:0;border-radius:6px;
+  background:transparent;color:var(--texto-3);cursor:pointer}
+.bl-fijar:hover{background:var(--panel-2);color:var(--texto)}
+.bl-fijar.on{color:var(--acento)}
+.bl-fijar .ico{width:15px;height:15px}
+
+/* ── Cabecera: qué cartera y qué vista ── */
+.l10-cab{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin:2px 0 16px}
+.l10-cab h1{margin:0;font-size:20px;font-weight:600;letter-spacing:-.01em;font-family:var(--mono)}
+.l10-vista{margin-left:auto;display:inline-flex;padding:3px;border:1px solid var(--borde);border-radius:9px;
+  background:var(--panel)}
+.l10-vista button{border:0;background:transparent;color:var(--texto-3);font:inherit;font-size:13px;
+  font-weight:500;padding:6px 16px;border-radius:6px;cursor:pointer;min-height:32px;transition:background .15s,color .15s}
+.l10-vista button:hover{color:var(--texto)}
+.l10-vista button[aria-pressed="true"]{background:var(--acento-suave);color:var(--texto);
+  box-shadow:inset 0 0 0 1px var(--acento)}
+/* La pestaña fija de arriba se pega bajo la cabecera, no encima. */
+[data-lab="1"] .tabs{margin-top:0}
+
+@media (prefers-reduced-motion:reduce){ [data-lab="1"] .barra-lab{transition:none!important} }
+
+/* Tablet: la columna es de íconos y la marca se esconde; el alfiler queda solo. */
+@media (min-width:641px) and (max-width:1023px){
+  [data-lab="1"] .bl-marca{display:flex!important;justify-content:center;font-size:0;padding:0}
+  [data-lab="1"] .bl-marca span{display:none}
+  [data-lab="1"] .bl-fijar{margin:0}
+}

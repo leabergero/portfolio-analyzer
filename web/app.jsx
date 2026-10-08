@@ -17,6 +17,36 @@
 
 const { useState, useEffect, useRef, useCallback, useMemo } = React;
 
+/* Rediseños en prueba: `?lab=1` (terminal), `?lab=2` (informe editorial),
+   `?lab=3` (neo-brutalista) y `?lab=4` (monitor CRT de fósforo). Esos cuatro
+   cambian la piel. Los labs 5, 6 y 7 dejan la piel de producción y cambian la
+   información: qué se muestra, en qué orden y qué se saca (ver `Info`).
+   Cada uno es una hoja aparte (web/labN.css) que pisa tokens y componentes,
+   más los pocos cambios de estructura que van detrás de `LAB` en este archivo.
+   Sin el flag la app queda exactamente como la de todos los días. La CSP no
+   deja scripts inline, por eso la hoja se cuelga desde acá y no desde el HTML. */
+const LAB = ["1", "2", "3", "4", "5", "6", "7"].includes(new URLSearchParams(location.search).get("lab"))
+  ? new URLSearchParams(location.search).get("lab") : null;
+// El 1 junta lo elegido de los otros: su piel de terminal con la columna que se
+// esconde, y las preguntas del 6 como vista simple, que acá es un interruptor y
+// no un callejón con un botón de volver. Por eso es piel y es información.
+const LAB_PIEL = ["1", "2", "3", "4"].includes(LAB);
+const LAB_INFO = ["1", "5", "6", "7"].includes(LAB);
+if (LAB) {
+  document.documentElement.dataset.lab = LAB;
+  for (const n of LAB === "1" ? ["1", "5"] : [LAB]) {
+    const hoja = document.createElement("link");
+    hoja.rel = "stylesheet"; hoja.href = `/lab${n}.css`;
+    document.head.appendChild(hoja);
+  }
+  // Las explicaciones largas quedan en una línea; un clic las abre. Delegado en
+  // el documento para no tocar los cuarenta paneles que tienen un `.pie`.
+  document.addEventListener("click", (e) => {
+    const p = e.target.closest(".pie");
+    if (p && !e.target.closest("a,button,input,select,label")) p.classList.toggle("abierta");
+  });
+}
+
 /* ═══════════════ utilidades ═══════════════ */
 
 /* El sobre firmado de la sesión web. Vive sólo en este navegador: es lo único
@@ -456,6 +486,7 @@ function colores() {
     positivo: v("--positivo"), negativo: v("--negativo"), alerta: v("--alerta"),
     marcaActual: v("--marca-actual"), marcaOptima: v("--marca-optima"),
     series: [1,2,3,4,5,6,7,8].map((i) => v(`--serie-${i}`)),
+    fuente: v("--fuente-graf") || '"Public Sans",sans-serif',
   };
 }
 
@@ -470,13 +501,13 @@ function Grafico({ datos, layout, alto = 280, config: configExtra }) {
     const c = colores();
     const base = {
       paper_bgcolor: "transparent", plot_bgcolor: "transparent",
-      font: { family: '"Public Sans",sans-serif', size: 11, color: c.texto2 },
+      font: { family: c.fuente, size: 11, color: c.texto2 },
       margin: { t: 10, r: 12, b: 38, l: 54 },
       xaxis: { showgrid: false, linecolor: c.borde, zerolinecolor: c.borde, automargin: true },
       yaxis: { showgrid: false, linecolor: c.borde, zerolinecolor: c.borde, automargin: true },
       legend: { bgcolor: "transparent", font: { size: 11 }, orientation: "h", y: -0.22 },
       hoverlabel: { bgcolor: c.panel, bordercolor: c.borde,
-                    font: { color: c.texto, family: '"Public Sans",sans-serif' } },
+                    font: { color: c.texto, family: c.fuente } },
       colorway: c.series,
       height: alto,
     };
@@ -878,6 +909,10 @@ function Barra({ modo, setModo, tema, setTema, carteras, cartera, setCartera, yo
   const sistemaOscuro = window.matchMedia?.("(prefers-color-scheme: dark)").matches;
   const esOscuro = tema === "dark" || (tema === "auto" && sistemaOscuro);
   const locales = MERCADOS[mercado].locales;
+  if (LAB_PIEL) return (
+    <BarraLab modo={modo} setModo={setModo} tema={tema} setTema={setTema} esOscuro={esOscuro}
+              carteras={carteras} cartera={cartera} setCartera={setCartera} yo={yo}
+              locales={locales} idioma={idioma} cambiarIdioma={cambiarIdioma} />);
   return (
     <div className="barra">
       {/* Fila 1: lo que no cambia nunca de tamaño — logo, pestañas y quién sos.
@@ -923,6 +958,541 @@ function Barra({ modo, setModo, tema, setTema, carteras, cartera, setCartera, yo
       )}
     </div>
   );
+}
+
+/* Íconos de trazo (Lucide, 24×24) para la navegación de los labs: SVG y no
+   emoji, que cambia de dibujo según el sistema operativo. */
+const ICONOS = {
+  analisis: ["M3 3v18h18", "m19 9-5 5-4-4-3 3"],
+  comparacion: ["M8 3 4 7l4 4", "M4 7h16", "m16 21 4-4-4-4", "M20 17H4"],
+  carteras: ["M4 7h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2Z",
+             "M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"],
+  mercado: ["M12 2v20", "M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"],
+  conectores: ["M12 22v-5", "M9 8V2", "M15 8V2", "M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8Z"],
+  cocos: ["M3 22h18", "M6 18v-7", "M10 18v-7", "M14 18v-7", "M18 18v-7", "M12 2l8 5H4Z"],
+  inviu: ["M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2",
+          "M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4"],
+  sol: ["M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z", "M12 2v2", "M12 20v2", "m4.9 4.9 1.4 1.4",
+        "m17.7 17.7 1.4 1.4", "M2 12h2", "M20 12h2", "m6.3 17.7-1.4 1.4", "m19.1 4.9-1.4 1.4"],
+  luna: ["M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"],
+  menu: ["M4 6h16", "M4 12h16", "M4 18h16"],
+  alfiler: ["M12 17v5", "M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"],
+};
+const Icono = ({ k }) => (
+  <svg className="ico" viewBox="0 0 24 24" aria-hidden="true">
+    {ICONOS[k].map((d) => <path key={d} d={d} />)}
+  </svg>);
+
+/* Lab 4: la hora que corre en la cabecera del monitor, como en un terminal de
+   mesa de dinero. */
+function Reloj() {
+  const [ahora, setAhora] = useState(() => new Date());
+  useEffect(() => { const id = setInterval(() => setAhora(new Date()), 1000);
+                    return () => clearInterval(id); }, []);
+  return <div className="bl-reloj">{ahora.toLocaleTimeString("es-AR", { hour12: false })}</div>;
+}
+
+/* La barra de los labs. Un solo marcado para los dos: en el 1 es una columna
+   fija a la izquierda, en el 2 una cabecera de diario centrada. Lo que cambia
+   respecto de la de producción es que las carteras están todas a la vista —son
+   pocas y se cambian seguido: un clic en vez de abrir un desplegable— y que el
+   tema es un botón con su ícono en vez del switch con estrellas. */
+function BarraLab({ modo, setModo, tema, setTema, esOscuro, carteras, cartera, setCartera, yo,
+                    locales, idioma, cambiarIdioma }) {
+  // Lab 1: la columna vive escondida y sale al pasar el mouse por el borde o
+  // con el botón; el alfiler la deja fija (y eso se recuerda).
+  const [fija, setFija] = useState(() => { try { return localStorage.getItem("pa-lateral") === "fija"; }
+                                           catch { return false; } });
+  const [abierta, setAbierta] = useState(false);
+  useEffect(() => {
+    if (LAB !== "1") return;
+    document.documentElement.toggleAttribute("data-lateral-fija", fija);
+    // Plotly sólo se reacomoda cuando cambia la ventana, no cuando cambia el hueco.
+    window.dispatchEvent(new Event("resize"));
+    try { localStorage.setItem("pa-lateral", fija ? "fija" : "auto"); } catch { /* sin storage */ }
+  }, [fija]);
+  useEffect(() => {
+    if (!abierta) return;
+    const cerrar = (e) => { if (!e.target.closest(".barra-lab,.bl-boton")) setAbierta(false); };
+    document.addEventListener("click", cerrar);
+    return () => document.removeEventListener("click", cerrar);
+  }, [abierta]);
+  return (
+    <>
+    {LAB === "1" && !fija && (
+      <button className="bl-boton" aria-label={t("Abrir el menú", "Open the menu")} aria-expanded={abierta}
+              onClick={() => setAbierta((a) => !a)}><Icono k="menu" /></button>)}
+    <aside className={"barra-lab" + (abierta ? " abierta" : "")}
+           onMouseLeave={() => setAbierta(false)}>
+      <div className="bl-marca">Portfolio <span>Analyzer</span>
+        {LAB === "1" && (
+          <button className={"bl-fijar" + (fija ? " on" : "")} onClick={() => { setFija(!fija); setAbierta(false); }}
+                  aria-pressed={fija} title={fija ? t("Esconder sola", "Auto-hide") : t("Dejar fija", "Keep open")}>
+            <Icono k="alfiler" /></button>)}
+      </div>
+      {LAB === "4" && <Reloj />}
+      <div className="bl-fecha">{new Date().toLocaleDateString(IDIOMA === "en" ? "en-GB" : "es-AR",
+        { weekday: "long", day: "numeric", month: "long", year: "numeric" })}</div>
+      <nav className="bl-grupo bl-modos" aria-label={t("Vistas", "Views")}>
+        <div className="bl-t">{t("Vistas", "Views")}</div>
+        {MODOS.filter(([k]) => locales || !MODOS_LOCALES.includes(k)).map(([k, etiqueta], i) => (
+          <button key={k} className={"bl-item" + (modo === k ? " on" : "")} data-tecla={`F${i + 1}`}
+                  aria-current={modo === k ? "page" : undefined} onClick={() => setModo(k)}>
+            <Icono k={k} /><span>{modoLabel(k, etiqueta)}</span></button>
+        ))}
+      </nav>
+      <div className="bl-grupo bl-carteras">
+        <div className="bl-t">{t("Carteras", "Portfolios")}</div>
+        {carteras.map((c) => { const m = MERCADOS[c.mercado] || MERCADOS.AR; return (
+          <button key={c.nombre} className={"bl-cartera" + (cartera === c.nombre ? " on" : "")}
+                  aria-pressed={cartera === c.nombre} onClick={() => setCartera(c.nombre)}
+                  title={t(`Se mide desde ${m.nombre}`, `Measured from ${m.nombre_en}`)}>
+            <span className="bl-plaza" aria-hidden="true">{MERCADOS[c.mercado] ? c.mercado : "AR"}</span>
+            <span>{c.nombre}</span></button>); })}
+      </div>
+      <div className="bl-pie">
+        {yo?.email && <Usuario yo={yo} idioma={idioma} cambiarIdioma={cambiarIdioma}
+                               tema={tema} setTema={setTema} />}
+        <button className="bl-tema" onClick={() => setTema(esOscuro ? "light" : "dark")}
+                aria-label={esOscuro ? t("Pasar a claro", "Switch to light")
+                                     : t("Pasar a oscuro", "Switch to dark")}>
+          <Icono k={esOscuro ? "sol" : "luna"} />
+          <span>{esOscuro ? t("Tema claro", "Light theme") : t("Tema oscuro", "Dark theme")}</span>
+        </button>
+      </div>
+    </aside>
+    </>
+  );
+}
+
+/* ═══════════════ Labs 5–7 · la información, no la piel ═══════════════
+
+   Hoy el análisis son cinco pestañas y unos cuarenta paneles, ordenados por
+   MODELO (Markowitz, Monte Carlo, CAPM…). Quien abre la app no piensa en
+   modelos: piensa en cuatro o cinco preguntas. Estos labs reordenan lo mismo
+   alrededor de esas preguntas y dejan el resto a un clic ("análisis completo").
+
+   `senales()` es la pieza común: convierte cada indicador en una respuesta en
+   castellano llano, con un semáforo (ok / ojo / mal) y la cifra que la
+   sostiene. Los tres labs la dibujan distinto:
+     5 · Tablero: seis preguntas fijas en una sola pantalla.
+     6 · Preguntas: se navega por pregunta, no por modelo.
+     7 · Excepciones: arriba sólo lo que está mal; lo que está bien, una línea. */
+
+const ok_ = (r) => (r && !r.error ? r : null);
+
+const PREGUNTAS = [
+  ["ganancia", "¿Cuánto gané?", "How much did I make?"],
+  ["perdida", "¿Cuánto puedo perder?", "How much can I lose?"],
+  ["diversif", "¿Está bien repartida?", "Is it well spread?"],
+  ["mercado", "¿Le gano al mercado?", "Am I beating the market?"],
+  ["hacer", "¿Qué debería hacer?", "What should I do?"],
+  ["futuro", "¿Qué puede pasar en un año?", "What could happen in a year?"],
+];
+
+function senales(R) {
+  const ev = ok_(R.evolucion), r = ok_(R.riesgo), corr = ok_(R.correlaciones),
+        capm = ok_(R.capm), mom = ok_(R.momentum), mk = ok_(R.markowitz),
+        mc = ok_(R.montecarlo), reg = ok_(R.regimenes), obj = ok_(R.objetivos);
+  const s = [];
+  const add = (x) => s.push(x);
+
+  if (ev?.ultimos_12m?.tir_pct != null) {
+    const tir = ev.ultimos_12m.tir_pct, rf = (r?.rf ?? 0.04) * 100;
+    add({ id: "rend", q: "ganancia", nivel: tir < 0 ? "mal" : tir < rf ? "ojo" : "ok",
+      titulo: t("Rendimiento anual", "Annual return"), valor: pct(tir, 1),
+      frase: t(`En los últimos 12 meses rindió ${pct(tir, 1)} anual; una letra del Tesoro daba ${pct(rf, 1)}.`
+               + (ev.tir_anual_pct != null ? ` Desde la primera compra, ${pct(ev.tir_anual_pct, 1)} anual.` : ""),
+               `Over the last 12 months it returned ${pct(tir, 1)} a year; a T-bill paid ${pct(rf, 1)}.`
+               + (ev.tir_anual_pct != null ? ` Since the first purchase, ${pct(ev.tir_anual_pct, 1)} a year.` : "")) });
+  }
+  const lotes = (ev?.bajo_agua || []).filter((x) => x.dias >= 180);
+  if (ev) add({ id: "agua", q: "ganancia", nivel: lotes.length ? "ojo" : "ok",
+    titulo: t("Posiciones en pérdida hace mucho", "Long-losing positions"),
+    valor: lotes.length ? t(`${lotes.length} lotes`, `${lotes.length} lots`) : "0",
+    frase: lotes.length
+      ? t(`${lotes.length} lotes llevan más de 6 meses sin volver a lo que costaron: `,
+          `${lotes.length} lots have gone over 6 months without recovering their cost: `)
+        + [...new Set(lotes.map((x) => x.ticker))].map((tk) =>
+            `${tk} (${Math.max(...lotes.filter((x) => x.ticker === tk).map((x) => x.dias))} d)`).join(", ") + "."
+      : t("Ningún lote lleva más de 6 meses en pérdida.", "No lot has been losing for over 6 months.") });
+
+  if (r) {
+    const v = Math.abs(r.var95_pct);
+    add({ id: "dia", q: "perdida", nivel: v > ZONAS.limite ? "mal" : v > ZONAS.moderado ? "ojo" : "ok",
+      titulo: t("Un día malo", "A bad day"), valor: usd(Math.abs(r.var95_usd), 0),
+      frase: t(`Uno de cada 20 días podés perder más de ${usd(Math.abs(r.var95_usd), 0)} (${pct(v, 1)}). El límite prudente es ${num(ZONAS.limite, 1)} % por día.`,
+               `One day in 20 you can lose more than ${usd(Math.abs(r.var95_usd), 0)} (${pct(v, 1)}). The prudent limit is ${num(ZONAS.limite, 1)} % a day.`) });
+    const dd = Math.abs(r.max_drawdown_pct);
+    add({ id: "caida", q: "perdida", nivel: dd > 40 ? "mal" : dd > 20 ? "ojo" : "ok",
+      titulo: t("La peor racha", "The worst streak"), valor: "−" + pct(dd, 0),
+      frase: t(`En su peor racha llegó a caer ${pct(dd, 0)} desde un máximo. Recuperar eso pide subir ${pct(dd / (100 - dd) * 100, 0)}.`,
+               `In its worst streak it fell ${pct(dd, 0)} from a peak. Recovering that takes a ${pct(dd / (100 - dd) * 100, 0)} rise.`) });
+    const top = [...(r.contribucion_riesgo || [])].sort((a, b) => b.peso_pct - a.peso_pct)[0];
+    if (top) add({ id: "conc", q: "diversif",
+      nivel: top.peso_pct > 50 ? "mal" : top.peso_pct > 30 ? "ojo" : "ok",
+      titulo: t("Concentración", "Concentration"), valor: `${top.ticker} ${pct(top.peso_pct, 0)}`,
+      frase: t(`${top.ticker} es el ${pct(top.peso_pct, 0)} de la cartera y trae el ${pct(top.riesgo_pct, 0)} del riesgo.`,
+               `${top.ticker} is ${pct(top.peso_pct, 0)} of the portfolio and brings ${pct(top.riesgo_pct, 0)} of the risk.`) });
+  }
+  if (corr) add({ id: "corr", q: "diversif",
+    nivel: corr.correlacion_media > 0.6 ? "mal" : corr.correlacion_media > 0.4 ? "ojo" : "ok",
+    titulo: t("Se mueven juntos", "Move together"), valor: num(corr.correlacion_media, 2),
+    frase: corr.lectura });
+  if (capm) add({ id: "mercado", q: "mercado", nivel: capm.alpha_anual_pct < 0 ? "ojo" : "ok",
+    titulo: t("Contra el índice", "Against the index"),
+    valor: `${pct(capm.retorno_cartera_pct, 0)} vs ${pct(capm.retorno_benchmark_pct, 0)}`,
+    frase: t(`Rindió ${pct(capm.retorno_cartera_pct, 1)} anual contra ${pct(capm.retorno_benchmark_pct, 1)} del ${capm.benchmark_nombre}. Cuando el índice sube 10 %, la cartera tiende a subir ${num(capm.beta * 10, 1)} %.`,
+             `It returned ${pct(capm.retorno_cartera_pct, 1)} a year against ${pct(capm.retorno_benchmark_pct, 1)} for the ${capm.benchmark_nombre}. When the index rises 10 %, the portfolio tends to rise ${num(capm.beta * 10, 1)} %.`) });
+  if (mom) {
+    const ev_ = mom.por_activo.filter((x) => x["señal"] === "EVITAR"),
+          es_ = mom.por_activo.filter((x) => x["señal"] === "ESPERAR");
+    add({ id: "mom", q: "hacer", nivel: ev_.length ? "mal" : es_.length ? "ojo" : "ok",
+      titulo: t("Viento a favor", "Tailwind"),
+      valor: `${mom.por_activo.length - ev_.length - es_.length}/${mom.por_activo.length}`,
+      frase: [ev_.length && t(`En contra: ${ev_.map((x) => x.ticker).join(", ")}.`, `Against: ${ev_.map((x) => x.ticker).join(", ")}.`),
+              es_.length && t(`Para esperar: ${es_.map((x) => x.ticker).join(", ")}.`, `Wait on: ${es_.map((x) => x.ticker).join(", ")}.`),
+              !ev_.length && !es_.length && t("Todos los activos vienen con tendencia a favor.", "Every asset has a favorable trend.")]
+             .filter(Boolean).join(" ") });
+  }
+  if (mk) {
+    const grandes = (mk.acciones_max_sharpe || []).filter((x) => Math.abs(x.delta_pct) >= 15);
+    const flojo = mk.actual.sharpe < 0.75 * mk.max_sharpe.sharpe;
+    add({ id: "optim", q: "hacer", nivel: flojo && grandes.length ? "ojo" : "ok",
+      titulo: t("Reparto óptimo", "Optimal mix"),
+      valor: `${num(mk.actual.sharpe, 2)} → ${num(mk.max_sharpe.sharpe, 2)}`,
+      acciones: grandes,
+      frase: grandes.length
+        ? t(`Con otro reparto el retorno por unidad de riesgo pasaría de ${num(mk.actual.sharpe, 2)} a ${num(mk.max_sharpe.sharpe, 2)}. Es una sugerencia sobre datos pasados, no una orden.`,
+            `With another mix the return per unit of risk would go from ${num(mk.actual.sharpe, 2)} to ${num(mk.max_sharpe.sharpe, 2)}. It's a suggestion based on past data, not an order.`)
+        : t("El reparto actual está cerca del óptimo.", "The current mix is close to optimal.") });
+  }
+  if (obj) {
+    const red = (obj.por_activo || []).filter((x) => x.disponible && /REDUCIR|VENDER/.test(x.combinada || ""));
+    add({ id: "obj", q: "hacer", nivel: red.length ? "ojo" : "ok",
+      titulo: t("Precio objetivo de analistas", "Analyst target price"), valor: obj.upside_promedio_pct != null ? pct(obj.upside_promedio_pct, 1) : "—",
+      frase: red.length
+        ? red.map((x) => `${x.ticker}: ${x.combinada_texto}`).join(" ")
+        : t(`Recorrido promedio hasta el precio objetivo: ${pct(obj.upside_promedio_pct, 1)}.`,
+            `Average room to the target price: ${pct(obj.upside_promedio_pct, 1)}.`) });
+  }
+  if (mc) {
+    const f = mc.final;
+    add({ id: "mc", q: "futuro", nivel: f.prob_ganancia < 50 ? "mal" : f.prob_ganancia < 60 ? "ojo" : "ok",
+      titulo: t("Dentro de un año", "A year from now"), valor: pct(f.prob_ganancia, 0),
+      frase: t(`En 10.000 escenarios simulados termina el año arriba el ${pct(f.prob_ganancia, 0)} de las veces. Lo típico: ${usd(f.mediana, 0)}. Un año malo (1 de 20): ${usd(f.var95, 0)}.`,
+               `Across 10,000 simulated scenarios it ends the year up ${pct(f.prob_ganancia, 0)} of the time. Typical: ${usd(f.mediana, 0)}. A bad year (1 in 20): ${usd(f.var95, 0)}.`) });
+  }
+  if (reg) add({ id: "reg", q: "futuro", nivel: reg.regimen_actual === "calma" ? "ok" : "ojo",
+    titulo: t("Clima del mercado", "Market mood"),
+    valor: reg.regimen_actual === "calma" ? t("calma", "calm") : t("tensión", "tension"),
+    frase: t(`Hoy el mercado está en ${reg.regimen_actual}. Pasó el ${pct(reg.pct_tension, 0)} del tiempo en tensión.`,
+             `Today the market is ${reg.regimen_actual === "calma" ? "calm" : "tense"}. It spent ${pct(reg.pct_tension, 0)} of the time in tension.`) });
+  return s;
+}
+
+const ORDEN_NIVEL = { mal: 0, ojo: 1, ok: 2 };
+const peorNivel = (l) => l.reduce((a, x) => (ORDEN_NIVEL[x.nivel] < ORDEN_NIVEL[a] ? x.nivel : a), "ok");
+const NIVEL_TXT = { ok: ["en orden", "fine"], ojo: ["para mirar", "worth a look"], mal: ["atención", "attention"] };
+
+/* Las tenencias por ACTIVO, no por lote: tres compras de METR.BA son una sola
+   decisión. Peso, valor, resultado y la señal de tendencia en una fila. */
+function InfoTenencias({ R }) {
+  const p = ok_(R.posicion); if (!p) return null;
+  const nombres = Object.fromEntries((ok_(R.composicion)?.detalle || []).map((x) => [x.ticker, x.nombre]));
+  const senal = Object.fromEntries((ok_(R.momentum)?.por_activo || []).map((x) => [x.ticker, x["señal"]]));
+  const por = {};
+  for (const f of p.posiciones) {
+    const a = (por[f.ticker] ||= { ticker: f.ticker, valor: 0, costo: 0, dia: 0 });
+    a.valor += f.valor_usd || 0; a.costo += f.costo_usd || 0; a.dia += f.pnl_dia_usd || 0;
+  }
+  const filas = Object.values(por).sort((a, b) => b.valor - a.valor);
+  const total = filas.reduce((s, x) => s + x.valor, 0) || 1;
+  const tono = { FAVORABLE: "ok", ESPERAR: "ojo", EVITAR: "mal" };
+  return (
+    <div className="tabla-wrap"><table className="info-tabla">
+      <thead><tr><th>{t("Activo", "Asset")}</th><th>{t("Peso", "Weight")}</th>
+        <th className="n">{t("Valor", "Value")}</th><th className="n">{t("Hoy", "Today")}</th>
+        <th className="n">{t("Resultado", "Result")}</th><th className="c">{t("Tendencia", "Trend")}</th></tr></thead>
+      <tbody>{filas.map((x) => {
+        const pnl = x.valor - x.costo, peso = (x.valor / total) * 100;
+        return (
+          <tr key={x.ticker}>
+            <td><b className="mono">{x.ticker}</b>{nombres[x.ticker] && nombres[x.ticker] !== "—" &&
+              <div className="info-nombre">{nombres[x.ticker]}</div>}</td>
+            <td><div className="info-peso"><i style={{ width: peso + "%" }} /><span>{pct(peso, 0)}</span></div></td>
+            <td className="n">{usd(x.valor, 0)}</td>
+            <td className={"n " + signo(x.dia)}>{usd(x.dia, 0)}</td>
+            <td className={"n " + signo(pnl)}>{usd(pnl, 0)}
+              <div className="info-nombre">{x.costo ? pct((pnl / x.costo) * 100, 1) : ""}</div></td>
+            <td>{senal[x.ticker]
+              ? <span className={"chip " + tono[senal[x.ticker]]}>{t(senal[x.ticker], SENAL_EN[senal[x.ticker]] || senal[x.ticker])}</span>
+              : <span className="info-nombre">{t("caja", "cash")}</span>}</td>
+          </tr>);
+      })}</tbody>
+    </table></div>);
+}
+
+/* El gráfico que más dice con menos: lo que vale contra lo que pusiste. Si la
+   línea llena está arriba de la punteada, la cartera ganó plata; si está
+   abajo, perdió. No hace falta leer un eje. */
+function InfoValor({ ev, alto = 230 }) {
+  const c = colores();
+  const datos = useMemo(() => [
+    { x: ev.fechas, y: ev.valor_usd, name: t("Lo que vale", "What it's worth"), type: "scatter", mode: "lines",
+      line: { color: c.acento, width: 2 }, fill: "tozeroy", fillcolor: rgba(c.acento, 0.12) },
+    { x: ev.fechas, y: ev.puesto_serie, name: t("Lo que pusiste", "What you put in"), type: "scatter", mode: "lines",
+      line: { color: c.texto3, width: 1.5, dash: "dot" } },
+  ], [ev]);
+  const layout = useMemo(() => ({ margin: { t: 6, r: 6, b: 30, l: 52 }, showlegend: true,
+    legend: { orientation: "h", y: 1.12, x: 0 }, yaxis: { tickprefix: "$", gridcolor: c.borde, showgrid: true } }), []);
+  return <Grafico datos={datos} layout={layout} alto={alto} />;
+}
+
+/* El año que viene en una barra: del escenario malo al bueno, con la mediana
+   y lo que vale hoy marcados. Reemplaza al abanico y al histograma. */
+function InfoRango({ mc }) {
+  const f = mc.final, hoy = mc.valor_inicial;
+  const lo = Math.min(f.p5, hoy), hi = Math.max(f.p95, hoy), en = (v) => ((v - lo) / (hi - lo || 1)) * 100 + "%";
+  return (
+    <div className="info-rango">
+      <div className="via">
+        <i className="malo" style={{ left: 0, width: en(hoy) }} />
+        <i className="bueno" style={{ left: en(hoy), right: 0 }} />
+        <b className="hoy" style={{ left: en(hoy) }} title={t("hoy", "today")} />
+        <b className="med" style={{ left: en(f.mediana) }} />
+      </div>
+      <div className="pies"><span>{usd(f.p5, 0)}<s>{t("año malo", "bad year")}</s></span>
+        <span style={{ textAlign: "center" }}>{usd(f.mediana, 0)}<s>{t("lo típico", "typical")}</s></span>
+        <span style={{ textAlign: "right" }}>{usd(f.p95, 0)}<s>{t("año bueno", "good year")}</s></span></div>
+    </div>);
+}
+
+function MiniPesos({ r }) {
+  const c = colores();
+  const l = [...(r.contribucion_riesgo || [])].sort((a, b) => b.peso_pct - a.peso_pct);
+  return (
+    <div className="info-apilada">{l.map((x, i) => (
+      <i key={x.ticker} style={{ width: x.peso_pct + "%", background: c.series[i % 8] }}
+         title={`${x.ticker} ${pct(x.peso_pct, 1)}`}>{x.peso_pct > 12 ? x.ticker : ""}</i>))}</div>);
+}
+
+function MiniBarra({ v, max, tope }) {
+  return (
+    <div className="info-mini"><i style={{ width: Math.min(100, (v / max) * 100) + "%" }} />
+      {tope != null && <b style={{ left: (tope / max) * 100 + "%" }} />}</div>);
+}
+
+function Acciones({ l }) {
+  return (
+    <ul className="info-acc">{l.map((x) => (
+      <li key={x.ticker}><span className={"chip " + (x.accion === "VENDER" ? "mal" : "ok")}>
+        {t(x.accion, ACCIONES_EN[x.accion] || x.accion)}</span>
+        <b className="mono">{x.ticker}</b> {usd(Math.abs(x.delta_usd), 0)}
+        <s>{pct(x.peso_actual_pct, 0)} → {pct(x.peso_objetivo_pct, 0)}</s></li>))}</ul>);
+}
+
+/* El detalle de cada señal: el panel existente que la explica, entero. */
+function DetalleSenal({ id, R, cartera, bench }) {
+  const r = ok_(R.riesgo), ev = ok_(R.evolucion);
+  switch (id) {
+    case "rend": return ev && <TirVentana ev={ev} />;
+    case "agua": return ev && <RendimientoTotal ev={ev} />;
+    case "dia": return r && <ZonasRiesgo d={r} />;
+    case "caida": return ok_(R.stress) && <Stress d={R.stress} />;
+    case "conc": return r && <RiesgoResumen d={r} />;
+    case "corr": return ok_(R.correlaciones) && <MatrizCorrelaciones corr={R.correlaciones} />;
+    case "mercado": return ok_(R.capm) && <Capm d={R.capm} cartera={cartera} bench={bench} todos={R.benchmarks} />;
+    case "mom": return ok_(R.momentum) && <Momentum d={R.momentum} />;
+    case "mc": return ok_(R.montecarlo) && <MonteCarlo d={R.montecarlo} cartera={cartera} />;
+    default: return null;
+  }
+}
+
+function Info(props) {
+  const s = senales(props.R);
+  if (LAB === "5") return <InfoTablero s={s} {...props} />;
+  if (LAB === "1" || LAB === "6") return <InfoPreguntas s={s} {...props} />;
+  return <InfoExcepciones s={s} {...props} />;
+}
+
+/* Las cuatro cifras de arriba, iguales en los tres labs: valor, hoy, resultado
+   y rendimiento anual. Lo demás —costo, cantidad de posiciones, realizado por
+   separado— vive en el análisis completo. */
+function InfoCifras({ R }) {
+  const p = ok_(R.posicion), ev = ok_(R.evolucion);
+  if (!p) return null;
+  const tir = ev?.ultimos_12m?.tir_pct;
+  const fig = (et, val, tono, sub) => (
+    <div className="info-cifra"><div className="et">{et}</div>
+      <div className={"val mono " + (tono || "")}>{val}</div>{sub && <div className="sub">{sub}</div>}</div>);
+  return (
+    <div className="info-cifras">
+      {fig(t("Vale", "Worth"), usd(ev?.valor_hoy_usd ?? p.valor_total, 0), "", null)}
+      {fig(diaEtiqueta(p.dia_fecha) === t("hoy", "today") ? t("Hoy", "Today") : t(`Rueda ${diaEtiqueta(p.dia_fecha)}`, `Session ${diaEtiqueta(p.dia_fecha)}`),
+           usd(p.pnl_dia, 0), signo(p.pnl_dia), pct(p.pnl_dia_pct, 1))}
+      {ev && fig(t("Resultado total", "Total result"), usd(ev.resultado_usd, 0), signo(ev.resultado_usd),
+                 t(`sobre ${usd(ev.puesto_neto_usd, 0)} puestos`, `on ${usd(ev.puesto_neto_usd, 0)} put in`))}
+      {tir != null && fig(t("Rinde por año", "Yearly return"), pct(tir, 1), signo(tir), t("últimos 12 meses", "last 12 months"))}
+    </div>);
+}
+
+function VerCompleto({ onClick }) {
+  return (
+    <div className="info-completo">
+      <button className="btn" onClick={onClick}>{t("Ver el análisis completo →", "See the full analysis →")}</button>
+      <span>{t("Sharpe, frontera eficiente, Black-Litterman, regímenes, correlaciones animadas y los otros cuarenta paneles.",
+               "Sharpe, efficient frontier, Black-Litterman, regimes, animated correlations and the other forty panels.")}</span>
+    </div>);
+}
+
+/* ── Lab 5 · Tablero ─────────────────────────────────────────────────────────
+   Una pantalla, sin pestañas. Seis preguntas fijas, siempre en el mismo lugar
+   —la memoria espacial es lo que hace rápido un tablero—, cada una con una
+   cifra, un semáforo y un dibujo mínimo. Abajo, lo que tenés y cómo evolucionó. */
+function InfoTablero({ s, R, verCompleto }) {
+  const by = Object.fromEntries(s.map((x) => [x.id, x]));
+  const r = ok_(R.riesgo), mc = ok_(R.montecarlo), ev = ok_(R.evolucion), capm = ok_(R.capm),
+        mom = ok_(R.momentum);
+  const tile = (x, dibujo) => x && (
+    <div className={"info-tile " + x.nivel} key={x.id}>
+      <div className="info-tile-t"><span className={"info-luz " + x.nivel} />{x.titulo}
+        <span className="info-tile-n">{t(...NIVEL_TXT[x.nivel])}</span></div>
+      <div className="info-tile-v mono">{x.valor}</div>
+      {dibujo}
+      <p>{x.frase}</p>
+    </div>);
+  return (
+    <>
+      <InfoCifras R={R} />
+      <div className="info-tablero">
+        {tile(by.rend)}
+        {tile(by.dia, r && <MiniBarra v={Math.abs(r.var95_pct)} max={Math.max(6, Math.abs(r.var95_pct) * 1.2)} tope={ZONAS.limite} />)}
+        {tile(by.conc, r && <MiniPesos r={r} />)}
+        {tile(by.mercado, capm && <div className="info-vs">
+          <div><s>{t("vos", "you")}</s><MiniBarra v={Math.max(0, capm.retorno_cartera_pct)} max={Math.max(capm.retorno_cartera_pct, capm.retorno_benchmark_pct, 1)} /></div>
+          <div><s>{t("índice", "index")}</s><MiniBarra v={Math.max(0, capm.retorno_benchmark_pct)} max={Math.max(capm.retorno_cartera_pct, capm.retorno_benchmark_pct, 1)} /></div></div>)}
+        {tile(by.mc, mc && <InfoRango mc={mc} />)}
+        {tile(by.mom, mom && <div className="info-chips">{mom.por_activo.map((x) => (
+          <span key={x.ticker} className={"chip " + ({ FAVORABLE: "ok", ESPERAR: "ojo", EVITAR: "mal" }[x["señal"]])}>{x.ticker}</span>))}</div>)}
+      </div>
+      <div className="fila f2 info-abajo">
+        <div className="panel"><h3>{t("Qué tenés", "What you hold")}</h3><InfoTenencias R={R} /></div>
+        {ev && <div className="panel"><h3>{t("Lo que vale contra lo que pusiste", "What it's worth vs what you put in")}</h3>
+          <InfoValor ev={ev} alto={260} /></div>}
+      </div>
+      <VerCompleto onClick={verCompleto} />
+    </>);
+}
+
+/* ── Lab 6 · Preguntas ───────────────────────────────────────────────────────
+   La navegación deja de ser por modelo y pasa a ser por pregunta. Cada una
+   abre con la respuesta corta —una o dos frases con su semáforo— y debajo sólo
+   los uno o dos paneles que la prueban. Lo que no responde ninguna pregunta no
+   aparece. */
+function InfoPreguntas({ s, R, cartera, bench, verCompleto }) {
+  const [q, setQ] = useState("ganancia");
+  const r = ok_(R.riesgo), ev = ok_(R.evolucion), mk = ok_(R.markowitz);
+  const deQ = (k) => s.filter((x) => x.q === k);
+  const pruebas = {
+    ganancia: <>{ev && <div className="panel"><h3>{t("Lo que vale contra lo que pusiste", "What it's worth vs what you put in")}</h3><InfoValor ev={ev} /></div>}
+                {ev && <TirVentana ev={ev} />}</>,
+    perdida: <>{r && <ZonasRiesgo d={r} />}{ok_(R.stress) && <Stress d={R.stress} />}</>,
+    diversif: <>{ok_(R.composicion) && <Composicion d={R.composicion} cartera={cartera} />}
+                {r && <RiesgoResumen d={r} />}</>,
+    mercado: <>{ok_(R.capm) && <Capm d={R.capm} cartera={cartera} bench={bench} todos={R.benchmarks} />}</>,
+    hacer: <>{mk && s.find((x) => x.id === "optim")?.acciones?.length > 0 && (
+                <div className="panel"><h3>{t("Lo que movería el modelo", "What the model would move")}</h3>
+                  <Acciones l={s.find((x) => x.id === "optim").acciones} />
+                  <div className="pie">{t("Markowitz de máximo Sharpe sobre los retornos pasados. En la pestaña de optimización del análisis completo está la prueba de si eso habría funcionado.",
+                                          "Maximum-Sharpe Markowitz on past returns. The optimization tab of the full analysis tests whether it would have worked.")}</div></div>)}
+             {ok_(R.momentum) && <Momentum d={R.momentum} />}</>,
+    futuro: <>{ok_(R.montecarlo) && <div className="panel"><h3>{t("El año que viene, en una barra", "Next year, in one bar")}</h3><InfoRango mc={R.montecarlo} /></div>}
+              {ok_(R.montecarlo) && <MonteCarlo d={R.montecarlo} cartera={cartera} />}</>,
+  };
+  return (
+    <>
+      <InfoCifras R={R} />
+      <div className="info-q">
+        <nav className="info-q-lista">
+          {PREGUNTAS.map(([k, es, en]) => {
+            const l = deQ(k); if (!l.length) return null;
+            const n = peorNivel(l);
+            return (
+              <button key={k} className={"info-q-item" + (q === k ? " on" : "")} onClick={() => setQ(k)}>
+                <span className={"info-luz " + n} /><span>{t(es, en)}</span>
+                <s>{l[0].valor}</s></button>);
+          })}
+          <button className="info-q-item" onClick={() => setQ("tengo")} data-on={q === "tengo"}>
+            <span className="info-luz neutro" /><span>{t("¿Qué tengo?", "What do I hold?")}</span></button>
+        </nav>
+        <div className="info-q-cuerpo">
+          <h2>{q === "tengo" ? t("¿Qué tengo?", "What do I hold?")
+                             : t(...PREGUNTAS.find((x) => x[0] === q).slice(1))}</h2>
+          {q === "tengo" ? <div className="panel"><InfoTenencias R={R} /></div> : <>
+            <div className="info-respuestas">{deQ(q).map((x) => (
+              <div key={x.id} className={"info-resp " + x.nivel}>
+                <span className={"info-luz " + x.nivel} />
+                <div><b>{x.titulo} · <span className="mono">{x.valor}</span></b><p>{x.frase}</p></div>
+              </div>))}</div>
+            <div className="info-pruebas">{pruebas[q]}</div></>}
+        </div>
+      </div>
+      <VerCompleto onClick={verCompleto} />
+    </>);
+}
+
+/* ── Lab 7 · Excepciones ─────────────────────────────────────────────────────
+   Como un tablero de control de avión: si todo está bien no hay nada que leer.
+   Arriba, cuántas cosas piden atención; después, cada una abierta con su
+   frase y un botón para ver la prueba; al final, lo que está en orden, en una
+   sola línea de chips. Una cartera sana se lee en tres segundos. */
+function InfoExcepciones({ s, R, cartera, bench, verCompleto }) {
+  const [abierto, setAbierto] = useState(null);
+  const malos = s.filter((x) => x.nivel !== "ok").sort((a, b) => ORDEN_NIVEL[a.nivel] - ORDEN_NIVEL[b.nivel]);
+  const buenos = s.filter((x) => x.nivel === "ok");
+  const p = ok_(R.posicion);
+  // Lo que más se movió en la rueda: lo único del día que vale la pena nombrar.
+  const movidas = p ? Object.values(p.posiciones.reduce((a, f) => {
+    if (f.pnl_dia_pct == null) return a;
+    (a[f.ticker] ||= { ticker: f.ticker, pct: f.pnl_dia_pct, usd: 0 }).usd += f.pnl_dia_usd || 0; return a;
+  }, {})).sort((a, b) => Math.abs(b.usd) - Math.abs(a.usd)).slice(0, 3) : [];
+  return (
+    <>
+      <InfoCifras R={R} />
+      {movidas.length > 0 && (
+        <div className="info-movidas">{t("Lo que movió la rueda:", "What moved the session:")}
+          {movidas.map((x) => <span key={x.ticker}><b className="mono">{x.ticker}</b>{" "}
+            <span className={signo(x.usd)}>{usd(x.usd, 0)} ({pct(x.pct, 1)})</span></span>)}</div>)}
+      <h2 className="info-titular">
+        {malos.length
+          ? t(`${malos.length} ${malos.length === 1 ? "cosa pide" : "cosas piden"} atención`,
+              `${malos.length} ${malos.length === 1 ? "thing needs" : "things need"} attention`)
+          : t("Todo en orden", "All good")}
+        <span>{t(`${buenos.length} en orden`, `${buenos.length} fine`)}</span></h2>
+      <div className="info-alertas">{malos.map((x) => {
+        const det = DetalleSenal({ id: x.id, R, cartera, bench });
+        return (
+          <div key={x.id} className={"info-alerta " + x.nivel}>
+            <div className="info-alerta-cab">
+              <span className={"info-luz " + x.nivel} />
+              <b>{x.titulo}</b><span className="mono info-alerta-v">{x.valor}</span>
+              <span className="info-alerta-n">{t(...NIVEL_TXT[x.nivel])}</span>
+            </div>
+            <p>{x.frase}</p>
+            {x.acciones?.length > 0 && <Acciones l={x.acciones} />}
+            {det && <button className="btn" onClick={() => setAbierto(abierto === x.id ? null : x.id)}>
+              {abierto === x.id ? t("Ocultar la prueba", "Hide the evidence") : t("Ver la prueba", "See the evidence")}</button>}
+            {abierto === x.id && <div className="info-prueba">{det}</div>}
+          </div>);
+      })}</div>
+      {buenos.length > 0 && (
+        <div className="info-bien"><span>{t("En orden:", "Fine:")}</span>
+          {buenos.map((x) => <span key={x.id} className="info-bien-chip" title={x.frase}>
+            <span className="info-luz ok" />{x.titulo} <b className="mono">{x.valor}</b></span>)}</div>)}
+      <div className="panel"><h3>{t("Qué tenés", "What you hold")}</h3><InfoTenencias R={R} /></div>
+      <VerCompleto onClick={verCompleto} />
+    </>);
 }
 
 /* ═══════════════ Modo 1 · Análisis ═══════════════ */
@@ -1073,6 +1643,13 @@ function Analisis({ cartera, recargar, sim, setSim }) {
   const [run, setRun] = useState(null);
   const [estado, setEstado] = useState(null);
   const [tab, setTab] = useState("posicion");
+  // Labs 5–7: la vista simple primero; el análisis entero queda a un clic.
+  const [completo, setCompletoE] = useState(() => {
+    // En el 1 arranca completa —la simple es para quien la elige— y se recuerda.
+    if (LAB !== "1") return false;
+    try { return localStorage.getItem("pa-vista") !== "simple"; } catch { return true; } });
+  const setCompleto = (v) => { setCompletoE(v);
+    try { localStorage.setItem("pa-vista", v ? "completa" : "simple"); } catch { /* sin storage */ } };
   const [bench, setBench] = useState(() => MERCADOS[MERCADO].bench);
   // Mientras el usuario no elija índice manda el que mejor explica la cartera:
   // lo dice el CAPM cuando termina de medir los tres. Si lo tocó se respeta —
@@ -1146,8 +1723,29 @@ function Analisis({ cartera, recargar, sim, setSim }) {
   const M = estado.modelos || {};
   const listos = Object.values(M).filter((m) => m.estado === "listo").length;
 
+  // Lab 1: la cartera que se mira (la columna está escondida) y el interruptor.
+  const cabeza = LAB === "1" && (
+    <div className="l10-cab">
+      <h1>{cartera}</h1>
+      <div className="l10-vista" role="group" aria-label={t("Vista", "View")}>
+        <button aria-pressed={!completo} onClick={() => setCompleto(false)}>{t("Simple", "Simple")}</button>
+        <button aria-pressed={completo} onClick={() => setCompleto(true)}>{t("Completa", "Full")}</button>
+      </div>
+    </div>);
+
+  if (LAB_INFO && !completo) return (
+    <>
+      {cabeza}
+      {estado.estado !== "terminado" && <PasosModelos M={M} listos={listos} />}
+      <Info R={R} cartera={cartera} bench={bench} verCompleto={() => setCompleto(true)} />
+    </>);
+
   return (
     <>
+      {cabeza}
+      {LAB_INFO && LAB !== "1" && (
+        <button className="btn info-volver" onClick={() => setCompleto(false)}>
+          ← {t("Volver a la vista simple", "Back to the simple view")}</button>)}
       {estado.estado !== "terminado" && (
         <PasosModelos M={M} listos={listos} />
       )}
@@ -1463,10 +2061,22 @@ function Posicion({ d, cartera, recargar, lanzar, extras, bench, sim, setSim }) 
 
   return (
     <>
+      {/* En los labs, primero lo que se pregunta al abrir —cuánto vale, cómo le
+          fue hoy, cuánto gané— y después los ratios: el Sharpe no es lo primero
+          que uno mira a la mañana. El resumen reemplaza a la fila de KPIs de
+          tenencia, que repetía los mismos números en tarjetas sueltas. */}
+      {LAB_PIEL && <Resumen d={d} ev={ev && !ev.error ? ev : null} cartera={cartera}
+                       cerrado={cerrado} real={real} filas={filas} />}
+
       {/* 1 · Cómo se comporta la cartera, antes que el detalle de qué tiene */}
       {r && !r.error && <KpisRiesgo d={r} capm={extras?.capm} />}
 
       {/* 2 · Qué tengo */}
+      {LAB_PIEL ? (caucionTotal != null && (
+        <div className="kpis">
+          <Kpi etiqueta="Resultado cauciones" valor={usd(caucionTotal)} tono={signo(caucionTotal)}
+               sub="carry trade tomadora + colocadora, ya incluido en el realizado" />
+        </div>)) :
       <div className="kpis">
         {!(ev && !ev.error) && (
           <Kpi etiqueta={t("Valor total", "Total value")} valor={usd(d.valor_total)} ayuda={AYUDA.valor}
@@ -1491,7 +2101,7 @@ function Posicion({ d, cartera, recargar, lanzar, extras, bench, sim, setSim }) 
         <Kpi etiqueta={t("Posiciones", "Positions")} valor={filas.length}
              sub={t(`${new Set(filas.map(f=>f.ticker)).size} activos`,
                     `${new Set(filas.map(f=>f.ticker)).size} assets`)} />
-      </div>
+      </div>}
 
       {/* Mismo recuadro que en la pestaña InvIU: solo el lado que sigue
           vigente hoy — una deuda (tomadora) o una inversión (colocadora) que
@@ -2453,7 +3063,7 @@ function MatrizCorrelaciones({ corr }) {
 
 function Seccion({ titulo }) {
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 12, margin: "26px 0 12px" }}>
+    <div className="seccion" style={{ display: "flex", alignItems: "center", gap: 12, margin: "26px 0 12px" }}>
       <h3 style={{ margin: 0, fontSize: 16.5, whiteSpace: "nowrap" }}>{titulo}</h3>
       <div style={{ flex: 1, height: 1, background: "var(--borde)" }} />
     </div>
@@ -2823,8 +3433,9 @@ function RendimientoTotal({ ev }) {
   return (
     <div className="panel" style={{ position: "relative" }}>
       <h3>{t("Rendimiento total", "Total return")}
-        <button className="btn" style={{ marginLeft: "auto", padding: "2px 9px" }}
-                onClick={(e) => { e.stopPropagation(); setAbierto((x) => !x); }}>⋯</button>
+        {/* Las tres opciones del menú no hacen nada todavía: en los labs no se muestra. */}
+        {!LAB && <button className="btn" style={{ marginLeft: "auto", padding: "2px 9px" }}
+                onClick={(e) => { e.stopPropagation(); setAbierto((x) => !x); }}>⋯</button>}
       </h3>
       {abierto && (
         <div style={{ position: "absolute", right: 16, top: 46, background: "var(--panel)",
@@ -3673,8 +4284,8 @@ function useCapm(cartera, bench, job, todos) {
 
 function KpisRiesgo({ d, capm }) {
   const n = d.n_ruedas;
-  return (
-    <div className="kpis">
+  const todos = (
+    <>
       <Kpi etiqueta="Sharpe" valor={num(d.sharpe, 3)} ayuda={AYUDA.sharpe}
            nivel={nivelRatio("sharpe", d.sharpe, n)} sub={d.rf_label} />
       <Kpi etiqueta="Sortino" valor={num(d.sortino, 3)} ayuda={AYUDA.sortino}
@@ -3696,7 +4307,82 @@ function KpisRiesgo({ d, capm }) {
       <Kpi etiqueta={t("Peor caída", "Worst drawdown")} valor={pct(d.max_drawdown_pct)} tono="neg" ayuda={AYUDA.maxdd} />
       <Kpi etiqueta={t("Curtosis", "Kurtosis")} valor={num(d.curtosis_exceso)} ayuda={AYUDA.curtosis}
            tono={d.curtosis_exceso > 3 ? "neg" : ""} sub={t("en exceso", "excess")} />
+    </>
+  );
+  if (!LAB_PIEL) return <div className="kpis">{todos}</div>;
+  // En los labs, dos grupos con nombre: cuánto paga el riesgo (los cuatro
+  // ratios) y cuánto riesgo hay (volatilidad y pérdidas). Nueve tarjetas
+  // iguales en fila dejaban a la curtosis sola en una segunda línea y no
+  // decían qué tenían en común.
+  const kids = React.Children.toArray(todos.props.children);
+  const corte = kids.length - 5;
+  return (
+    <div className="kpi-grupos">
+      <section className="kpi-grupo">
+        <h4>{t("Cuánto paga el riesgo", "How well risk pays")}</h4>
+        <div className="kpis">{kids.slice(0, corte)}</div>
+      </section>
+      <section className="kpi-grupo">
+        <h4>{t("Cuánto riesgo hay", "How much risk there is")}</h4>
+        <div className="kpis">{kids.slice(corte)}</div>
+      </section>
     </div>
+  );
+}
+
+/* El resumen de los labs: la cartera en una línea. En el 1 es una tira de
+   cifras; en el 2 además una frase, como el primer párrafo de un informe. */
+function Resumen({ d, ev, cartera, cerrado, real, filas }) {
+  const moneda = MERCADOS[MERCADO].simbolo === "$" ? "US$" : MERCADOS[MERCADO].simbolo;
+  const valor = ev?.valor_hoy_usd ?? d.valor_total;
+  const cifra = Number(valor).toLocaleString(IDIOMA === "en" ? "en-US" : "es-AR",
+                                             { maximumFractionDigits: 0 });
+  const total = ev ? ev.resultado_usd : cerrado != null ? d.pnl + cerrado : d.pnl;
+  const totalPct = ev ? ev.rendimiento_pct : null;
+  const tir = ev?.ultimos_12m?.tir_pct;
+  const activos = new Set(filas.map((f) => f.ticker)).size;
+  const dia = diaEtiqueta(d.dia_fecha);
+  const fig = (et, val, tono, sub, cls = "") => (
+    <div className={"res-fig " + cls}>
+      <div className="et">{et}</div>
+      <div className={"val mono " + (tono || "")}>{val}</div>
+      {sub && <div className="sub">{sub}</div>}
+    </div>);
+  return (
+    <section className="resumen">
+      <p className="res-frase">
+        {IDIOMA === "en" ? <>
+          <b>{cartera}</b> is worth <b>{moneda} {cifra}</b>.
+          {d.pnl_dia != null && <> On the {dia === "today" ? "session today" : `session of ${dia}`} it{" "}
+            {d.pnl_dia >= 0 ? "gained" : "lost"} <b className={signo(d.pnl_dia)}>{usd(Math.abs(d.pnl_dia))}</b>.</>}
+          {tir != null && <> Over the last twelve months it returned <b className={signo(tir)}>{pct(tir, 1)}</b> a year</>}
+          {totalPct != null && <>; since the first purchase, <b className={signo(totalPct)}>{pct(totalPct, 1)}</b> in total</>}.
+        </> : <>
+          <b>{cartera}</b> vale <b>{moneda} {cifra}</b>.
+          {d.pnl_dia != null && <> En la rueda {dia === "hoy" ? "de hoy" : `del ${dia}`}{" "}
+            {d.pnl_dia >= 0 ? "ganó" : "perdió"} <b className={signo(d.pnl_dia)}>{usd(Math.abs(d.pnl_dia))}</b>.</>}
+          {tir != null && <> En los últimos doce meses rindió <b className={signo(tir)}>{pct(tir, 1)}</b> anual</>}
+          {totalPct != null && <>; desde la primera compra, <b className={signo(totalPct)}>{pct(totalPct, 1)}</b> en total</>}.
+        </>}
+      </p>
+      <div className="res-cifras">
+        {fig(t("Valor de cartera", "Portfolio value"), `${moneda} ${cifra}`, "",
+             t(`costo ${usd(d.costo_total)} · ${filas.length} posiciones en ${activos} activos`,
+               `cost ${usd(d.costo_total)} · ${filas.length} positions in ${activos} assets`), "grande")}
+        {d.pnl_dia != null && fig(dia === t("hoy", "today") ? t("Hoy", "Today") : t(`Rueda ${dia}`, `Session ${dia}`),
+             usd(d.pnl_dia), signo(d.pnl_dia), pct(d.pnl_dia_pct))}
+        {fig(t("Resultado total", "Total result"), usd(total), signo(total),
+             ev ? t(`${pct(totalPct, 1)} sobre ${usd(ev.puesto_neto_usd, 0)} puestos`,
+                    `${pct(totalPct, 1)} on ${usd(ev.puesto_neto_usd, 0)} put in`)
+                : t("abierto + cerrado", "open + realized"))}
+        {fig(t("Abierto", "Open"), usd(d.pnl), signo(d.pnl), pct(d.pnl_pct, 1))}
+        {cerrado != null && fig(t("Realizado", "Realized"), usd(cerrado), signo(cerrado),
+             t(`${real.n} operaciones`, `${real.n} trades`))}
+        {tir != null && fig(t("TIR 12 meses", "IRR 12 months"), pct(tir, 1), signo(tir),
+             ev.tir_anual_pct != null ? t(`desde el inicio ${pct(ev.tir_anual_pct, 1)}`,
+                                          `since inception ${pct(ev.tir_anual_pct, 1)}`) : null)}
+      </div>
+    </section>
   );
 }
 
