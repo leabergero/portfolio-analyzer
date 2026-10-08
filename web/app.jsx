@@ -1391,7 +1391,13 @@ function InfoTablero({ s, R, verCompleto }) {
    los uno o dos paneles que la prueban. Lo que no responde ninguna pregunta no
    aparece. */
 function InfoPreguntas({ s, R, cartera, bench, verCompleto }) {
-  const [q, setQ] = useState("ganancia");
+  const [q, setQE] = useState("ganancia");
+  const cuerpo = useRef(null);
+  // Apiladas (teléfono, monitor vertical) la respuesta queda debajo de la lista:
+  // elegir una pregunta lleva hasta ella en vez de cambiar algo fuera de vista.
+  const setQ = (k) => { setQE(k);
+    if (matchMedia("(max-width:860px)").matches) requestAnimationFrame(() =>
+      cuerpo.current?.scrollIntoView({ behavior: "smooth", block: "start" })); };
   const r = ok_(R.riesgo), ev = ok_(R.evolucion), mk = ok_(R.markowitz);
   const deQ = (k) => s.filter((x) => x.q === k);
   const pruebas = {
@@ -1426,7 +1432,7 @@ function InfoPreguntas({ s, R, cartera, bench, verCompleto }) {
           <button className="info-q-item" onClick={() => setQ("tengo")} data-on={q === "tengo"}>
             <span className="info-luz neutro" /><span>{t("¿Qué tengo?", "What do I hold?")}</span></button>
         </nav>
-        <div className="info-q-cuerpo">
+        <div className="info-q-cuerpo" ref={cuerpo}>
           <h2>{q === "tengo" ? t("¿Qué tengo?", "What do I hold?")
                              : t(...PREGUNTAS.find((x) => x[0] === q).slice(1))}</h2>
           {q === "tengo" ? <div className="panel"><InfoTenencias R={R} /></div> : <>

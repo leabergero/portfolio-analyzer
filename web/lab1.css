@@ -322,3 +322,15 @@
   [data-lab="1"] .bl-marca span{display:none}
   [data-lab="1"] .bl-fijar{margin:0}
 }
+
+/* Las filas de dos paneles piden 380 px por columna: en un teléfono de 390 la
+   única columna se pasaba del ancho y la página se corría de costado. */
+[data-lab="1"] .f2{grid-template-columns:repeat(auto-fit,minmax(min(380px,100%),1fr))}
+/* Lo mismo con las ruedas de la semana: la columna del medio no se achicaba. */
+[data-lab="1"] .lab-ruedas{grid-template-columns:78px minmax(0,1fr) 66px}
+/* Teléfono: las zonas de riesgo no entran en tres columnas; la barra baja a su
+   propia línea, a todo el ancho. */
+@media (max-width:640px){
+  [data-lab="1"] .lab-zona{grid-template-columns:minmax(0,1fr) auto;gap:6px 12px}
+  [data-lab="1"] .lab-zona > :nth-child(2){grid-column:1/-1;grid-row:2}
+}
