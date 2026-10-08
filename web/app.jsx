@@ -1097,14 +1097,23 @@ function senales(R) {
   const s = [];
   const add = (x) => s.push(x);
 
-  if (ev?.ultimos_12m?.tir_pct != null) {
-    const tir = ev.ultimos_12m.tir_pct, rf = (r?.rf ?? 0.04) * 100;
-    add({ id: "rend", q: "ganancia", nivel: tir < 0 ? "mal" : tir < rf ? "ojo" : "ok",
-      titulo: t("Rendimiento anual", "Annual return"), valor: pct(tir, 1),
-      frase: t(`En los últimos 12 meses rindió ${pct(tir, 1)} anual; una letra del Tesoro daba ${pct(rf, 1)}.`
-               + (ev.tir_anual_pct != null ? ` Desde la primera compra, ${pct(ev.tir_anual_pct, 1)} anual.` : ""),
-               `Over the last 12 months it returned ${pct(tir, 1)} a year; a T-bill paid ${pct(rf, 1)}.`
-               + (ev.tir_anual_pct != null ? ` Since the first purchase, ${pct(ev.tir_anual_pct, 1)} a year.` : "")) });
+  // Lo que ganaste es el resultado sobre la plata que pusiste (abierto +
+  // realizado + dividendos, el mismo número del panel de rendimiento total). La
+  // TIR de los últimos 12 meses NO es eso: es lo que rindió la cartera en esa
+  // ventana, la tasa para compararla con otra inversión — va en "¿le gano al
+  // mercado?", nunca como "cuánto gané".
+  const rf = (r?.rf ?? 0.04) * 100;
+  if (ev?.rendimiento_pct != null) {
+    const anual = ev.tir_anual_pct;
+    add({ id: "rend", q: "ganancia",
+      nivel: ev.resultado_usd < 0 ? "mal" : anual != null && anual < rf ? "ojo" : "ok",
+      titulo: t("Sobre lo que pusiste", "On what you put in"), valor: pct(ev.rendimiento_pct, 1),
+      frase: t(`Pusiste ${usd(ev.puesto_neto_usd, 0)} y, contando lo que vale hoy, lo que vendiste y los dividendos, `
+               + `estás ${usd(Math.abs(ev.resultado_usd), 0)} ${ev.resultado_usd < 0 ? "abajo" : "arriba"}: ${pct(ev.rendimiento_pct, 1)}.`
+               + (anual != null ? ` Repartido en el tiempo que estuvo puesta la plata, ${pct(anual, 1)} por año; una letra del Tesoro daba ${pct(rf, 1)}.` : ""),
+               `You put in ${usd(ev.puesto_neto_usd, 0)} and, counting what it's worth today, what you sold and the dividends, `
+               + `you're ${usd(Math.abs(ev.resultado_usd), 0)} ${ev.resultado_usd < 0 ? "down" : "up"}: ${pct(ev.rendimiento_pct, 1)}.`
+               + (anual != null ? ` Spread over the time the money was in, ${pct(anual, 1)} a year; a T-bill paid ${pct(rf, 1)}.` : "")) });
   }
   const lotes = (ev?.bajo_agua || []).filter((x) => x.dias >= 180);
   if (ev) add({ id: "agua", q: "ganancia", nivel: lotes.length ? "ojo" : "ok",
@@ -1144,6 +1153,15 @@ function senales(R) {
     valor: `${pct(capm.retorno_cartera_pct, 0)} vs ${pct(capm.retorno_benchmark_pct, 0)}`,
     frase: t(`Rindió ${pct(capm.retorno_cartera_pct, 1)} anual contra ${pct(capm.retorno_benchmark_pct, 1)} del ${capm.benchmark_nombre}. Cuando el índice sube 10 %, la cartera tiende a subir ${num(capm.beta * 10, 1)} %.`,
              `It returned ${pct(capm.retorno_cartera_pct, 1)} a year against ${pct(capm.retorno_benchmark_pct, 1)} for the ${capm.benchmark_nombre}. When the index rises 10 %, the portfolio tends to rise ${num(capm.beta * 10, 1)} %.`) });
+  if (ev?.ultimos_12m?.tir_pct != null) {
+    const tir = ev.ultimos_12m.tir_pct;
+    add({ id: "tir12", q: "mercado", nivel: tir < 0 ? "mal" : tir < rf ? "ojo" : "ok",
+      titulo: t("La cartera, últimos 12 meses", "The portfolio, last 12 months"), valor: pct(tir, 1),
+      frase: t(`En los últimos 12 meses la cartera rindió ${pct(tir, 1)} anual, contra ${pct(rf, 1)} de una letra del Tesoro. `
+               + "Es la tasa para compararla con otra inversión, no lo que ganaste sobre lo que pusiste.",
+               `Over the last 12 months the portfolio returned ${pct(tir, 1)} a year, against ${pct(rf, 1)} for a T-bill. `
+               + "It's the rate to compare it with another investment, not what you made on what you put in.") });
+  }
   if (mom) {
     const ev_ = mom.por_activo.filter((x) => x["señal"] === "EVITAR"),
           es_ = mom.por_activo.filter((x) => x["señal"] === "ESPERAR");
@@ -1296,7 +1314,8 @@ function Acciones({ l }) {
 function DetalleSenal({ id, R, cartera, bench }) {
   const r = ok_(R.riesgo), ev = ok_(R.evolucion);
   switch (id) {
-    case "rend": return ev && <TirVentana ev={ev} />;
+    case "rend": return ev && <RendimientoTotal ev={ev} />;
+    case "tir12": return ev && <TirVentana ev={ev} />;
     case "agua": return ev && <RendimientoTotal ev={ev} />;
     case "dia": return r && <ZonasRiesgo d={r} />;
     case "caida": return ok_(R.stress) && <Stress d={R.stress} />;
@@ -1322,7 +1341,7 @@ function Info(props) {
 function InfoCifras({ R }) {
   const p = ok_(R.posicion), ev = ok_(R.evolucion);
   if (!p) return null;
-  const tir = ev?.ultimos_12m?.tir_pct;
+  const anual = ev?.tir_anual_pct;
   const fig = (et, val, tono, sub) => (
     <div className="info-cifra"><div className="et">{et}</div>
       <div className={"val mono " + (tono || "")}>{val}</div>{sub && <div className="sub">{sub}</div>}</div>);
@@ -1333,7 +1352,9 @@ function InfoCifras({ R }) {
            usd(p.pnl_dia, 0), signo(p.pnl_dia), pct(p.pnl_dia_pct, 1))}
       {ev && fig(t("Resultado total", "Total result"), usd(ev.resultado_usd, 0), signo(ev.resultado_usd),
                  t(`sobre ${usd(ev.puesto_neto_usd, 0)} puestos`, `on ${usd(ev.puesto_neto_usd, 0)} put in`))}
-      {tir != null && fig(t("Rinde por año", "Yearly return"), pct(tir, 1), signo(tir), t("últimos 12 meses", "last 12 months"))}
+      {ev?.rendimiento_pct != null && fig(t("Rendimiento", "Return"), pct(ev.rendimiento_pct, 1), signo(ev.resultado_usd),
+                 anual != null ? t(`${pct(anual, 1)} por año desde la primera compra`, `${pct(anual, 1)} a year since the first purchase`)
+                               : t("sobre lo que pusiste", "on what you put in"))}
     </div>);
 }
 
@@ -1402,11 +1423,11 @@ function InfoPreguntas({ s, R, cartera, bench, verCompleto }) {
   const deQ = (k) => s.filter((x) => x.q === k);
   const pruebas = {
     ganancia: <>{ev && <div className="panel"><h3>{t("Lo que vale contra lo que pusiste", "What it's worth vs what you put in")}</h3><InfoValor ev={ev} /></div>}
-                {ev && <TirVentana ev={ev} />}</>,
+                {ev && <RendimientoTotal ev={ev} />}</>,
     perdida: <>{r && <ZonasRiesgo d={r} />}{ok_(R.stress) && <Stress d={R.stress} />}</>,
     diversif: <>{ok_(R.composicion) && <Composicion d={R.composicion} cartera={cartera} />}
                 {r && <RiesgoResumen d={r} />}</>,
-    mercado: <>{ok_(R.capm) && <Capm d={R.capm} cartera={cartera} bench={bench} todos={R.benchmarks} />}</>,
+    mercado: <>{ev && <TirVentana ev={ev} />}{ok_(R.capm) && <Capm d={R.capm} cartera={cartera} bench={bench} todos={R.benchmarks} />}</>,
     hacer: <>{mk && s.find((x) => x.id === "optim")?.acciones?.length > 0 && (
                 <div className="panel"><h3>{t("Lo que movería el modelo", "What the model would move")}</h3>
                   <Acciones l={s.find((x) => x.id === "optim").acciones} />
