@@ -367,9 +367,10 @@ def pnl_realizado(trades) -> dict:
             "total_fx_usd": round(total_fx, 2)}
 
 
-# Lab 11 (`X-Lab: 11` o `?lab=11`): historia larga y ventana común, sin ceros
-# ni retornos copiados. Viaja por request como la plaza (`core.mercado`).
-HISTORIA_LARGA = ContextVar("historia_larga", default=False)
+# Historia larga y ventana común, sin ceros ni retornos copiados: lo que usan
+# los modelos desde que el lab 11 pasó a ser la app (2026-10-09). Sigue siendo
+# una ContextVar para poder pedir la matriz corta en un test o un backtest.
+HISTORIA_LARGA = ContextVar("historia_larga", default=True)
 
 
 def _matriz_larga(posiciones, desde=None, hasta=None):

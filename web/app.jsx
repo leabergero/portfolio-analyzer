@@ -25,8 +25,10 @@ const { useState, useEffect, useRef, useCallback, useMemo } = React;
    más los pocos cambios de estructura que van detrás de `LAB` en este archivo.
    Sin el flag la app queda exactamente como la de todos los días. La CSP no
    deja scripts inline, por eso la hoja se cuelga desde acá y no desde el HTML. */
-const LAB = ["1", "2", "3", "4", "5", "6", "7", "11"].includes(new URLSearchParams(location.search).get("lab"))
-  ? new URLSearchParams(location.search).get("lab") : null;
+// Sin `?lab` la app es el 11: desde el 2026-10-09 es la de todos los días. Los
+// otros quedan para mirar las pieles y vistas de referencia.
+const LAB = ["1", "2", "3", "4", "5", "6", "7"].includes(new URLSearchParams(location.search).get("lab"))
+  ? new URLSearchParams(location.search).get("lab") : "11";
 // El 1 junta lo elegido de los otros: su piel de terminal con la columna que se
 // esconde, y las preguntas del 6 como vista simple, que acá es un interruptor y
 // no un callejón con un botón de volver. Por eso es piel y es información.
@@ -1681,16 +1683,6 @@ function Analisis({ cartera, recargar, sim, setSim }) {
   const setCompleto = (v) => { setCompletoE(v);
     try { localStorage.setItem("pa-vista", v ? "completa" : "simple"); } catch { /* sin storage */ } };
   const [bench, setBench] = useState(() => MERCADOS[MERCADO].bench);
-  // Lab 11: el Monte Carlo propuesto y Markowitz con sus insumos reemplazan a
-  // los actuales en toda la pantalla (también en la vista simple).
-  const [fhs, setFhs] = useState(null);
-  const [mk11, setMk11] = useState(null);
-  useEffect(() => {
-    if (LAB !== "11" || !cartera) return;
-    setFhs(null); setMk11(null);
-    api(`/api/montecarlo/${encodeURIComponent(cartera)}/fhs`).then(setFhs).catch(() => setFhs(null));
-    api(`/api/markowitz/${encodeURIComponent(cartera)}?lab=11`).then(setMk11).catch(() => setMk11(null));
-  }, [cartera]);
   // Mientras el usuario no elija índice manda el que mejor explica la cartera:
   // lo dice el CAPM cuando termina de medir los tres. Si lo tocó se respeta —
   // un selector que se mueve solo después de que lo movieron es un bug.
@@ -1759,10 +1751,7 @@ function Analisis({ cartera, recargar, sim, setSim }) {
                                                   "Choose a portfolio above to analyze it.")}</div>;
   if (!estado) return <div className="cargando">{t("Lanzando los modelos…", "Launching the models…")}</div>;
 
-  const R0 = estado.resultados || {};
-  const R = { ...R0,
-    ...(fhs && !fhs.error ? { montecarlo: fhs } : {}),
-    ...(mk11 && !mk11.error ? { markowitz: mk11 } : {}) };
+  const R = estado.resultados || {};
   const M = estado.modelos || {};
   const listos = Object.values(M).filter((m) => m.estado === "listo").length;
 

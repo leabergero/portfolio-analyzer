@@ -41,8 +41,8 @@ MODELOS = {
     "composicion":  ("Composición",     lambda p, c: composicion.analizar(p)),
     "riesgo":       ("Riesgo",          lambda p, c: risk.analizar(p)),
     "stress":       ("Stress test",     lambda p, c: risk.stress_test(p)),
-    "markowitz":    ("Markowitz",       lambda p, c: markowitz.optimizar(p)),
-    "montecarlo":   ("Monte Carlo",     lambda p, c: montecarlo.simular(p)),
+    "markowitz":    ("Markowitz",       lambda p, c: markowitz.optimizar(p, lab=True)),
+    "montecarlo":   ("Monte Carlo",     lambda p, c: montecarlo.simular_fhs(p)),
     "capm":         ("CAPM",            lambda p, c: capm.analizar(p)),
     "momentum":     ("Momentum",        lambda p, c: momentum.analizar(p)),
     "objetivos":    ("Objetivos",       lambda p, c: targets.analizar(p)),
@@ -51,7 +51,7 @@ MODELOS = {
     # arman desde los precios objetivo, recortando confianza donde el momentum
     # va en contra. Es el uso para el que existe el modelo en esta aplicación.
     "blacklitterman": ("Black-Litterman", lambda p, c: blacklitterman.analizar(
-        p, blacklitterman.views_combinadas(targets.analizar(p), momentum.analizar(p)))),
+        p, blacklitterman.views_combinadas(targets.analizar(p), momentum.analizar(p)), lab=True)),
 
     # Estos tres los pedía cada panel por su cuenta, en paralelo a los once de
     # arriba y compitiendo con ellos por el mismo procesador: en la VM sumaban
