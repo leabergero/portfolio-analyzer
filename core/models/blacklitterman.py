@@ -64,24 +64,41 @@ def _confianza_a_omega(confianzas, tau, Sigma, P):
 
 
 def analizar(posiciones, views=None, benchmark: str = None,
-             max_weight: float = None) -> dict:
-    """views: [{"ticker", "ret" (% anual esperado), "confidence" (1-90)}]"""
+             max_weight: float = None, lab: bool = False) -> dict:
+    """views: [{"ticker", "ret" (% anual esperado), "confidence" (1-90)}]
+
+    lab (`?lab=11`): el punto de partida no es la ingeniería inversa de tus
+    pesos sino el rendimiento esperado del modelo propuesto (historia encogida
+    al CAPM de su mercado + riesgo país, `montecarlo.esperados`), con su Σ de
+    largo plazo. Es lo que el equilibrio de BL quiere ser —el CAPM— medido
+    activo por activo; las views se aplican igual. Sin views coincide con el
+    Markowitz del lab, que ganó el backtest (Sharpe 0,79 vs 0,74).
+    """
     from core.models.portfolio import matriz_retornos, value_weights
     from core.models.rates import risk_free_para
 
-    ret_df, precios = matriz_retornos(posiciones)
-    if ret_df.shape[1] < 2:
-        return {"error": "Hacen falta al menos dos activos con historia."}
-
-    tickers = list(ret_df.columns)
-    n, T = len(tickers), len(ret_df)
-    Sigma = ret_df.cov().to_numpy() * RUEDAS
     rf, rf_label = risk_free_para(benchmark, "corto")
-    delta, delta_label = _delta(benchmark, rf)
-    tau = 1.0 / T                       # He-Litterman
+    if lab:
+        from core.models.montecarlo import esperados
+        e = esperados(posiciones)
+        if "error" in e or len(e["tickers"]) < 2:
+            return {"error": "Hacen falta al menos dos activos con historia."}
+        tickers, precios, Sigma, pi = e["tickers"], e["precios"], e["cov"], e["mu"]
+        n, T = len(tickers), len(e["px"])
+        delta, delta_label = None, "no se usa: se parte del rendimiento esperado del Monte Carlo"
+        w_mkt = value_weights(posiciones, precios, tickers)
+    else:
+        ret_df, precios = matriz_retornos(posiciones)
+        if ret_df.shape[1] < 2:
+            return {"error": "Hacen falta al menos dos activos con historia."}
 
-    w_mkt = value_weights(posiciones, precios, tickers)
-    pi = delta * Sigma @ w_mkt
+        tickers = list(ret_df.columns)
+        n, T = len(tickers), len(ret_df)
+        Sigma = ret_df.cov().to_numpy() * RUEDAS
+        delta, delta_label = _delta(benchmark, rf)
+        w_mkt = value_weights(posiciones, precios, tickers)
+        pi = delta * Sigma @ w_mkt
+    tau = 1.0 / T                       # He-Litterman
 
     valor_total = sum(float(p.get("qty", 0)) * precios[t]
                       for p in posiciones
@@ -91,11 +108,17 @@ def analizar(posiciones, views=None, benchmark: str = None,
         "tickers": tickers, "valor_total": round(valor_total, 2),
         "equilibrio_pct": {t: round(float(pi[i]) * 100, 2) for i, t in enumerate(tickers)},
         "rf": round(rf, 4), "rf_label": rf_label,
-        "delta": round(delta, 3), "delta_label": delta_label,
+        "delta": round(delta, 3) if delta is not None else None, "delta_label": delta_label,
         "tau": round(tau, 6), "tau_label": f"1/T con T = {T} ruedas",
-        "equilibrio_nota": "El equilibrio se calcula sobre los pesos de esta cartera, "
-                           "no sobre capitalizaciones de mercado: mide cuánto te movés "
-                           "respecto de tu propia posición.",
+        "equilibrio_nota": ("El punto de partida es el rendimiento esperado del "
+                            "Monte Carlo —la historia de cada activo encogida hacia "
+                            "el CAPM de su mercado más el riesgo país— y los precios objetivo "
+                            "lo corrigen según su confianza. Este panel es lo que dicen los "
+                            "analistas, y sus precios objetivo suelen ser optimistas: los "
+                            "números prudentes son los de Markowitz y HRP." if lab else
+                            "El equilibrio se calcula sobre los pesos de esta cartera, "
+                            "no sobre capitalizaciones de mercado: mide cuánto te movés "
+                            "respecto de tu propia posición."),
     }
 
     validas = [v for v in (views or []) if str(v.get("ticker", "")).upper() in tickers]

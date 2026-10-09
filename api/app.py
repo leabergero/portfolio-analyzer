@@ -136,6 +136,14 @@ def elegir_mercado():
     mercado.poner(request.headers.get("X-Mercado"))
 
 
+# Lab 11: los modelos con historia larga y sin ceros inventados (ver
+# `portfolio.matriz_retornos`). Igual que la plaza, es del navegador que pide.
+@app.before_request
+def elegir_lab():
+    from core.models.portfolio import HISTORIA_LARGA
+    HISTORIA_LARGA.set(request.headers.get("X-Lab") == "11" or request.args.get("lab") == "11")
+
+
 @app.before_request
 def abrir_sesion():
     if not sesion.modo_web():

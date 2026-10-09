@@ -25,16 +25,18 @@ const { useState, useEffect, useRef, useCallback, useMemo } = React;
    más los pocos cambios de estructura que van detrás de `LAB` en este archivo.
    Sin el flag la app queda exactamente como la de todos los días. La CSP no
    deja scripts inline, por eso la hoja se cuelga desde acá y no desde el HTML. */
-const LAB = ["1", "2", "3", "4", "5", "6", "7"].includes(new URLSearchParams(location.search).get("lab"))
+const LAB = ["1", "2", "3", "4", "5", "6", "7", "11"].includes(new URLSearchParams(location.search).get("lab"))
   ? new URLSearchParams(location.search).get("lab") : null;
 // El 1 junta lo elegido de los otros: su piel de terminal con la columna que se
 // esconde, y las preguntas del 6 como vista simple, que acá es un interruptor y
 // no un callejón con un botón de volver. Por eso es piel y es información.
-const LAB_PIEL = ["1", "2", "3", "4"].includes(LAB);
-const LAB_INFO = ["1", "5", "6", "7"].includes(LAB);
+// El 11 es el 1 con los modelos nuevos (Monte Carlo FHS, Markowitz, BL, HRP y riesgo con historia larga): misma piel y vistas.
+const LAB1 = LAB === "1" || LAB === "11";
+const LAB_PIEL = ["1", "2", "3", "4", "11"].includes(LAB);
+const LAB_INFO = ["1", "5", "6", "7", "11"].includes(LAB);
 if (LAB) {
-  document.documentElement.dataset.lab = LAB;
-  for (const n of LAB === "1" ? ["1", "5"] : [LAB]) {
+  document.documentElement.dataset.lab = LAB1 ? "1" : LAB;
+  for (const n of LAB1 ? ["1", "5"] : [LAB]) {
     const hoja = document.createElement("link");
     hoja.rel = "stylesheet"; hoja.href = `/lab${n}.css`;
     document.head.appendChild(hoja);
@@ -175,6 +177,7 @@ const api = async (ruta, opciones) => {
   if (guardadoInviu) o.headers = { ...(o.headers || {}), "X-Sesion-Inviu": guardadoInviu };
   if (SIM_ACTIVA) o.headers = { ...(o.headers || {}), "X-Sim": SIM_ACTIVA };
   o.headers = { ...(o.headers || {}), "X-Mercado": MERCADO };
+  if (LAB === "11") o.headers["X-Lab"] = "11";
 
   // Si se corta la conexión (la notebook se durmió, cambió la red) `fetch`
   // rechaza y nadie llama al setState: la pantalla quedaba en "Calculando…"
@@ -1005,7 +1008,7 @@ function BarraLab({ modo, setModo, tema, setTema, esOscuro, carteras, cartera, s
                                            catch { return false; } });
   const [abierta, setAbierta] = useState(false);
   useEffect(() => {
-    if (LAB !== "1") return;
+    if (!LAB1) return;
     document.documentElement.toggleAttribute("data-lateral-fija", fija);
     // Plotly sólo se reacomoda cuando cambia la ventana, no cuando cambia el hueco.
     window.dispatchEvent(new Event("resize"));
@@ -1019,13 +1022,13 @@ function BarraLab({ modo, setModo, tema, setTema, esOscuro, carteras, cartera, s
   }, [abierta]);
   return (
     <>
-    {LAB === "1" && !fija && (
+    {LAB1 && !fija && (
       <button className="bl-boton" aria-label={t("Abrir el menú", "Open the menu")} aria-expanded={abierta}
               onClick={() => setAbierta((a) => !a)}><Icono k="menu" /></button>)}
     <aside className={"barra-lab" + (abierta ? " abierta" : "")}
            onMouseLeave={() => setAbierta(false)}>
       <div className="bl-marca">Portfolio <span>Analyzer</span>
-        {LAB === "1" && (
+        {LAB1 && (
           <button className={"bl-fijar" + (fija ? " on" : "")} onClick={() => { setFija(!fija); setAbierta(false); }}
                   aria-pressed={fija} title={fija ? t("Esconder sola", "Auto-hide") : t("Dejar fija", "Keep open")}>
             <Icono k="alfiler" /></button>)}
@@ -1331,7 +1334,7 @@ function DetalleSenal({ id, R, cartera, bench }) {
 function Info(props) {
   const s = senales(props.R);
   if (LAB === "5") return <InfoTablero s={s} {...props} />;
-  if (LAB === "1" || LAB === "6") return <InfoPreguntas s={s} {...props} />;
+  if (LAB1 || LAB === "6") return <InfoPreguntas s={s} {...props} />;
   return <InfoExcepciones s={s} {...props} />;
 }
 
@@ -1673,11 +1676,21 @@ function Analisis({ cartera, recargar, sim, setSim }) {
   // Labs 5–7: la vista simple primero; el análisis entero queda a un clic.
   const [completo, setCompletoE] = useState(() => {
     // En el 1 arranca completa —la simple es para quien la elige— y se recuerda.
-    if (LAB !== "1") return false;
+    if (!LAB1) return false;
     try { return localStorage.getItem("pa-vista") !== "simple"; } catch { return true; } });
   const setCompleto = (v) => { setCompletoE(v);
     try { localStorage.setItem("pa-vista", v ? "completa" : "simple"); } catch { /* sin storage */ } };
   const [bench, setBench] = useState(() => MERCADOS[MERCADO].bench);
+  // Lab 11: el Monte Carlo propuesto y Markowitz con sus insumos reemplazan a
+  // los actuales en toda la pantalla (también en la vista simple).
+  const [fhs, setFhs] = useState(null);
+  const [mk11, setMk11] = useState(null);
+  useEffect(() => {
+    if (LAB !== "11" || !cartera) return;
+    setFhs(null); setMk11(null);
+    api(`/api/montecarlo/${encodeURIComponent(cartera)}/fhs`).then(setFhs).catch(() => setFhs(null));
+    api(`/api/markowitz/${encodeURIComponent(cartera)}?lab=11`).then(setMk11).catch(() => setMk11(null));
+  }, [cartera]);
   // Mientras el usuario no elija índice manda el que mejor explica la cartera:
   // lo dice el CAPM cuando termina de medir los tres. Si lo tocó se respeta —
   // un selector que se mueve solo después de que lo movieron es un bug.
@@ -1746,12 +1759,15 @@ function Analisis({ cartera, recargar, sim, setSim }) {
                                                   "Choose a portfolio above to analyze it.")}</div>;
   if (!estado) return <div className="cargando">{t("Lanzando los modelos…", "Launching the models…")}</div>;
 
-  const R = estado.resultados || {};
+  const R0 = estado.resultados || {};
+  const R = { ...R0,
+    ...(fhs && !fhs.error ? { montecarlo: fhs } : {}),
+    ...(mk11 && !mk11.error ? { markowitz: mk11 } : {}) };
   const M = estado.modelos || {};
   const listos = Object.values(M).filter((m) => m.estado === "listo").length;
 
   // Lab 1: la cartera que se mira (la columna está escondida) y el interruptor.
-  const cabeza = LAB === "1" && (
+  const cabeza = LAB1 && (
     <div className="l10-cab">
       <h1>{cartera}</h1>
       <div className="l10-vista" role="group" aria-label={t("Vista", "View")}>
@@ -1770,7 +1786,7 @@ function Analisis({ cartera, recargar, sim, setSim }) {
   return (
     <>
       {cabeza}
-      {LAB_INFO && LAB !== "1" && (
+      {LAB_INFO && !LAB1 && (
         <button className="btn info-volver" onClick={() => setCompleto(false)}>
           ← {t("Volver a la vista simple", "Back to the simple view")}</button>)}
       {estado.estado !== "terminado" && (
@@ -1861,7 +1877,7 @@ function Panel({ tab, R, M, cartera, bench, recargar, lanzar, sim, setSim }) {
     markowitz: <Markowitz d={d} cartera={cartera} bench={bench}
                           extras={{ objetivos: R.objetivos, bl: R.blacklitterman,
                                     momentum: R.momentum }} />,
-    montecarlo: <MonteCarlo d={d} cartera={cartera} />,
+    montecarlo: LAB === "11" ? <McEscenarios d={d} cartera={cartera} /> : <MonteCarlo d={d} cartera={cartera} />,
     regimenes: <Regimenes d={d} cartera={cartera} />,
   };
   return vistas[tab] || <div className="cargando">—</div>;
@@ -3051,7 +3067,7 @@ function MatrizCorrelaciones({ corr }) {
       <div className="fila f2" style={{ marginTop: 10, marginBottom: 0 }}>
         <Grafico alto={Math.max(260, corr.tickers.length * 44)}
           datos={[{ type: "heatmap", z: m, x: orden, y: orden,
-                    zmin: -1, zmax: 1, colorscale: [[0, c.negativo], [0.5, c.panel], [1, c.acento]],
+                    zmin: -1, zmax: 1, colorscale: [[0, c.negativo], [0.5, c.panel], [1, c.positivo]],
                     text: m.map((f) => f.map((v) => v.toFixed(2))),
                     texttemplate: "%{text}", textfont: { size: 10 },
                     hovertemplate: "%{y} ↔ %{x}: %{z:.2f}<extra></extra>",
@@ -3141,7 +3157,7 @@ function Distribucion({ d, hoy, fecha }) {
             ...(dist.grados_libertad ? [{ type: "scatter", mode: "lines", x: dist.x,
               y: dist.tstudent, name: t(`t de Student (ν = ${dist.grados_libertad})`,
                                         `Student's t (ν = ${dist.grados_libertad})`),
-              line: { color: c.acento, width: 2.4 } }] : []),
+              line: { color: c.positivo, width: 2.4 } }] : []),
             // Punto invisible: las shapes no cuentan para el rango, y un día fuera
             // del histograma dejaría la línea fuera del cuadro.
             ...(hayHoy ? [{ type: "scatter", mode: "markers", x: [hoy], y: [0], showlegend: false,
@@ -3325,7 +3341,9 @@ function BarraRiesgo({ etiqueta, detalle, pct_, usd_, escala, nota }) {
   );
 }
 
-function ZonasRiesgo({ d }) {
+function ZonasRiesgo({ d: todo }) {
+  // Lab 11: el VaR de mañana (filtrado), el mismo de los KPI de arriba.
+  const d = todo.var_fhs || todo;
   // Una sola escala para las dos barras: si cada una se ajusta a lo suyo, el
   // CVaR parece menos grave que el VaR justo cuando es peor.
   const escala = Math.max(ZONAS.escala,
@@ -4170,22 +4188,15 @@ function Composicion({ d, cartera }) {
     // El resto del mundo se dibuja igual, con el perímetro de cada país
     // (`showcountries`) y de cada continente (`showcoastlines`): así se ve
     // que un país queda sin colorear porque no hay inversión ahí, no porque
-    // falte el mapa entero. `lataxis.range` corta en -60°/65°: deja completa
-    // la Tierra del Fuego (~-55°, la punta sur de Argentina) y saca a la
-    // Antártida entera —su punto más al norte, la península, está a -63°—.
-    // El techo de 65° (no 85°) importa por otra razón, no geográfica sino de
-    // Mercator: cerca del polo la proyección infla la escala vertical sin
-    // límite, así que subir hasta 85° hacía un mapa "cuadrado" que no
-    // llenaba un panel ancho —el hueco lateral que quedaba era ESO, no un
-    // bug de layout— y agrandarlo con `scale` recortaba los costados en vez
-    // de estirarlos. Con el techo bajo, el mapa ya calza ancho y no hace
-    // falta ningún zoom.
+    // falte el mapa entero. `lataxis` corta en -56° (deja la Tierra del
+    // Fuego, saca la Antártida) y 62°: en Mercator cada grado hacia el polo
+    // alarga el mapa, y un techo bajo es lo que lo deja ancho en un panel ancho.
     geo: { bgcolor: "transparent", showframe: false,
            showcoastlines: true, coastlinecolor: c.borde,
            showcountries: true, countrycolor: c.borde,
            showland: true, landcolor: rgba(c.borde, 0.35),
            projection: { type: "mercator" }, lakecolor: "transparent",
-           lataxis: { range: [-60, 65] } },
+           lataxis: { range: [-56, 62] }, lonaxis: { range: [-170, 190] } },
     margin: { t: 8, r: 8, b: 8, l: 8 },
     // Arrastrar con el mouse en un mapa "geo" desplaza el centro (rota el
     // globo, en la práctica lo saca de foco); `dragmode: false` lo apaga. El
@@ -4269,6 +4280,7 @@ function Riesgo({ d, cartera, extras }) {
   return (
     <>
       <KpisRiesgo d={d} capm={extras.capm} />
+      {d.historia_larga && <HistoriaLarga d={d} />}
       <ZonasRiesgo d={d} />
       <Seccion titulo={t("¿Cuándo se disparó el riesgo?", "When did risk spike?")} />
       <RiesgoEvolucion cartera={cartera} />
@@ -4279,7 +4291,7 @@ function Riesgo({ d, cartera, extras }) {
       <Seccion titulo={t("¿Cuánto del riesgo es el dólar?", "How much of the risk is the exchange rate?")} />
       <RiesgoCambiario cartera={cartera} />
       <Seccion titulo={t("Qué habría pasado en crisis reales", "What would have happened in real crises")} />
-      {extras.stress ? <Stress d={extras.stress} /> : <div className="cargando">{t("Calculando…", "Calculating…")}</div>}
+      {extras.stress ? <Stress d={extras.stress} plegado /> : <div className="cargando">{t("Calculando…", "Calculating…")}</div>}
       <Seccion titulo={t("Ponerle un techo al riesgo", "Putting a ceiling on risk")} />
       <RiesgoLimite cartera={cartera} d={d} />
     </>
@@ -4327,10 +4339,17 @@ function KpisRiesgo({ d, capm }) {
            nivel={nivelRatio("calmar", d.calmar, n)} />
       <Kpi etiqueta={t("Volatilidad", "Volatility")} valor={pct(d.volatilidad_anual_pct)} ayuda={AYUDA.vol}
            nivel={nivelVol(d.volatilidad_anual_pct)} />
+      {d.var_fhs ? <>
+        <Kpi etiqueta={t("Día malo", "Bad day")} valor={usd(d.var_fhs.var95_usd)} tono="neg" ayuda={AYUDA.var95}
+             sub={pct(d.var_fhs.var95_pct) + t(" · mañana, 1 de cada 20", " · tomorrow, 1 in 20")} />
+        <Kpi etiqueta={t("Día muy malo", "Very bad day")} valor={usd(d.var_fhs.cvar95_usd)} tono="neg" ayuda={AYUDA.cvar}
+             sub={pct(d.var_fhs.cvar95_pct) + t(" · promedio del peor 5 %", " · average of the worst 5 %")} />
+      </> : <>
       <Kpi etiqueta={t("Día malo", "Bad day")} valor={usd(d.var95_usd)} tono="neg" ayuda={AYUDA.var95}
            sub={pct(d.var95_pct) + t(" · 1 de cada 20", " · 1 in 20")} />
       <Kpi etiqueta={t("Día muy malo", "Very bad day")} valor={usd(d.cvar95_usd)} tono="neg" ayuda={AYUDA.cvar}
            sub={pct(d.cvar95_pct)} />
+      </>}
       <Kpi etiqueta={t("Peor caída", "Worst drawdown")} valor={pct(d.max_drawdown_pct)} tono="neg" ayuda={AYUDA.maxdd} />
       <Kpi etiqueta={t("Curtosis", "Kurtosis")} valor={num(d.curtosis_exceso)} ayuda={AYUDA.curtosis}
            tono={d.curtosis_exceso > 3 ? "neg" : ""} sub={t("en exceso", "excess")} />
@@ -4413,6 +4432,26 @@ function Resumen({ d, ev, cartera, cerrado, real, filas }) {
   );
 }
 
+function HistoriaLarga({ d }) {
+  const h = d.historia_larga;
+  const fecha = (f) => new Date(f + "T12:00").toLocaleDateString(IDIOMA === "en" ? "en-US" : "es-AR", { month: "short", year: "numeric" });
+  return (
+    <div className="panel">
+      <h3>{t(`Esta composición desde ${h.desde.slice(0, 4)}`, `This composition since ${h.desde.slice(0, 4)}`)}</h3>
+      <div className="kpis">
+        <Kpi etiqueta={t("Peor caída", "Worst drawdown")} valor={pct(h.max_drawdown_pct, 1)} tono="neg"
+             sub={`${fecha(h.peor_caida.desde)} → ${fecha(h.peor_caida.hasta)}`} />
+        <Kpi etiqueta={t("Peor año calendario", "Worst calendar year")} valor={pct(h.peor_anio_pct, 1)} tono={h.peor_anio_pct < 0 ? "neg" : ""} />
+        <Kpi etiqueta={t("Retorno anual", "Annual return")} valor={pct(h.retorno_anual_pct, 1)} />
+        <Kpi etiqueta={t("Volatilidad", "Volatility")} valor={pct(h.volatilidad_anual_pct, 1)} />
+        <Kpi etiqueta="Sharpe" valor={num(h.sharpe, 2)} sub={`Sortino ${num(h.sortino, 2)} · Calmar ${num(h.calmar, 2)}`} />
+      </div>
+      <div className="pie">{t(
+        `Los números de arriba miden los últimos tres años (desde ${d.desde}). Éstos son los pesos de hoy mantenidos desde ${h.desde}, con cada CEDEAR medido con su acción y cada acción argentina en dólares MEP y, antes de 2019, CCL: no es lo que pasó con tu plata, es cómo se habría portado esta composición, crisis incluidas.`,
+        `The figures above cover the last three years (since ${d.desde}). These are today's weights held since ${h.desde}, each CEDEAR measured with its share and each Argentine share in MEP dollars and, before 2019, CCL: not what happened to your money, but how this composition would have behaved, crises included.`)}</div>
+    </div>);
+}
+
 function RiesgoResumen({ d }) {
   const c = colores();
   const contrib = d.contribucion_riesgo || [];
@@ -4440,24 +4479,30 @@ function RiesgoResumen({ d }) {
               + "Red bar bigger than the blue one = contributes more risk than its weight suggests.")}
           </div>
         </div>
-        <div className="panel">
-          <h3>{t("Cuánto esconde suponer normalidad", "How much assuming normality hides")}</h3>
+        <Plegable id="riesgo-normalidad" porDefecto={false}
+                  titulo={t("Cuánto esconde suponer normalidad", "How much assuming normality hides")}>
           <div className="tabla-wrap"><table>
             <thead><tr><th>{t("Método", "Method")}</th><th className="n">{t("Un día malo", "A bad day")}</th>
               <th className="n">{t("En dólares", "In dollars")}</th></tr></thead>
             <tbody>
-              <tr><td>{t("Histórico (95 %)", "Historical (95 %)")}</td><td className="n">{pct(d.var95_pct)}</td><td className="n neg">{usd(d.var95_usd)}</td></tr>
+              {d.var_fhs && <>
+                <tr><td><b>{t("Filtrada, mañana (95 %)", "Filtered, tomorrow (95 %)")}</b></td><td className="n"><b>{pct(d.var_fhs.var95_pct)}</b></td><td className="n neg"><b>{usd(d.var_fhs.var95_usd)}</b></td></tr>
+                <tr><td><b>{t("Filtrada, mañana (99 %)", "Filtered, tomorrow (99 %)")}</b></td><td className="n"><b>{pct(d.var_fhs.var99_pct)}</b></td><td className="n neg"><b>{usd(d.var_fhs.var99_usd)}</b></td></tr>
+              </>}
+              <tr><td>{d.var_fhs ? t("Histórico 3 años (95 %)", "Historical 3 years (95 %)") : t("Histórico (95 %)", "Historical (95 %)")}</td><td className="n">{pct(d.var95_pct)}</td><td className="n neg">{usd(d.var95_usd)}</td></tr>
               <tr><td>Cornish-Fisher (95 %)</td><td className="n">{pct(d.var95_cornish_fisher_pct)}</td><td className="n neg">{usd(d.var95_cornish_fisher_usd)}</td></tr>
-              <tr><td>{t("Histórico (99 %)", "Historical (99 %)")}</td><td className="n">{pct(d.var99_pct)}</td><td className="n neg">{usd(d.var99_usd)}</td></tr>
+              <tr><td>{d.var_fhs ? t("Histórico 3 años (99 %)", "Historical 3 years (99 %)") : t("Histórico (99 %)", "Historical (99 %)")}</td><td className="n">{pct(d.var99_pct)}</td><td className="n neg">{usd(d.var99_usd)}</td></tr>
             </tbody>
           </table></div>
           <div className="pie">
-            {t("Cornish-Fisher ajusta el cuantil por la asimetría y las colas gordas reales. "
+            {d.var_fhs ? t(`La filtrada multiplica la volatilidad de hoy (${pct(d.var_fhs.vol_hoy_anual_pct, 0)} anual, contra ${pct(d.var_fhs.vol_historica_anual_pct, 0)} de su historia) por los peores días de toda la historia de la composición, medidos en esa escala. En el backtest (1,07 millones de pronósticos, 2007–2025) fue el único que acertó la frecuencia: superaron su VaR 95 % el 4,9 % de los días, y en 2008 el 7 %, contra 17 % el histórico. Cornish-Fisher, con colas tan gordas como las de estas carteras, achica el VaR en vez de agrandarlo: se muestra sólo como referencia.`,
+                `The filtered one multiplies today's volatility (${pct(d.var_fhs.vol_hoy_anual_pct, 0)} a year, against ${pct(d.var_fhs.vol_historica_anual_pct, 0)} over its history) by the worst days of the composition's whole history, measured on that scale. In the backtest (1.07 million forecasts, 2007–2025) it was the only one that got the frequency right: losses exceeded its 95 % VaR on 4.9 % of days, and 7 % in 2008, against 17 % for the historical one. Cornish-Fisher, with tails as fat as these portfolios', shrinks VaR instead of enlarging it: it's shown only for reference.`)
+             : t("Cornish-Fisher ajusta el cuantil por la asimetría y las colas gordas reales. "
               + "La diferencia con el histórico es cuánto riesgo queda oculto.",
               "Cornish-Fisher adjusts the quantile for real skewness and fat tails. "
               + "The difference from the historical figure is how much risk stays hidden.")}
           </div>
-        </div>
+        </Plegable>
       </div>
       {desbalance.length > 0 && (
         <div className="aviso ojo"><b>{t("Riesgo concentrado.", "Concentrated risk.")}</b>{" "}
@@ -4584,6 +4629,10 @@ function RiesgoEvolucion({ cartera }) {
               x: d.serie.map((p) => p.fecha), y: d.serie.map((p) => p.cvar95_pct),
               line: { color: c.alerta, width: 1.2, dash: "dot" },
               hovertemplate: "%{x}<br>%{y:.2f} %<extra></extra>" },
+            ...(d.metodo === "fhs" ? [{ type: "scatter", mode: "markers",
+              name: t("días que perdieron más que el VaR", "days that lost more than VaR"),
+              x: d.violaciones_fechas, y: d.violaciones_fechas.map((f) => porFecha[f]),
+              marker: { symbol: "x", size: 5, color: c.texto3 }, hovertemplate: "%{x}<extra></extra>" }] : []),
             { type: "scatter", mode: "markers", name: t("eventos argentinos", "Argentine events"),
               x: ev.filter((e) => e.alcance === "AR").map((e) => e.fecha),
               y: ev.filter((e) => e.alcance === "AR").map((e) => cercano(e.fecha)),
@@ -4605,7 +4654,9 @@ function RiesgoEvolucion({ cartera }) {
                                     width: 1, dash: "dot" }, opacity: 0.5 })),
             yaxis: { title: t("Pérdida diaria", "Daily loss"), ticksuffix: " %" } }} />
         <div className="pie">
-          {t(`VaR 95 % sobre las últimas ${d.ventana_ruedas} ruedas en cada punto: cuando la línea `
+          {d.metodo === "fhs" ? t(`VaR 95 % filtrado de cada rueda, calculado sólo con lo anterior a ella: la volatilidad de ese momento por los peores días vistos hasta entonces. Cuando la línea baja, la cartera se volvió más riesgosa. Las cruces son los días que perdieron más que eso: ${d.violaciones} de ${d.ruedas.toLocaleString("es-AR")} ruedas, ${pct(d.tasa_violacion_pct, 1)} (lo esperado es 5 %). Los`,
+              `95 % filtered VaR for each session, computed only with what came before it: that moment's volatility times the worst days seen until then. When the line drops, the portfolio became riskier. The crosses are the days that lost more than that: ${d.violaciones} of ${d.ruedas.toLocaleString("en-US")} sessions, ${pct(d.tasa_violacion_pct, 1)} (5 % is expected). The`)
+           : t(`VaR 95 % sobre las últimas ${d.ventana_ruedas} ruedas en cada punto: cuando la línea `
             + `baja, la cartera se volvió más riesgosa. Los`,
             `VaR 95 % over the last ${d.ventana_ruedas} sessions at each point: when the line `
             + `drops, the portfolio became riskier. The`)} <b>{t("rombos", "diamonds")}</b>{" "}
@@ -4614,8 +4665,8 @@ function RiesgoEvolucion({ cartera }) {
                  "global — hover them with the mouse to read what happened. They're context, not cause.")}
         </div>
       </div>
-      <div className="panel">
-        <h3>{t(`Los ${ev.length} eventos del período`, `The ${ev.length} events in the period`)}</h3>
+      <Plegable id="riesgo-eventos" porDefecto={false}
+                titulo={t(`Los ${ev.length} eventos del período`, `The ${ev.length} events in the period`)}>
         <div className="tabla-wrap"><table>
           <thead><tr><th>{t("Fecha", "Date")}</th><th className="c">{t("Alcance", "Scope")}</th>
             <th>{t("Qué pasó", "What happened")}</th>
@@ -4625,7 +4676,7 @@ function RiesgoEvolucion({ cartera }) {
               <td><span className="chip" style={{ color: e.alcance === "AR" ? c.series[3] : c.series[4] }}>{alcanceLabel(e.alcance)}</span></td><td>{eventoDescripcion(e.descripcion)}</td>
               <td className="n neg">{pct(cercano(e.fecha))}</td></tr>))}</tbody>
         </table></div>
-      </div>
+      </Plegable>
     </>
   );
 }
@@ -4691,7 +4742,9 @@ function RiesgoCambiario({ cartera }) {
   );
 }
 
-function RiesgoLimite({ cartera, d }) {
+function RiesgoLimite({ cartera, d: todo }) {
+  // Lab 11: el techo se pone sobre el VaR de mañana (filtrado), el de los KPI.
+  const d = todo.var_fhs || todo;
   const c = colores();
   const sugerido = Math.abs(d.var95_pct * 0.8).toFixed(2);
   const [objetivo, setObjetivo] = useState(sugerido);
@@ -4875,7 +4928,7 @@ function Markowitz({ d, cartera, bench, extras }) {
   useEffect(() => {
     let vivo = true;
     setBt(null);
-    api(`/api/markowitz/${encodeURIComponent(cartera)}/backtest?meses=${meses}&benchmark=${bench}`)
+    api(`/api/markowitz/${encodeURIComponent(cartera)}/backtest?meses=${meses}&benchmark=${bench}${LAB === "11" ? "&lab=11" : ""}`)
       .then((r) => vivo && setBt(r));
     return () => { vivo = false; };
   }, [cartera, meses, bench]);
@@ -4885,6 +4938,9 @@ function Markowitz({ d, cartera, bench, extras }) {
 
   return (
     <>
+      {d.insumos === "propuesto" && <div className="pie" style={{ margin: "0 0 12px" }}>{t(
+        "El rendimiento esperado de cada activo es el mismo del Monte Carlo —su historia encogida hacia el CAPM de su mercado más el riesgo país—, no el promedio de los últimos años; la volatilidad es la de largo plazo. Probado sobre 12.000 carteras óptimas mantenidas un año (2007–2025): Sharpe 0,79 contra 0,74 con el promedio histórico, con menos caída y más diversificada.",
+        "Each asset's expected return is the Monte Carlo's —its history shrunk towards its market's CAPM plus country risk—, not the last years' average; volatility is the long-run one. Tested on 12,000 optimal portfolios held one year (2007–2025): Sharpe 0.79 against 0.74 with the historical average, with smaller drawdowns and more diversified.")}</div>}
       <div className="kpis">
         <Kpi etiqueta={t("Tu Sharpe", "Your Sharpe")} valor={num(d.actual.sharpe, 3)}
              sub={`${pct(d.actual.ret_pct)} / ${pct(d.actual.vol_pct)}`} />
@@ -4992,7 +5048,96 @@ function Markowitz({ d, cartera, bench, extras }) {
 
 /* ── Monte Carlo ── */
 
-function MonteCarlo({ d, cartera }) {
+/* Dos escenarios del mismo Monte Carlo: el del modelo y el de los analistas
+   (el rendimiento de Black-Litterman, con los precios objetivo y los que fijó
+   el usuario, como una OPA). Misma semilla: lo que cambia entre los dos es lo
+   que se espera de cada activo, no la suerte. */
+function McEscenarios({ d, cartera }) {
+  const [esc, setEsc] = useState("modelo");
+  const [da, setDa] = useState(null);
+  useEffect(() => { setEsc("modelo"); setDa(null); }, [cartera]);
+  useEffect(() => {
+    if (esc !== "analistas" || da) return;
+    let vivo = true;
+    api(`/api/montecarlo/${encodeURIComponent(cartera)}/analistas`).then((r) => vivo && setDa(r));
+    return () => { vivo = false; };
+  }, [esc, cartera, da]);
+  const e = da?.escenario;
+  const datos = esc === "analistas" && da && !da.error ? da : d;
+  return (
+    <>
+      <div className="panel" style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+        <div className="l10-vista" role="group" aria-label={t("Escenario", "Scenario")} style={{ marginLeft: 0 }}>
+          <button aria-pressed={esc === "modelo"} onClick={() => setEsc("modelo")}>{t("Modelo", "Model")}</button>
+          <button aria-pressed={esc === "analistas"} onClick={() => setEsc("analistas")}>{t("Según los analistas", "Per analysts")}</button>
+        </div>
+        <span style={{ fontSize: 12.5, color: "var(--texto-3)", flex: "1 1 320px" }}>
+          {esc === "modelo"
+            ? t("Lo que se espera de cada activo sale de su historia y del CAPM de su mercado con el riesgo país: el escenario probado contra 20 años de datos.",
+                "What's expected from each asset comes from its history and its market's CAPM with country risk: the scenario tested against 20 years of data.")
+            : t("Lo mismo, corregido por Black-Litterman con los precios objetivo de los analistas y los precios que fijaste en Optimización. Los objetivos de los analistas suelen ser optimistas y no se pueden probar con datos históricos.",
+                "The same, corrected by Black-Litterman with analysts' target prices and the prices you set in Optimization. Analysts' targets tend to be optimistic and can't be tested on historical data.")}
+        </span>
+      </div>
+      {esc === "analistas" && !da && <div className="cargando">{t("Corriendo el escenario de los analistas…", "Running the analysts' scenario…")}</div>}
+      {esc === "analistas" && da?.error && <div className="aviso mal">{da.error}</div>}
+      {esc === "analistas" && e && (
+        <div className="aviso" style={{ marginBottom: 12 }}>
+          {e.eventos.length > 0 && <div style={{ marginBottom: 6 }}>
+            <b>{t("Eventos fijados:", "Events set:")}</b>{" "}
+            {e.eventos.map((x) => t(`${x.ticker} se resuelve a ${usd(x.precio)} en ${x.meses} meses → ${pct(x.ret_12m_pct, 1)} en el año, con la incertidumbre de tu rango (${pct(x.vol_pct, 1)})`,
+                                    `${x.ticker} settles at ${usd(x.precio)} in ${x.meses} months → ${pct(x.ret_12m_pct, 1)} in the year, with your range's uncertainty (${pct(x.vol_pct, 1)})`)).join(" · ")}.
+          </div>}
+          <b>{t("Rendimiento esperado por activo:", "Expected return per asset:")}</b>{" "}
+          {Object.entries(e.deriva_pct).map(([tk, r]) => {
+            const v = e.views.find((x) => x.ticker === tk);
+            const fuente = !v ? t("sin vista: el del modelo", "no view: the model's")
+              : v.manual ? (v.modo === "B2" ? t("evento fijado", "event set") : t("tu opinión", "your view"))
+              : t(`analistas, confianza ${v.confianza} %`, `analysts, confidence ${v.confianza} %`);
+            return `${tk} ${pct(r, 1)} (${fuente})`;
+          }).join(" · ")}.
+        </div>)}
+      <MonteCarlo d={datos} cartera={cartera} escenario={esc === "analistas" && da && !da.error ? "analistas" : null} />
+      <McCalibracion d={d} />
+    </>);
+}
+
+/* Con qué se calibró cada activo: el Monte Carlo deja de ser una caja negra.
+   De dónde salió la historia, contra qué mercado se midió, cuánto riesgo país
+   carga y cuánto pesa su pasado en lo que se espera de él. */
+function McCalibracion({ d }) {
+  const m = d.modelo;
+  if (!m) return null;
+  return (
+    <>
+      <div className="panel">
+        <h3>{t("Con qué se calibró cada activo", "What each asset was calibrated with")}</h3>
+        <div className="tabla-wrap"><table>
+          <thead><tr><th>{t("Activo", "Asset")}</th><th className="n">{t("Peso", "Weight")}</th>
+            <th>{t("País · mercado", "Country · market")}</th><th className="n">{t("Riesgo país", "Country risk")}</th>
+            <th className="n">β</th><th className="n">{t("Años", "Years")}</th><th className="n">{t("Rindió", "Returned")}</th>
+            <th className="n">CAPM</th><th className="n">{t("Se usa", "Used")}</th>
+            <th className="n">{t("Peso de la historia", "History weight")}</th>
+            <th className="n">{t("Vol hoy", "Vol today")}</th><th className="n">{t("Vol normal", "Usual vol")}</th></tr></thead>
+          <tbody>{(m.activos || []).map((a) => (
+            <tr key={a.ticker}>
+              <td><b>{a.ticker}</b>{a.calibrado_con !== a.ticker && <span style={{ color: "var(--texto-3)" }}> · {t("con", "with")} {a.calibrado_con}</span>}</td>
+              <td className="n">{pct(a.peso_pct, 0)}</td>
+              <td style={{ whiteSpace: "nowrap" }}>{a.pais || "—"}<span style={{ color: "var(--texto-3)" }}> · {a.mercado}</span></td>
+              <td className="n">{pct(a.crp_pct, 1)}</td><td className="n">{num(a.beta, 2)}</td>
+              <td className="n">{num(a.anios, 1)}</td>
+              <td className="n">{pct(a.deriva_historica_pct, 1)}</td><td className="n">{pct(a.deriva_capm_pct, 1)}</td>
+              <td className="n"><b>{pct(a.deriva_usada_pct, 1)}</b></td><td className="n">{pct(a.peso_historia_pct, 0)}</td>
+              <td className={"n " + (a.vol_hoy_pct > a.vol_largo_pct * 1.15 ? "neg" : "")}>{pct(a.vol_hoy_pct, 0)}</td>
+              <td className="n">{pct(a.vol_largo_pct, 0)}</td></tr>))}</tbody></table></div>
+        <div className="pie">{t(
+          `"Rindió" es el promedio anual de su historia. "CAPM" es lo que paga su riesgo en su mercado: ${m.rf}, más β × (${m.erp_pct} % + el riesgo país de Damodaran); un bono, la tasa libre más el spread de default del país. La β se mide contra el índice local si el activo cotiza en su plaza (Merval, Stoxx 600, ETF de país) y contra el S&P 500 si es una extranjera que cotiza en EE. UU. "Se usa" combina historia y CAPM pesando cada uno por cuánto se le puede creer (el CAPM con ±${m.tau_pct} % de duda): con veinte años tranquilos manda la historia; con cinco y una volatilidad del 60 %, el promedio histórico es casi ruido y manda el CAPM. La volatilidad arranca en la de hoy y vuelve a la normal a mitad de camino en ${m.vida_media_vol} ruedas.`,
+          `"Returned" is its historical yearly average. "CAPM" is what its risk pays in its own market: ${m.rf}, plus β × (${m.erp_pct} % + Damodaran's country risk premium); a bond, the risk-free rate plus the country's default spread. β is measured against the local index when the asset trades at home (Merval, Stoxx 600, country ETF) and against the S&P 500 for a foreign company listed in the US. "Used" blends history and CAPM weighted by how much each can be trusted (CAPM with ±${m.tau_pct} % of doubt): with twenty calm years history rules; with five and 60 % volatility the historical average is mostly noise and CAPM rules. Volatility starts at today's and gets halfway back to normal in ${m.vida_media_vol} sessions.`)}</div>
+      </div>
+    </>);
+}
+
+function MonteCarlo({ d, cartera, escenario }) {
   // Un solo botón para todo: el abanico abriéndose rueda a rueda y las
   // correlaciones moviéndose en el tiempo son la misma película contada dos
   // veces, y tenerlas en pestañas separadas obligaba a arrancar cada una a mano.
@@ -5013,9 +5158,18 @@ function MonteCarlo({ d, cartera }) {
       </div>
 
       <div className="panel" style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        {LAB1 ? (
+          <button className="btn primario" onClick={() => setCorriendo(!corriendo)}
+                  aria-label={corriendo ? t("Detener la simulación", "Stop the simulation") : t("Reproducir la simulación", "Play the simulation")}
+                  title={corriendo ? t("Detener la simulación", "Stop the simulation") : t("Reproducir la simulación", "Play the simulation")}
+                  style={{ width: 28, height: 28, padding: 0, borderRadius: "50%", fontSize: 12, lineHeight: 1, flex: "none" }}>
+            {corriendo ? "⏸" : "▶"}
+          </button>
+        ) : (
         <button className="btn primario" onClick={() => setCorriendo(!corriendo)}>
           {corriendo ? t("⏸ Detener la simulación", "⏸ Stop the simulation") : t("▶ Reproducir la simulación", "▶ Play the simulation")}
         </button>
+        )}
         <span style={{ fontSize: 12.5, color: "var(--texto-3)" }}>
           {t("Mueve a la vez el abanico y las correlaciones: cómo se abre el rango de "
             + "resultados rueda a rueda, y cómo se movió lo que los activos tienen en común.",
@@ -5025,19 +5179,19 @@ function MonteCarlo({ d, cartera }) {
       </div>
 
       <DistribucionFinal d={d} corriendo={corriendo} />
-      <McPorActivo cartera={cartera} horizonte={d.horizonte_ruedas} />
+      <McPorActivo cartera={cartera} horizonte={d.horizonte_ruedas} escenario={escenario} />
       <CorrelacionesAnimadas cartera={cartera} corriendo={corriendo} />
       <McMotores cartera={cartera} horizonte={d.horizonte_ruedas} />
     </>
   );
 }
 
-function McPorActivo({ cartera, horizonte }) {
+function McPorActivo({ cartera, horizonte, escenario }) {
   const c = colores();
   const [d, setD] = useState(null);
   useEffect(() => { setD(null);
-    api(`/api/montecarlo/${encodeURIComponent(cartera)}/por-activo?horizonte=${horizonte}`).then(setD);
-  }, [cartera, horizonte]);
+    api(`/api/montecarlo/${encodeURIComponent(cartera)}/por-activo?horizonte=${horizonte}${LAB === "11" ? "&lab=11" : ""}${escenario ? `&escenario=${escenario}` : ""}`).then(setD);
+  }, [cartera, horizonte, escenario]);
   if (!d) return <div className="cargando">{t("Simulando cada activo por separado…", "Simulating each asset separately…")}</div>;
   if (d.error) return <div className="aviso mal">{d.error}</div>;
 
@@ -5214,7 +5368,7 @@ function CorrelacionesAnimadas({ cartera, corriendo }) {
           <Grafico alto={Math.max(280, d.tickers.length * 46)}
             datos={[{ type: "heatmap", z: cuadro.matriz, x: d.tickers, y: d.tickers,
                       zmin: -1, zmax: 1,
-                      colorscale: [[0, c.negativo], [0.5, c.panel], [1, c.acento]],
+                      colorscale: [[0, c.negativo], [0.5, c.panel], [1, c.positivo]],
                       text: cuadro.matriz.map((f) => f.map((v) => v.toFixed(2))),
                       texttemplate: "%{text}", textfont: { size: 10 },
                       hovertemplate: "%{y} ↔ %{x}: %{z:.2f}<extra></extra>",
@@ -5266,7 +5420,7 @@ function McMotores({ cartera, horizonte }) {
   // filas y la pregunta que contesta —¿el resultado depende del supuesto de
   // distribución?— hay que hacérsela siempre, no solo cuando uno se acuerda.
   useEffect(() => { setMotores(null);
-    api(`/api/montecarlo/${encodeURIComponent(cartera)}/motores?horizonte=${horizonte}`)
+    api(`/api/montecarlo/${encodeURIComponent(cartera)}/motores?horizonte=${horizonte}${LAB === "11" ? "&lab=11" : ""}`)
       .then(setMotores);
   }, [cartera, horizonte]);
 
@@ -5279,15 +5433,19 @@ function McMotores({ cartera, horizonte }) {
           <div className="tabla-wrap"><table>
             <thead><tr><th>{t("Motor", "Engine")}</th><th className="n">{t("Escenario malo", "Bad scenario")}</th>
                        <th className="n">{t("Pérdida", "Loss")}</th><th className="n">{t("Muy malo", "Very bad")}</th>
-                       <th className="n">{t("Pérdida", "Loss")}</th></tr></thead>
+                       <th className="n">{t("Pérdida", "Loss")}</th>
+                       {LAB === "11" && <th className="n">{t("Prob. de ganar", "Prob. of winning")}</th>}</tr></thead>
             <tbody>{Object.entries(motores).map(([k, v]) => (
               <tr key={k}><td>{k}</td>
                 <td className="n">{usd(v.var95)}</td><td className="n neg">{pct(v.perdida_var95_pct, 1)}</td>
                 <td className="n">{usd(v.var99)}</td><td className="n neg">{pct(v.perdida_var99_pct, 1)}</td>
+                {LAB === "11" && <td className="n">{pct(v.prob_ganancia, 0)}</td>}
               </tr>))}</tbody>
           </table></div>
           <div className="pie">
-            {t("Las colas gordas pesan en el riesgo de un día —ahí está el VaR de "
+            {LAB === "11" ? t("Los tres con el mismo rendimiento esperado: lo único que cambia es cómo se sortean los días. La normal multivariante es el GBM clásico con Cholesky; el bootstrap remuestrea bloques de 21 ruedas de la historia real, con todos los activos juntos; la simulación histórica filtrada hace lo mismo pero arranca de la volatilidad de hoy. En el backtest, la filtrada fue la que mejor acertó en las crisis.",
+              "All three with the same expected return: the only difference is how days are drawn. The multivariate normal is the classic GBM with Cholesky; the bootstrap resamples 21-session blocks of real history, all assets together; filtered historical simulation does the same but starts from today's volatility. In the backtest, the filtered one was the most accurate in crises.") :
+            t("Las colas gordas pesan en el riesgo de un día —ahí está el VaR de "
               + "Cornish-Fisher, en la pestaña de Riesgo— pero se diluyen al componer "
               + "muchos días: por eso los tres motores dan parecido a este horizonte.",
               "Fat tails matter for one-day risk —that's what the Cornish-Fisher VaR, in the "
@@ -5338,12 +5496,40 @@ function DistribucionFinal({ d, corriendo }) {
       hoverinfo: "skip" },
   ];
 
+  // Lab 11: el abanico con las trayectorias simuladas en vez de bandas. Todas
+  // las que terminan arriba de hoy en un trazo y todas las de abajo en otro
+  // (separadas por null): dos trazos en vez de doscientos, para que el SVG no
+  // se arrastre al animar.
+  const muestra = d.trayectorias_muestra || [];
+  const LINEAS = LAB === "11" && muestra.length > 0;
+  const lineas = (gana) => {
+    const xs = [], ys = [];
+    for (const tr of muestra) {
+      if ((tr[tr.length - 1] >= V) !== gana) continue;
+      xs.push(...corte(a.dias), null); ys.push(...corte(tr), null);
+    }
+    const n = muestra.filter((tr) => (tr[tr.length - 1] >= V) === gana).length;
+    return [{ type: "scatter", mode: "lines", x: xs, y: ys, hoverinfo: "skip", connectgaps: false,
+              name: gana ? t(`terminan ganando (${n} de ${muestra.length})`, `end up winning (${n} of ${muestra.length})`)
+                         : t(`terminan perdiendo (${n} de ${muestra.length})`, `end up losing (${n} of ${muestra.length})`),
+              line: { color: gana ? c.positivo : c.negativo, width: 0.8 }, opacity: 0.28 }];
+  };
+
   return (
     <>
       <div className="panel">
         <h3>{t("Cómo se abre el abanico", "How the fan opens up")}</h3>
-        <Grafico alto={320}
-          datos={[
+        <Grafico alto={LINEAS ? 380 : 320}
+          datos={LINEAS ? [
+            ...lineas(true), ...lineas(false),
+            { type: "scatter", x: corte(a.dias), y: corte(a.p5), mode: "lines", name: t("5 % peor y 5 % mejor", "worst and best 5 %"),
+              line: { color: c.texto3, width: 1.4, dash: "dash" }, hoverinfo: "skip" },
+            { type: "scatter", x: corte(a.dias), y: corte(a.p95), mode: "lines", showlegend: false,
+              line: { color: c.texto3, width: 1.4, dash: "dash" }, hoverinfo: "skip" },
+            // Ámbar fijo y no el --alerta del tema: en claro ése es casi marrón.
+            { type: "scatter", x: corte(a.dias), y: corte(a.p50), mode: "lines",
+              name: t("mediana", "median"), line: { color: "#F59E0B", width: 3 } },
+          ] : [
             ...banda(a.p5, a.p95, "22", t("9 de cada 10 casos", "9 out of 10 cases")),
             ...banda(a.p25, a.p75, "44", t("la mitad de los casos", "half the cases")),
             { type: "scatter", x: corte(a.dias), y: corte(a.p50), mode: "lines",
@@ -5352,13 +5538,19 @@ function DistribucionFinal({ d, corriendo }) {
           layout={{ xaxis: { title: t("Ruedas hacia adelante", "Sessions ahead"),
                              range: [0, a.dias?.[a.dias.length - 1] || 1] },
                     yaxis: { title: t("Valor en dólares", "Value in dollars"),
-                             range: [Math.min(...(a.p5 || [0])) * 0.95,
-                                     Math.max(...(a.p95 || [1])) * 1.05] },
+                             range: [Math.min(...(a.p5 || [0])) * (LINEAS ? 0.85 : 0.95),
+                                     Math.max(...(a.p95 || [1])) * (LINEAS ? 1.2 : 1.05)] },
                     shapes: [{ type: "line", xref: "paper", x0: 0, x1: 1,
                                y0: V, y1: V,
-                               line: { color: c.texto3, width: 2, dash: "dot" } }] }} />
+                               line: { color: c.texto3, width: 2, dash: "dot" } }],
+                    annotations: LINEAS ? [{ xref: "paper", yref: "paper", x: 0.01, y: 0.99, xanchor: "left", yanchor: "top",
+                      showarrow: false, align: "left", font: { size: 12, color: c.texto2 }, bgcolor: c.panel, opacity: 0.9,
+                      text: t(`<b>${d.n_simulaciones.toLocaleString("es-AR")} simulaciones</b> · se dibujan ${muestra.length}`,
+                              `<b>${d.n_simulaciones.toLocaleString("en-US")} simulations</b> · ${muestra.length} drawn`) }] : [] }} />
         <div className="pie">
-          {t("La incertidumbre no crece de golpe: se abre con la raíz del tiempo. La línea "
+          {LINEAS ? t(`Cada línea es un futuro posible: ${muestra.length} de los ${d.n_simulaciones.toLocaleString("es-AR")} simulados, en verde los que terminan el año arriba de lo que vale hoy (la línea punteada) y en rojo los que terminan abajo. Ninguno es una predicción: lo que importa es la forma de la nube, que se abre con el tiempo. Las líneas cortadas marcan el 5 % peor y el 5 % mejor de todos los escenarios.`,
+              `Each line is a possible future: ${muestra.length} of the ${d.n_simulaciones.toLocaleString("en-US")} simulated, in green those that end the year above today's value (the dotted line) and in red those that end below. None is a prediction: what matters is the shape of the cloud, which opens up over time. The dashed lines mark the worst 5 % and the best 5 % of all scenarios.`)
+           : t("La incertidumbre no crece de golpe: se abre con la raíz del tiempo. La línea "
             + "punteada es lo que vale hoy, y todo lo pintado en rojo abajo es la parte de los "
             + "escenarios en la que terminás con menos de lo que tenés.",
             "Uncertainty doesn't grow all at once: it opens up with the square root of time. The "
@@ -5612,6 +5804,21 @@ function Momentum({ d }) {
 
 function ObjetivosYBL({ cartera, extras, d, bench }) {
   const [manuales, setManuales] = useState({});
+  // Lab 11: los precios fijados a mano se guardan en el servidor
+  // (`store.opiniones`) — una OPA no se olvida al recargar, y el escenario
+  // "según los analistas" del Monte Carlo los usa igual que BL.
+  useEffect(() => {
+    if (LAB !== "11") return;
+    let vivo = true;
+    api(`/api/opiniones/${encodeURIComponent(cartera)}`).then((m) => vivo && m && !m.error && setManuales(m));
+    return () => { vivo = false; };
+  }, [cartera]);
+  const persistir = (m) => {
+    setManuales(m);
+    if (LAB === "11")
+      api(`/api/opiniones/${encodeURIComponent(cartera)}`, { method: "PUT",
+        headers: { "Content-Type": "application/json" }, body: JSON.stringify({ manuales: m }) });
+  };
   const [bl, setBl] = useState(null);
   const [editando, setEditando] = useState(null);
   const [hrp, setHrp] = useState(null);
@@ -5621,9 +5828,10 @@ function ObjetivosYBL({ cartera, extras, d, bench }) {
   // impone una opinión propia. No hay botón: es el modo normal de uso.
   useEffect(() => {
     let vivo = true;
-    if (Object.keys(manuales).length === 0) { setBl(extras?.bl || null); return; }
+    // En el lab 11 se pide siempre: el BL que viene con el análisis es el de producción.
+    if (Object.keys(manuales).length === 0 && LAB !== "11") { setBl(extras?.bl || null); return; }
     setBl("cargando");
-    api(`/api/blacklitterman/${encodeURIComponent(cartera)}`, {
+    api(`/api/blacklitterman/${encodeURIComponent(cartera)}${LAB === "11" ? "?lab=11" : ""}`, {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ manuales, benchmark: bench }) })
       .then((r) => vivo && setBl(r));
@@ -5635,7 +5843,7 @@ function ObjetivosYBL({ cartera, extras, d, bench }) {
   // `manuales`.
   useEffect(() => {
     let vivo = true;
-    api(`/api/hrp/${encodeURIComponent(cartera)}?benchmark=${bench}`).then((r) => vivo && setHrp(r));
+    api(`/api/hrp/${encodeURIComponent(cartera)}?benchmark=${bench}${LAB === "11" ? "&lab=11" : ""}`).then((r) => vivo && setHrp(r));
     return () => { vivo = false; };
   }, [cartera, bench]);
 
@@ -5643,11 +5851,10 @@ function ObjetivosYBL({ cartera, extras, d, bench }) {
   if (obj.error) return <div className="aviso mal">{obj.error}</div>;
 
   const guardar = (ticker, cfg) => {
-    setManuales((m) => ({ ...m, [ticker]: cfg }));
+    persistir({ ...manuales, [ticker]: cfg });
     setEditando(null);
   };
-  const borrar = (ticker) =>
-    setManuales((m) => { const n = { ...m }; delete n[ticker]; return n; });
+  const borrar = (ticker) => { const n = { ...manuales }; delete n[ticker]; persistir(n); };
 
   return (
     <>
@@ -5875,7 +6082,11 @@ function BlackLitterman({ bl, actual }) {
                 </tr>))}</tbody>
             </table></div>
             <div className="pie">
-              {t(`"Retorno esperado" es el posterior del modelo: la mezcla entre lo que estaba `
+              {LAB === "11" ? t(`"Retorno esperado" es el posterior del modelo: la mezcla entre el rendimiento `
+                + `esperado del Monte Carlo y lo que dicen las views, pesada por confianza.`,
+                `"Expected return" is the model's posterior: the blend between the Monte Carlo's `
+                + `expected return and what the views say, weighted by confidence.`) :
+               t(`"Retorno esperado" es el posterior del modelo: la mezcla entre lo que estaba `
                 + `implícito en tu cartera y lo que dicen las views, pesada por confianza.`,
                 `"Expected return" is the model's posterior: the blend between what was `
                 + `implicit in your portfolio and what the views say, weighted by confidence.`)}
@@ -6045,15 +6256,15 @@ function Regimenes({ d, cartera }) {
 }
 
 /* ── Stress ── */
-function Stress({ d }) {
+function Stress({ d, plegado = false }) {
   const filas = d.escenarios || [];
   const conProxy = filas.some((e) => e.proxies?.length);
   const parcial = filas.some((e) => e.cobertura_pct != null && e.cobertura_pct < 99.5
                                     && e.pnl_pct != null);
   return (
-    <div className="panel">
-      <h3>{t(`Qué le habría pasado a esta cartera en ${filas.length} crisis reales`,
-             `What would have happened to this portfolio in ${filas.length} real crises`)}</h3>
+    <Plegable id={plegado ? "riesgo-crisis" : "crisis"} porDefecto={!plegado}
+              titulo={t(`Qué le habría pasado a esta cartera en ${filas.length} crisis reales`,
+                        `What would have happened to this portfolio in ${filas.length} real crises`)}>
       <div className="tabla-wrap"><table>
         <thead><tr><th>{t("Escenario", "Scenario")}</th><th>{t("Período", "Period")}</th>
                    <th>{t("Qué pasó", "What happened")}</th>
@@ -6104,7 +6315,7 @@ function Stress({ d }) {
             + `there and the weights are redistributed among them: the column says what portion of `
             + `the portfolio was represented, and the dollar amount corresponds only to that portion.`)}</>)}
       </div>
-    </div>
+    </Plegable>
   );
 }
 
@@ -6297,9 +6508,15 @@ function MonteCarloComparado({ mc, nombres, c }) {
       </table></div>
       <div className="pie">
         {mc.simulaciones.toLocaleString(IDIOMA === "en" ? "en-US" : "es-AR")}{" "}
+        {mc.motor === "fhs" ? <>
+          {t("trayectorias por cartera con el Monte Carlo de la app (simulación histórica filtrada, rendimiento esperado bayesiano con riesgo país), cada una calibrada con su propia historia larga y ",
+             "paths per portfolio with the app's Monte Carlo (filtered historical simulation, Bayesian expected return with country risk), each calibrated with its own long history and ")}
+          <b>{t("la misma semilla para todas", "the same seed for all of them")}</b>:{" "}
+        </> : <>
         {t(`trayectorias por cartera, motor ${mc.motor}`, `paths per portfolio, ${mc.motor} engine`)}
         {" "}{t("(colas gordas),", "(fat tails),")} <b>{t("la misma semilla y el mismo período para todas",
           "the same seed and the same period for all of them")}</b>:{" "}
+        </>}
         {t(`lo que separa a los abanicos es la cartera, no la suerte del sorteo. Va en base 100 y no en `
           + `dólares porque las carteras tienen tamaños distintos — en plata compararías cuánto `
           + `tenés, no cómo se comporta lo que tenés. La banda es el 90 % central: uno de cada `

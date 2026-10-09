@@ -223,6 +223,31 @@ def a_usd(monto_ars: float, fecha, mep: pd.Series = None) -> float:
     return float(monto_ars) / v
 
 
+def serie_larga() -> pd.Series:
+    """El MEP y, antes de que empiece su serie, el CCL implícito de GGAL
+    (GGAL.BA × 10 / ADR, la relación del ADR).
+
+    Sólo para CALIBRAR modelos con historia larga, nunca para valuar: el MEP
+    guardado arranca en 2019 y con él toda acción argentina perdía sus 14 años
+    previos en dólares — METR quedaba con 7 años que empezaban en el piso de
+    2019 y un "histórico" de 66 % anual que en 22 años es 27 %. Empalman: el
+    2019-08-12 el CCL daba 55,2 y el MEP 54,5.
+    """
+    from core.data import sources
+
+    mep = serie()
+    try:
+        local = sources.precios("GGAL.BA")["Close"].dropna()
+        adr = sources.precios("GGAL")["Close"].dropna()
+    except Exception:
+        return mep
+    ccl = (local * 10 / adr.reindex(local.index)).dropna()
+    ccl.index = pd.DatetimeIndex(ccl.index).tz_localize(None) if ccl.index.tz is not None else ccl.index
+    if mep is not None and len(mep):
+        ccl = ccl[ccl.index < mep.index[0]]
+    return pd.concat([ccl, mep]).sort_index() if mep is not None else ccl
+
+
 def serie_a_usd(precios_ars: pd.Series, mep: pd.Series = None) -> pd.Series:
     """Convierte una serie de precios en pesos a dólares, fecha por fecha.
 

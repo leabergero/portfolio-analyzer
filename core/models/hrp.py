@@ -70,19 +70,34 @@ def _bisección_recursiva(cov: np.ndarray) -> np.ndarray:
     return pesos
 
 
-def optimizar(posiciones, benchmark: str = None) -> dict:
-    """Pesos de HRP para esta cartera, comparables con los de Markowitz."""
+def optimizar(posiciones, benchmark: str = None, lab: bool = False) -> dict:
+    """Pesos de HRP para esta cartera, comparables con los de Markowitz.
+
+    lab (`?lab=11`): Σ y ρ del modelo propuesto (`montecarlo.esperados`):
+    historia larga de cada activo y ventana común sin ceros inventados; μ, que
+    HRP no usa para los pesos, es el del modelo propuesto.
+    """
+    import pandas as pd
     from core.models.portfolio import matriz_retornos, value_weights, _orden_jerarquico
     from core.models.rates import risk_free_para
 
-    ret_df, precios = matriz_retornos(posiciones)
-    if ret_df.shape[1] < 2:
-        return {"error": "Hacen falta al menos dos activos con historia."}
+    if lab:
+        from core.models.montecarlo import esperados
+        e = esperados(posiciones)
+        if "error" in e or len(e["tickers"]) < 2:
+            return {"error": "Hacen falta al menos dos activos con historia."}
+        tickers, precios, mu, cov = e["tickers"], e["precios"], e["mu"], e["cov"]
+        d = np.sqrt(np.diag(cov))
+        corr = pd.DataFrame(cov / np.outer(d, d), index=tickers, columns=tickers)
+    else:
+        ret_df, precios = matriz_retornos(posiciones)
+        if ret_df.shape[1] < 2:
+            return {"error": "Hacen falta al menos dos activos con historia."}
 
-    tickers = list(ret_df.columns)
-    mu = ret_df.mean().to_numpy() * RUEDAS
-    cov = ret_df.cov().to_numpy() * RUEDAS
-    corr = ret_df.corr()
+        tickers = list(ret_df.columns)
+        mu = ret_df.mean().to_numpy() * RUEDAS
+        cov = ret_df.cov().to_numpy() * RUEDAS
+        corr = ret_df.corr()
     rf, rf_label = risk_free_para(benchmark, "corto")
 
     orden, _grupo = _orden_jerarquico(corr)

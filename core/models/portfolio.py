@@ -11,6 +11,7 @@ convertida al dólar de hoy contra su valor de hoy mide el movimiento del tipo d
 cambio, no el rendimiento del activo.
 """
 
+from contextvars import ContextVar
 from datetime import date, datetime
 
 import numpy as np
@@ -366,12 +367,54 @@ def pnl_realizado(trades) -> dict:
             "total_fx_usd": round(total_fx, 2)}
 
 
-def matriz_retornos(posiciones, desde=None, hasta=None):
+# Lab 11 (`X-Lab: 11` o `?lab=11`): historia larga y ventana común, sin ceros
+# ni retornos copiados. Viaja por request como la plaza (`core.mercado`).
+HISTORIA_LARGA = ContextVar("historia_larga", default=False)
+
+
+def _matriz_larga(posiciones, desde=None, hasta=None):
+    """Precios largos alineados (CEDEAR → subyacente, acción argentina → MEP +
+    CCL de GGAL) y recortados a la ventana en que existen TODOS los activos.
+
+    La matriz de siempre alinea RETORNOS desde que existe la mitad de la
+    cartera: un día sin rueda copiaba el retorno anterior (MUD 107 días en
+    MAMI) y un activo que todavía no cotizaba quedaba con retorno 0 —GLDD y
+    QQQD figuraban quietos el 65 % de los días en KARIN—, y un activo quieto
+    no aporta volatilidad: el VaR salía 15–20 % más chico. Acá se alinean
+    precios (un día sin rueda repite el precio: retorno 0, que es lo cierto) y
+    no se inventa historia que no existe.
+    """
+    from core.models.montecarlo import _limpiar, _serie_larga
+
+    series, precios = {}, {}
+    for p in posiciones:
+        t = str(p["ticker"]).upper()
+        if t in series or p.get("source") == sources.SOURCE_FCI:
+            continue
+        propia, larga, _ = _serie_larga(t, p.get("source") or None)
+        if len(propia) == 0 or len(larga) < 30:
+            continue
+        precios[t] = float(propia.iloc[-1])
+        series[t] = _limpiar(larga.dropna())
+    if not series:
+        return pd.DataFrame(), {}
+    px = pd.DataFrame(series).sort_index().ffill().dropna()
+    if desde:
+        px = px[px.index >= pd.Timestamp(desde)]
+    if hasta:
+        px = px[px.index <= pd.Timestamp(hasta)]
+    return px.pct_change().dropna(), precios
+
+
+def matriz_retornos(posiciones, desde=None, hasta=None, larga: bool = None):
     """(DataFrame de retornos diarios en USD, {ticker: precio actual}).
 
     Base de todos los modelos de la fase 3. Descarta series con menos de 30
     ruedas: con menos, cualquier volatilidad o correlación es ruido.
+    `larga` (por defecto, lo que diga `HISTORIA_LARGA`): ver `_matriz_larga`.
     """
+    if HISTORIA_LARGA.get() if larga is None else larga:
+        return _matriz_larga(posiciones, desde, hasta)
     retornos, precios = {}, {}
     for p in posiciones:
         t = str(p["ticker"]).upper()

@@ -61,6 +61,13 @@ def consultar(nombre, run_id):
 
 # ── Modelos sueltos ───────────────────────────────────────────────────────────
 
+def _lab() -> bool:
+    """`?lab=11`: el modelo propuesto (Monte Carlo FHS y Markowitz con sus
+    insumos) en vez del de producción, hasta que se apruebe."""
+    from core.models.portfolio import HISTORIA_LARGA
+    return HISTORIA_LARGA.get()
+
+
 def _simple(nombre, fn, *args, **kwargs):
     pos = _posiciones(nombre)
     if not pos:
@@ -138,7 +145,7 @@ def mk_backtest(nombre):
     """¿La cartera optimizada habría funcionado fuera de muestra?"""
     return _simple(nombre, markowitz.backtest,
                    request.args.get("meses", 6, type=int),
-                   request.args.get("benchmark"))
+                   request.args.get("benchmark"), _lab())
 
 
 @bp.get("/stress/<nombre>")
@@ -150,13 +157,13 @@ def stress(nombre):
 def mk(nombre):
     cap = request.args.get("cap", type=float)
     return _simple(nombre, markowitz.optimizar,
-                   request.args.get("benchmark"), cap)
+                   request.args.get("benchmark"), cap, _lab())
 
 
 @bp.get("/hrp/<nombre>")
 def hrp_ep(nombre):
     """Hierarchical Risk Parity: pesos por clustering, sin invertir la covarianza."""
-    return _simple(nombre, hrp.optimizar, request.args.get("benchmark"))
+    return _simple(nombre, hrp.optimizar, request.args.get("benchmark"), _lab())
 
 
 @bp.get("/montecarlo/<nombre>")
@@ -167,9 +174,39 @@ def mc(nombre):
                    request.args.get("motor", "t"))
 
 
+@bp.get("/montecarlo/<nombre>/fhs")
+def mc_fhs(nombre):
+    """Lab 11: el modelo propuesto (simulación histórica filtrada)."""
+    return _simple(nombre, montecarlo.simular_fhs,
+                   request.args.get("horizonte", 252, type=int))
+
+
+@bp.get("/montecarlo/<nombre>/analistas")
+def mc_analistas(nombre):
+    """El Monte Carlo con el rendimiento de Black-Litterman: precios objetivo
+    y los precios fijados a mano (una OPA) incluidos."""
+    return _simple(nombre, montecarlo.escenario_analistas, store.opiniones(nombre),
+                   request.args.get("horizonte", 252, type=int))
+
+
+@bp.get("/opiniones/<nombre>")
+def opiniones_get(nombre):
+    return jsonify(store.opiniones(nombre))
+
+
+@bp.put("/opiniones/<nombre>")
+def opiniones_put(nombre):
+    if not store.cargar(nombre):
+        return _falta(nombre)
+    store.fijar_opiniones(nombre, (request.json or {}).get("manuales") or {})
+    return jsonify(store.opiniones(nombre))
+
+
 @bp.get("/montecarlo/<nombre>/motores")
 def mc_motores(nombre):
     """Los tres motores lado a lado: cuánto cambia el supuesto de distribución."""
+    if _lab():
+        return _simple(nombre, montecarlo.motores_fhs, request.args.get("horizonte", 252, type=int))
     return _simple(nombre, montecarlo.comparar_motores,
                    request.args.get("horizonte", 252, type=int))
 
@@ -177,6 +214,21 @@ def mc_motores(nombre):
 @bp.get("/montecarlo/<nombre>/por-activo")
 def mc_activos(nombre):
     """Simula cada activo por separado: qué papel puede hundir el resultado."""
+    if _lab():
+        # `?escenario=analistas`: los mismos ajustes de Black-Litterman que el
+        # abanico de ese escenario, para que cada activo cuente lo mismo.
+        ajustes = {}
+        if request.args.get("escenario") == "analistas":
+            pos = _posiciones(nombre)
+            if not pos:
+                return _falta(nombre)
+            aj = montecarlo.ajustes_analistas(pos, store.opiniones(nombre))
+            if "error" in aj:
+                return jsonify(aj)
+            ajustes = {"deriva_anual": aj["deriva"], "vol_anual": aj["vol"]}
+        return _simple(nombre, montecarlo.por_activo_fhs,
+                       request.args.get("horizonte", 252, type=int),
+                       request.args.get("simulaciones", 4000, type=int), **ajustes)
     return _simple(nombre, montecarlo.por_activo,
                    request.args.get("horizonte", 252, type=int),
                    request.args.get("simulaciones", 4000, type=int),
@@ -264,14 +316,15 @@ def bl(nombre):
         return _falta(nombre)
     cuerpo = request.json or {}
     views = cuerpo.get("views")
+    # Sin `manuales` en el pedido, las guardadas (`store.opiniones`).
+    manuales = cuerpo["manuales"] if "manuales" in cuerpo else store.opiniones(nombre)
 
     # Sin views explícitas se arman desde los precios objetivo, dejando que las
     # manuales pisen activo por activo. Es el uso normal: BL automático, con la
     # posibilidad de imponer una opinión propia donde el usuario la tenga.
     if views is None:
         views = blacklitterman.views_combinadas(
-            targets.analizar(pos), momentum.analizar(pos),
-            cuerpo.get("manuales"))
+            targets.analizar(pos), momentum.analizar(pos), manuales)
 
     return jsonify(blacklitterman.analizar(
-        pos, views, cuerpo.get("benchmark"), cuerpo.get("max_weight")))
+        pos, views, cuerpo.get("benchmark"), cuerpo.get("max_weight"), _lab()))

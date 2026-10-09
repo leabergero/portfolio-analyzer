@@ -157,18 +157,34 @@ def nube_factible(mu, covarianza, rf: float, n_carteras: int = 2000) -> dict:
 
 # ── Optimización de una cartera concreta ──────────────────────────────────────
 
-def optimizar(posiciones, benchmark: str = None, cap: float = None) -> dict:
+def _insumos_lab(posiciones, hasta=None):
+    """Lab 11: μ y Σ del modelo propuesto (`montecarlo.esperados`) en vez del
+    promedio y la covarianza muestrales de los últimos años."""
+    from core.models.montecarlo import esperados
+    e = esperados(posiciones, hasta=hasta)
+    if "error" in e or len(e["tickers"]) < 2:
+        return None
+    return e
+
+
+def optimizar(posiciones, benchmark: str = None, cap: float = None, lab: bool = False) -> dict:
     """Frontera, óptimos y qué habría que comprar o vender para llegar."""
     from core.models.portfolio import matriz_retornos, value_weights
     from core.models.rates import risk_free_para
 
-    ret_df, precios = matriz_retornos(posiciones)
-    if ret_df.shape[1] < 2:
-        return {"error": "Hacen falta al menos dos activos con historia."}
+    if lab:
+        e = _insumos_lab(posiciones)
+        if e is None:
+            return {"error": "Hacen falta al menos dos activos con historia."}
+        tickers, mu, cov, precios = e["tickers"], e["mu"], e["cov"], e["precios"]
+    else:
+        ret_df, precios = matriz_retornos(posiciones)
+        if ret_df.shape[1] < 2:
+            return {"error": "Hacen falta al menos dos activos con historia."}
 
-    tickers = list(ret_df.columns)
-    mu = ret_df.mean().to_numpy() * RUEDAS          # aritmética: es el insumo de media-varianza
-    cov = ret_df.cov().to_numpy() * RUEDAS
+        tickers = list(ret_df.columns)
+        mu = ret_df.mean().to_numpy() * RUEDAS          # aritmética: es el insumo de media-varianza
+        cov = ret_df.cov().to_numpy() * RUEDAS
     rf, rf_label = risk_free_para(benchmark, "corto")
 
     w_actual = value_weights(posiciones, precios, tickers)
@@ -221,10 +237,11 @@ def optimizar(posiciones, benchmark: str = None, cap: float = None) -> dict:
         "min_varianza": punto(w_minvar),
         "acciones_max_sharpe": acciones(w_sharpe),
         "acciones_min_varianza": acciones(w_minvar),
+        "insumos": "propuesto" if lab else "historicos",
     }
 
 
-def backtest(posiciones, meses: int = 6, benchmark: str = None) -> dict:
+def backtest(posiciones, meses: int = 6, benchmark: str = None, lab: bool = False) -> dict:
     """¿La cartera óptima habría funcionado de verdad?
 
     Se optimiza con los datos ANTERIORES a la ventana de prueba y se mide qué
@@ -237,21 +254,38 @@ def backtest(posiciones, meses: int = 6, benchmark: str = None) -> dict:
     """
     from core.models.portfolio import matriz_retornos, value_weights
 
-    ret_df, precios = matriz_retornos(posiciones)
-    if ret_df.shape[1] < 2:
-        return {"error": "Hacen falta al menos dos activos."}
-
     ruedas_prueba = int(meses * 21)
-    if len(ret_df) < ruedas_prueba + 252:
-        return {"error": f"Hace falta al menos un año más de historia para probar "
-                         f"{meses} meses fuera de muestra."}
+    falta = {"error": f"Hace falta al menos un año más de historia para probar "
+                      f"{meses} meses fuera de muestra."}
+    if lab:
+        # La prueba es la misma (los últimos `meses` de la ventana común); lo
+        # que cambia es con qué se calibra el óptimo: el modelo propuesto
+        # cortado en la fecha de inicio de la prueba, sin ver nada posterior.
+        todo = _insumos_lab(posiciones)
+        if todo is None:
+            return {"error": "Hacen falta al menos dos activos."}
+        ret_df, precios = todo["px"].pct_change().dropna(), todo["precios"]
+        if len(ret_df) < ruedas_prueba + 252:
+            return falta
+        corte = ret_df.index[-ruedas_prueba - 1]
+        e = _insumos_lab(posiciones, hasta=corte)
+        if e is None or e["tickers"] != todo["tickers"]:
+            return falta
+        tickers, mu, cov = e["tickers"], e["mu"], e["cov"]
+        entrenamiento, prueba = ret_df.loc[:corte], ret_df.loc[ret_df.index > corte]
+    else:
+        ret_df, precios = matriz_retornos(posiciones)
+        if ret_df.shape[1] < 2:
+            return {"error": "Hacen falta al menos dos activos."}
+        if len(ret_df) < ruedas_prueba + 252:
+            return falta
 
-    entrenamiento = ret_df.iloc[:-ruedas_prueba]
-    prueba = ret_df.iloc[-ruedas_prueba:]
-    tickers = list(ret_df.columns)
+        entrenamiento = ret_df.iloc[:-ruedas_prueba]
+        prueba = ret_df.iloc[-ruedas_prueba:]
+        tickers = list(ret_df.columns)
 
-    mu = entrenamiento.mean().to_numpy() * RUEDAS
-    cov = entrenamiento.cov().to_numpy() * RUEDAS
+        mu = entrenamiento.mean().to_numpy() * RUEDAS
+        cov = entrenamiento.cov().to_numpy() * RUEDAS
     from core.models.rates import risk_free_para
     rf, rf_label = risk_free_para(benchmark, "corto")
 

@@ -151,7 +151,10 @@ def _clasificar_tipo(ticker: str, base: str, source: str):
         if "equity" in tipo_yf:
             if generico is None:
                 generico, ficha_generica = "Renta Variable", ficha
-            if not es_cedear_d:
+            # Si el subyacente ya dijo "equity", es una acción: el siguiente
+            # candidato (el ticker con la D) colisiona con otro papel —MUD es
+            # un ETF bajista sobre Micron, no el CEDEAR de Micron—.
+            if not es_cedear_d or candidato == base:
                 break
 
     return (generico or "Otro"), ficha_generica
@@ -252,7 +255,9 @@ def analizar(posiciones, precios=None) -> dict:
         else:
             tipo, ficha = _clasificar_tipo(ticker, base, origen)
         sector, industria = _clasificar_sector(ticker, base, tipo, ficha)
-        pais = _clasificar_pais(ticker, base, tipo, ficha)
+        # Los FCI de esta app son fondos argentinos (Cocos), aunque estén en dólares.
+        pais = ("Argentina" if origen == sources.SOURCE_FCI
+                else _clasificar_pais(ticker, base, tipo, ficha))
 
         por_tipo[tipo] = por_tipo.get(tipo, 0.0) + valor
         por_sector[sector] = por_sector.get(sector, 0.0) + valor

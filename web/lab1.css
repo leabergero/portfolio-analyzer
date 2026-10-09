@@ -13,7 +13,7 @@
 :root[data-lab="1"] {
   --fondo:#0A0C10; --panel:#11141A; --panel-2:#181C24; --borde:#262C38; --borde-suave:#1C212B;
   --texto:#E7EAF0; --texto-2:#A9B1C1; --texto-3:#7D8799;
-  --acento:#5AA2FF; --acento-2:#7DB6FF; --acento-suave:#13233A;
+  --acento:#F2B544; --acento-2:#F5C76E; --acento-suave:#2A2112;
   --positivo:#2FD49A; --negativo:#FF5D6E; --alerta:#F2B544;
   --destaque:#F2B544; --destaque-suave:#2A2112;
   --sombra:none;
@@ -30,7 +30,7 @@
 :root[data-lab="1"][data-theme="light"] {
   --fondo:#EEF1F5; --panel:#FFFFFF; --panel-2:#F3F5F8; --borde:#D5DBE4; --borde-suave:#E5E9EF;
   --texto:#111827; --texto-2:#3D4656; --texto-3:#5B6678;
-  --acento:#1F63D6; --acento-2:#3B7BE8; --acento-suave:#E3ECFB;
+  --acento:#F2B544; --acento-2:#E0A22F; --acento-suave:#FBEFD2;
   --positivo:#0B7F55; --negativo:#C8233A; --alerta:#9A5A00;
   --destaque:#F2B544; --destaque-suave:#FBEFD2;
   --serie-1:#0A7C6E; --serie-2:#B26B00; --serie-3:#1F63D6; --serie-4:#C2255C;
@@ -42,7 +42,7 @@
   :root[data-lab="1"]:not([data-theme]) {
     --fondo:#EEF1F5; --panel:#FFFFFF; --panel-2:#F3F5F8; --borde:#D5DBE4; --borde-suave:#E5E9EF;
     --texto:#111827; --texto-2:#3D4656; --texto-3:#5B6678;
-    --acento:#1F63D6; --acento-2:#3B7BE8; --acento-suave:#E3ECFB;
+    --acento:#F2B544; --acento-2:#E0A22F; --acento-suave:#FBEFD2;
     --positivo:#0B7F55; --negativo:#C8233A; --alerta:#9A5A00;
     --destaque:#F2B544; --destaque-suave:#FBEFD2;
     --serie-1:#0A7C6E; --serie-2:#B26B00; --serie-3:#1F63D6; --serie-4:#C2255C;
@@ -187,7 +187,7 @@
 /* El valor ya está en el resumen: la tarjeta queda como el gráfico del valor. */
 [data-lab="1"] .lab-valor .cifra,[data-lab="1"] .lab-valor .delta{display:none}
 [data-lab="1"] .lab-valor svg{top:44px;height:calc(100% - 44px)}
-[data-lab="1"] .lab-valor .area{fill:var(--acento);opacity:.22}
+[data-lab="1"] .lab-valor .area{fill:var(--acento);opacity:.88}
 [data-lab="1"] .lab-valor{min-height:200px}
 [data-lab="1"] .lab-tirgrande b{font-family:var(--mono);font-size:28px;font-weight:500}
 
@@ -334,3 +334,9 @@
   [data-lab="1"] .lab-zona{grid-template-columns:minmax(0,1fr) auto;gap:6px 12px}
   [data-lab="1"] .lab-zona > :nth-child(2){grid-column:1/-1;grid-row:2}
 }
+/* Frontera y CAL con colores propios: el acento y el ámbar de alerta ya son
+   la marca de "tu cartera" y el resalte de la app. */
+[data-lab="1"] .lab-front .eficiente{stroke:var(--serie-6)}
+[data-lab="1"] .lab-front .cal{stroke:var(--serie-5)}
+[data-lab="1"] .lab-flg u.ueff{background:var(--serie-6)}
+[data-lab="1"] .lab-flg u.ucal{background:repeating-linear-gradient(90deg,var(--serie-5) 0 4px,transparent 4px 7px)}

@@ -94,7 +94,7 @@ def simular(posiciones, horizonte: int = 252, n_sims: int = 10_000,
     """
     from core.models.portfolio import matriz_retornos, value_weights
 
-    ret_df, precios = matriz_retornos(posiciones)
+    ret_df, precios = matriz_retornos(posiciones, larga=False)
     if ret_df.empty:
         return {"error": "Sin datos para simular."}
 
@@ -110,6 +110,16 @@ def simular(posiciones, horizonte: int = 252, n_sims: int = 10_000,
     rng = np.random.default_rng(_SEMILLA)
     log_ret = _sortear(motor, cartera, n_sims, horizonte, rng)
     trayectorias = valor_inicial * np.exp(np.cumsum(log_ret, axis=1))
+    return {"motor": motor, **_salida(trayectorias, valor_inicial, horizonte, rng)}
+
+
+def _salida(trayectorias, valor_inicial, horizonte, rng, n_muestra: int = 50) -> dict:
+    """Abanico, percentiles finales e histograma de un juego de trayectorias.
+
+    La comparten los dos modelos (`simular` y `simular_fhs`) para que el panel
+    de la app dibuje cualquiera de los dos sin saber cuál es.
+    """
+    n_sims = len(trayectorias)
     finales = trayectorias[:, -1]
 
     # Se submuestrea el eje temporal: 252 puntos por serie × 5 series es más de
@@ -147,7 +157,6 @@ def simular(posiciones, horizonte: int = 252, n_sims: int = 10_000,
         lognormal, mejor = np.zeros_like(centros), "normal"
 
     return {
-        "motor": motor,
         "horizonte_ruedas": horizonte,
         "n_simulaciones": n_sims,
         "valor_inicial": round(valor_inicial, 2),
@@ -182,9 +191,448 @@ def simular(posiciones, horizonte: int = 252, n_sims: int = 10_000,
 
         "trayectorias_muestra": [
             [round(float(trayectorias[s, i]), 2) for i in cortes]
-            for s in rng.choice(n_sims, size=min(50, n_sims), replace=False)
+            for s in rng.choice(n_sims, size=min(n_muestra, n_sims), replace=False)
         ],
     }
+
+
+# ── Modelo propuesto (lab 11): simulación histórica filtrada ────────────────
+#
+# Elegido por backtest (2026-10): 47.500 pronósticos a un año, orígenes
+# mensuales 2006–2025, 300 carteras (índices, CEDEARs, acciones argentinas,
+# europeas, latinas en EE. UU., bonos y las carteras reales). En cada fecha se
+# calibró sólo con el pasado y se comparó contra lo que pasó (CRPS). Le gana al
+# modelo actual en todos los grupos, Argentina y las carteras reales incluidas.
+# Las decisiones, cada una medida:
+#
+#   1. HISTORIA LARGA. Un CEDEAR se calibra con su subyacente (AAPLD.BA desde
+#      2021 → AAPL desde 2005), y una acción argentina pasa a dólares con el MEP
+#      y, antes de 2019, con el CCL implícito de GGAL (`mep.serie_larga`).
+#
+#   2. VOLATILIDAD CONDICIONAL (FHS, Barone-Adesi 1999). Cada retorno se divide
+#      por su vol EWMA del día; esos shocks se remuestrean en bloques de 21
+#      ruedas, TODOS los activos de la misma fecha juntos (conserva las
+#      correlaciones reales, también las de crisis, sin Cholesky ni normalidad),
+#      y se reescalan con una vol que arranca en la de hoy y vuelve a la de largo
+#      plazo con vida media de 120 ruedas. Es el que reacciona cuando el mercado
+#      ya está nervioso: en 2007–2012 el error bajó 11 %.
+#
+#   3. DERIVA ENCOGIDA (bayesiana). La media histórica de unos años tiene un
+#      error estándar de ±7 a ±25 pp anuales; usada tal cual, la app le daba
+#      95 % de chances de ganar a MAMI. Se combina con el CAPM pesando cada una
+#      por su precisión (τ = 8 %: el CAPM ± 8 pp de duda a priori).
+#
+#   4. CADA ACTIVO CONTRA SU MERCADO. CAPM = rf + β·(5 % + CRP del país): la
+#      prima de riesgo país de Damodaran (`riesgo_pais`) es lo que más sumó
+#      (t ≈ 2,3), sobre todo en Argentina y en las latinas que cotizan en EE. UU.
+#      La β se mide contra el índice local cuando el activo cotiza en su plaza
+#      (BYMA, Europa, ETF de país) y contra SPY cuando es una extranjera que
+#      forman inversores globales (NU, MELI, TSM); medida así o toda contra SPY
+#      dio lo mismo, la diferencia la hace la prima. β semanal: en diario la
+#      asincronía horaria (Taiwán cierra antes de que abra Nueva York) daba β ≈ 0.
+#
+# Lo que NO arregla: ningún modelo previó el piso de las crisis que empiezan en
+# calma (2007–2012: 16 % de los resultados bajo el percentil 5), las acciones
+# argentinas sueltas tienen colas más gordas que las simuladas (12 % bajo el
+# p5), y China queda optimista: su riesgo es regulatorio, no de default, y el
+# spread soberano no lo mide.
+
+_ERP, _TAU, _VIDA_MEDIA, _BLOQUE, _LAMBDA = 0.05, 0.08, 120, 21, 0.94
+
+# Empresas que facturan en varios países: la prima país va ponderada por
+# ingresos (Damodaran), no por la sede — yfinance da Uruguay para MELI.
+# ponytail: a mano, revisar con los balances una vez por año.
+_PAIS_POR_INGRESOS = {"MELI": {"Brazil": .55, "Argentina": .25, "Mexico": .20}}
+_EUROPA = ("Germany", "France", "Netherlands", "Spain", "Italy", "Belgium", "Austria",
+           "Ireland", "Finland", "Portugal", "Europe", "Eurozone")
+_INDICE = {"Argentina": "^MERV", "Brazil": "^BVSP", "China": "MCHI", "Japan": "EWJ",
+           "Taiwan": "EWT", **{p: "^STOXX" for p in _EUROPA}}
+_SUFIJOS_EU = (".AS", ".PA", ".DE", ".MC", ".MI", ".BR", ".LS", ".VI", ".HE", ".IR")
+
+
+def _limpiar(s):
+    """Sin fines de semana (los bonos de Cocos traen ruedas de domingo con un
+    precio de otra moneda) y sin picos de un día que se revierten al siguiente."""
+    import pandas as pd
+    s = s[pd.DatetimeIndex(s.index).dayofweek < 5]
+    l = np.log(s.to_numpy(dtype=float))
+    malo = np.zeros(len(l), bool)
+    for i in range(1, len(l) - 1):
+        if abs(l[i] - l[i - 1]) > 0.2 and abs(l[i + 1] - l[i - 1]) < 0.06:
+            malo[i] = True
+    return s[~malo]
+
+
+def _serie_larga(ticker, source):
+    """(serie propia, serie para calibrar, de dónde salió la historia o None)."""
+    from core import mercado
+    from core.data import mep, sources, symbols
+    propia = sources.precios_base(ticker, source=source)
+    if symbols.is_bond(ticker, source):
+        return propia, propia, None
+    base = symbols.base_symbol(ticker)
+    larga, origen = None, None
+    try:
+        if base != symbols.strip_ba(ticker):                    # CEDEAR → subyacente
+            larga, origen = sources.precios_base(base), base
+        elif symbols.ticker_currency(ticker) == "ARS":          # acción local
+            crudo = sources.precios(ticker, source=source)["Close"].dropna()
+            larga, origen = mercado.desde_usd(mep.serie_a_usd(crudo, mep.serie_larga())), "MEP + CCL"
+    except Exception:
+        larga = None
+    if larga is not None and len(larga) > len(propia) + 252:
+        return propia, larga, origen
+    return propia, propia, None
+
+
+def _pais_y_mercado(ticker, source):
+    """(país o mezcla por ingresos, índice local contra el que medir β o None
+    para medirla contra SPY)."""
+    from core.data import sources
+    from core.models import composicion
+    base = sources.base_symbol(ticker)
+    if base in _PAIS_POR_INGRESOS:
+        return _PAIS_POR_INGRESOS[base], None
+    tipo, ficha = composicion._clasificar_tipo(ticker, base, source)
+    pais = composicion._clasificar_pais(ticker, base, tipo, ficha)
+    en_su_plaza = (sources.is_bond(ticker, source) or ticker.endswith(_SUFIJOS_EU)
+                   or base in composicion.PAISES_ETF
+                   or (ticker.endswith(".BA") and base == sources.strip_ba(ticker)))
+    return pais, (_INDICE.get(pais) if en_su_plaza else None)
+
+
+def _indice(simbolo):
+    """Índice local en la moneda de medición, fecha por fecha."""
+    from core import mercado
+    from core.data import mep, sources
+    if simbolo not in ("^MERV", "^BVSP", "^STOXX"):
+        return sources.precios_base(simbolo)                    # ETFs en dólares
+    crudo = sources.precios(simbolo)["Close"].dropna()
+    if simbolo == "^MERV":
+        usd = mep.serie_a_usd(crudo, mep.serie_larga())
+    elif simbolo == "^BVSP":
+        brl = sources.precios("BRL=X")["Close"].dropna()
+        usd = (crudo / brl.reindex(crudo.index, method="ffill")).dropna()
+    else:
+        usd = mercado.a_usd(crudo, "EUR")
+    return mercado.desde_usd(usd)
+
+
+def _beta_semanal(x, m):
+    """β con retornos semanales; neutra (1) con menos de un año en común."""
+    n = len(x) // 5 * 5
+    if n < 252:
+        return 1.0
+    x, m = x[-n:].reshape(-1, 5).sum(1), m[-n:].reshape(-1, 5).sum(1)
+    return float(np.cov(x, m)[0, 1] / m.var(ddof=1))
+
+
+def calibrar(posiciones, horizonte: int = 252, hasta=None) -> dict:
+    """Todo lo que el modelo propuesto sabe de cada activo, sin simular nada.
+
+    Lo comparten el Monte Carlo (`simular_fhs`, `por_activo_fhs`,
+    `motores_fhs`) y Markowitz en el lab 11 (`esperados`): los mismos
+    rendimientos esperados, volatilidades y correlaciones de los dos lados, o
+    la optimización y el abanico contarían dos historias de la misma cartera.
+    `hasta` corta la historia en esa fecha (para probar fuera de muestra).
+    """
+    import pandas as pd
+    from core.data import riesgo_pais, sources
+    from core.models import rates
+
+    qty, origen = {}, {}
+    for p in posiciones:
+        if p.get("source") == sources.SOURCE_FCI:      # la caja no se simula
+            continue
+        t = str(p["ticker"]).upper()
+        qty[t] = qty.get(t, 0.0) + float(p.get("qty", 0))
+        origen.setdefault(t, p.get("source") or None)
+
+    precio, calib, proxy = {}, {}, {}
+    for t in qty:
+        propia, larga, sub = _serie_larga(t, origen[t])
+        if hasta is not None:
+            larga = larga[larga.index <= pd.Timestamp(hasta)]
+        if len(propia) == 0 or len(larga) < 30:
+            continue
+        precio[t] = float(propia.iloc[-1])
+        calib[t], proxy[t] = _limpiar(larga.dropna()), sub
+    tickers = [t for t in calib if qty[t] * precio[t] > 0]
+    if not tickers:
+        return {"error": "Sin datos para simular."}
+    valor = np.array([qty[t] * precio[t] for t in tickers])
+    valor_inicial = float(valor.sum())
+    w = valor / valor_inicial
+
+    # Precios (no retornos) alineados: un día sin rueda repite el precio. La
+    # ventana común la fija el activo más nuevo; sirve para los shocks
+    # conjuntos (las correlaciones). Deriva y vol de largo plazo salen de la
+    # historia COMPLETA de cada activo: AAPL no pierde 13 años porque NU nació
+    # en 2021.
+    todo = pd.DataFrame(calib).sort_index().ffill()
+    px = todo.dropna()
+    X = np.log(px[tickers]).diff().iloc[1:].to_numpy()
+    T, N = X.shape
+    if T < 60:
+        return {"error": "Hace falta al menos tres meses de historia común para simular."}
+    indices = {}
+
+    def indice(simbolo):
+        if simbolo not in indices:
+            try:
+                s_ = _indice(simbolo)
+                indices[simbolo] = s_[s_.index <= pd.Timestamp(hasta)] if hasta is not None else s_
+            except Exception:
+                indices[simbolo] = None
+        return indices[simbolo]
+
+    # Deriva: media histórica encogida hacia el CAPM de su mercado.
+    rf, rf_txt = rates.risk_free_para()
+    m, v, largo, beta, Ts, crp = (np.empty(N) for _ in range(6))
+    paises, mercados = [], []
+    bono = np.array([sources.is_bond(t, origen[t]) for t in tickers])
+    for i, t in enumerate(tickers):
+        x = np.log(calib[t]).diff().dropna()
+        Ts[i], m[i], v[i] = len(x), np.expm1(x).mean(), x.var(ddof=1)
+        largo[i] = np.sqrt(v[i])
+        try:
+            pais, local = _pais_y_mercado(t, origen[t])
+        except Exception:
+            pais, local = None, None
+        mk = indice(local) if local else None
+        if mk is None:
+            local, mk = "SPY", indice("SPY")
+        par = pd.DataFrame({"x": calib[t], "m": mk}).sort_index().ffill().dropna() if mk is not None else None
+        r_ = np.log(par).diff().dropna() if par is not None else None
+        beta[i] = _beta_semanal(r_["x"].to_numpy(), r_["m"].to_numpy()) if r_ is not None else 1.0
+        crp[i] = (riesgo_pais.spread_default if bono[i] else riesgo_pais.prima)(pais) if pais else 0.0
+        paises.append(pais if isinstance(pais, str) or pais is None
+                      else " + ".join(f"{p} {w:.0%}" for p, w in pais.items()))
+        mercados.append(local)
+    beta = 0.33 + 0.67 * beta                          # Blume: vuelven hacia 1
+    # Un bono no cobra prima de acciones: su prior es la tasa libre más el
+    # spread de default del país (un CAPM de acciones les daba 20 % anual a
+    # ONs que rinden 8 %). ponytail: el ideal es la TIR de cada bono, cuando
+    # `analizar_bono` la dé para todos los de la cartera.
+    capm = np.where(bono, rf + crp, rf + beta * (_ERP + crp)) / 252
+    prec_dato, prec_prior = Ts / np.maximum(v, 1e-12), 1 / (_TAU / 252) ** 2
+    peso_dato = prec_dato / (prec_dato + prec_prior)
+    a = peso_dato * m + (1 - peso_dato) * capm         # aritmética diaria
+
+    # Shocks filtrados por su vol EWMA, y la vol de hoy hacia la de largo plazo.
+    Y = X - X.mean(0)
+    var_ewma = np.empty_like(Y)
+    var_ewma[0] = Y[:21].var(0) + 1e-12
+    for i in range(1, T):
+        var_ewma[i] = _LAMBDA * var_ewma[i - 1] + (1 - _LAMBDA) * Y[i - 1] ** 2
+    hoy = np.sqrt(_LAMBDA * var_ewma[-1] + (1 - _LAMBDA) * Y[-1] ** 2)
+    Z = Y / np.sqrt(var_ewma)
+    Z = Z / Z.std(0, ddof=1)
+    phi = 0.5 ** (1 / _VIDA_MEDIA)
+    var_k = largo ** 2 + (hoy ** 2 - largo ** 2) * phi ** np.arange(horizonte)[:, None]
+
+    anual = lambda x: float(np.expm1(x * 252) * 100)
+    activos = [{
+        "ticker": t, "peso_pct": round(float(w[i]) * 100, 1), "calibrado_con": proxy[t] or t,
+        "anios": round(float(Ts[i]) / 252, 1), "beta": round(float(beta[i]), 2),
+        "pais": paises[i], "mercado": mercados[i], "crp_pct": round(float(crp[i]) * 100, 2),
+        "deriva_historica_pct": round(anual(m[i]), 1), "deriva_capm_pct": round(anual(capm[i]), 1),
+        "deriva_usada_pct": round(anual(a[i]), 1), "peso_historia_pct": round(float(peso_dato[i]) * 100),
+        "vol_hoy_pct": round(float(hoy[i] * np.sqrt(252) * 100), 1),
+        "vol_largo_pct": round(float(largo[i] * np.sqrt(252) * 100), 1),
+    } for i, t in enumerate(tickers)]
+    return {"tickers": tickers, "valor": valor, "w": w, "valor_inicial": valor_inicial,
+            "precios": {t: precio[t] for t in tickers}, "px": px, "X": X, "Y": Y, "Z": Z,
+            "a": a, "largo": largo, "var_k": var_k, "activos": activos,
+            "modelo": {"nombre": "Simulación histórica filtrada · deriva bayesiana",
+                       "desde": str(px.index[0].date()), "anios": round(T / 252, 1), "rf": rf_txt,
+                       "historia_corta": T < 252,
+                       "erp_pct": _ERP * 100, "tau_pct": _TAU * 100, "vida_media_vol": _VIDA_MEDIA,
+                       "activos": activos}}
+
+
+def _log_trayectorias(cal, n_sims, horizonte, rng, motor="fhs"):
+    """De a mil escenarios: log-precio acumulado de cada activo (s × H × N).
+
+    fhs        shocks filtrados por su EWMA, remuestreados en bloques conjuntos,
+               con la vol de hoy volviendo a la de largo plazo (el propuesto)
+    bootstrap  bloques conjuntos de los retornos tal cual, vol de largo plazo
+    normal     normal multivariante (Cholesky de la correlación), vol de largo
+    Los tres con la MISMA deriva: lo que los separe es el supuesto de
+    distribución, no cuánto se espera ganar.
+    """
+    Z, Y, a, largo = cal["Z"], cal["Y"], cal["a"], cal["largo"]
+    T, N = Z.shape
+    if motor == "fhs":
+        var_k = cal["var_k"][:horizonte]
+        shocks, escala, deriva = Z, np.sqrt(var_k), a - 0.5 * var_k
+    else:
+        shocks = Y / Y.std(0, ddof=1)
+        escala, deriva = largo, a - 0.5 * largo ** 2
+    chol = np.linalg.cholesky(np.corrcoef(shocks.T).reshape(N, N) + 1e-10 * np.eye(N))
+    n_bloques = -(-horizonte // _BLOQUE)
+    for desde in range(0, n_sims, 1000):               # de a mil: memoria acotada
+        s_ = min(1000, n_sims - desde)
+        if motor == "normal":
+            z = rng.standard_normal((s_, horizonte, N)) @ chol.T
+        else:
+            ini = rng.integers(0, T - _BLOQUE + 1, size=(s_, n_bloques))
+            z = shocks[(ini[:, :, None] + np.arange(_BLOQUE)).reshape(s_, -1)[:, :horizonte]]
+        yield np.cumsum(z * escala + deriva, axis=1)
+
+
+def esperados(posiciones, hasta=None) -> dict:
+    """Insumos de media-varianza del modelo propuesto, anuales.
+
+    μ es la deriva bayesiana (CAPM de su mercado + riesgo país, encogida con
+    la historia); Σ = D·ρ·D con la vol de largo plazo de cada activo (su
+    historia completa) y la correlación de la ventana común. Backtest de
+    2026-10 (12.000 carteras óptimas mantenidas un año, 2007–2025): con esta
+    μ el máximo Sharpe rindió Sharpe 0,79 contra 0,74 con la histórica, con
+    menos caída (−21 % vs −24 %) y más diversificado. Usar la vol del Monte
+    Carlo (de la de hoy a la de largo plazo) no mejoró nada y duplicaba la
+    rotación trimestral (17 % vs 9 % de la cartera): para decidir pesos
+    conviene la de largo plazo, que no se mueve con cada semana nerviosa.
+    """
+    cal = calibrar(posiciones, hasta=hasta)
+    if "error" in cal:
+        return cal
+    N = len(cal["tickers"])
+    d = cal["largo"] * np.sqrt(252)
+    rho = np.corrcoef(cal["Y"].T).reshape(N, N)
+    return {**cal, "mu": cal["a"] * 252, "cov": rho * np.outer(d, d)}
+
+
+def _ajustar(cal, deriva_anual=None, vol_anual=None):
+    """Reemplaza en la calibración la deriva y/o la vol de algunos activos."""
+    if "error" in cal:
+        return cal
+    tk = cal["tickers"]
+    for t, mu in (deriva_anual or {}).items():
+        if t in tk:
+            cal["a"][tk.index(t)] = mu / 252
+    for t, sd in (vol_anual or {}).items():
+        if t in tk:
+            cal["var_k"][:, tk.index(t)] = (sd / np.sqrt(252)) ** 2
+    return cal
+
+
+def simular_fhs(posiciones, horizonte: int = 252, n_sims: int = 10_000,
+                deriva_anual: dict = None, vol_anual: dict = None) -> dict:
+    """Abanico a `horizonte` ruedas con el modelo propuesto (ver arriba).
+
+    `deriva_anual` y `vol_anual` ({ticker: fracción}) reemplazan lo que el
+    modelo calibró para esos activos: es como corre el escenario "según los
+    analistas" (`escenario_analistas`). El resto —shocks, correlaciones— no
+    cambia, así los dos abanicos se comparan con la misma suerte.
+    """
+    cal = _ajustar(calibrar(posiciones, horizonte), deriva_anual, vol_anual)
+    if "error" in cal:
+        return cal
+    rng = np.random.default_rng(_SEMILLA)
+    trayectorias = np.concatenate([np.exp(L) @ cal["valor"]
+                                   for L in _log_trayectorias(cal, n_sims, horizonte, rng)])
+    # 200 trayectorias de muestra: el abanico se dibuja con ellas (lab 11), y
+    # con 50 se ven sueltas en vez de una nube.
+    return {"motor": "fhs", "modelo": cal["modelo"],
+            **_salida(trayectorias, cal["valor_inicial"], horizonte, rng, n_muestra=200)}
+
+
+def escenario_analistas(posiciones, opiniones: dict = None, horizonte: int = 252) -> dict:
+    """El Monte Carlo con el rendimiento esperado de Black-Litterman.
+
+    BL parte del rendimiento esperado de este modelo y lo corrige con los
+    precios objetivo de los analistas y con los precios que el usuario fijó a
+    mano (`store.opiniones`). Es "lo que dicen los analistas" —sus objetivos
+    suelen ser optimistas y no hay historia para probarlos—; el escenario de
+    siempre es el del modelo.
+
+    Un evento con fecha (modo B2: una OPA, un canje) no se proyecta como la
+    tasa anualizada que usa BL: una OPA que paga 10 % en 3 meses no rinde 46 %
+    en el año, rinde ese 10 % y después la tasa libre sobre la plata cobrada.
+    Y el rango que fijó el usuario es su incertidumbre: se toma como el 90 %
+    central del resultado, en lugar de la volatilidad de toda la historia del
+    papel, que ya no es la del activo una vez anunciada la oferta.
+    """
+    aj = ajustes_analistas(posiciones, opiniones)
+    if "error" in aj:
+        return aj
+    salida = simular_fhs(posiciones, horizonte, deriva_anual=aj["deriva"], vol_anual=aj["vol"])
+    if "error" in salida:
+        return salida
+    salida["escenario"] = aj["escenario"]
+    return salida
+
+
+def ajustes_analistas(posiciones, opiniones: dict = None) -> dict:
+    """La deriva de Black-Litterman y la vol de los eventos fijados, por activo
+    (ver `escenario_analistas`). La comparten el abanico y `por_activo_fhs`."""
+    from core.models import blacklitterman, momentum, rates, targets
+
+    rf, _ = rates.risk_free_para()
+    views = blacklitterman.views_combinadas(targets.analizar(posiciones),
+                                            momentum.analizar(posiciones), opiniones)
+    vol, eventos = {}, []
+    for v in views:
+        if v.get("modo") != "B2" or not v.get("rango") or not v.get("precio_referencia"):
+            continue
+        bajo, alto = v["rango"]
+        medio, m = (bajo + alto) / 2, max(1, int(v.get("meses") or 12))
+        bruto = medio / v["precio_referencia"] - 1
+        anio = (1 + bruto) * (1 + rf) ** (max(0, 12 - m) / 12) - 1 if m <= 12 else (1 + bruto) ** (12 / m) - 1
+        v["ret"] = round(anio * 100, 2)
+        # El rango es el 90 % central del precio al que se resuelve: ésa es toda
+        # la incertidumbre del año, repartida pareja (después hay plata cobrada).
+        vol[v["ticker"]] = max((alto - bajo) / medio / (2 * 1.645), 0.01)
+        eventos.append({"ticker": v["ticker"], "meses": m, "precio": round(medio, 2),
+                        "ret_12m_pct": v["ret"], "vol_pct": round(vol[v["ticker"]] * 100, 1)})
+    bl = blacklitterman.analizar(posiciones, views, lab=True)
+    if "error" in bl:
+        return bl
+    deriva = {t: r / 100 for t, r in bl["retornos_bl_pct"].items()}
+    return {"deriva": deriva, "vol": vol, "escenario": {
+        "nombre": "Según los analistas (Black-Litterman)",
+        "views": [{"ticker": v["ticker"], "ret_pct": v["ret"], "confianza": v["confidence"],
+                   "manual": bool(v.get("manual")), "modo": v.get("modo")} for v in views],
+        "eventos": eventos,
+        "deriva_pct": {t: round(r * 100, 2) for t, r in deriva.items()},
+    }}
+
+
+def motores_fhs(posiciones, horizonte: int = 252, n_sims: int = 10_000) -> dict:
+    """Lab 11: los tres motores con la deriva del propuesto (ver `_log_trayectorias`)."""
+    cal = calibrar(posiciones, horizonte)
+    if "error" in cal:
+        return cal
+    v0, salida = cal["valor_inicial"], {}
+    nombres = {"normal": "Normal multivariante (Cholesky)", "bootstrap": "Bootstrap por bloques",
+               "fhs": "Simulación histórica filtrada (el de la app)"}
+    for motor, nombre in nombres.items():
+        rng = np.random.default_rng(_SEMILLA)
+        fin = np.concatenate([np.exp(L[:, -1]) @ cal["valor"]
+                              for L in _log_trayectorias(cal, n_sims, horizonte, rng, motor)])
+        var95, var99 = float(np.percentile(fin, 5)), float(np.percentile(fin, 1))
+        salida[nombre] = {
+            "var95": round(var95, 2), "perdida_var95_pct": round((v0 - var95) / v0 * 100, 2),
+            "var99": round(var99, 2), "perdida_var99_pct": round((v0 - var99) / v0 * 100, 2),
+            "mediana": round(float(np.median(fin)), 2),
+            "prob_ganancia": round(float((fin > v0).mean()) * 100, 1)}
+    return salida
+
+
+def por_activo_fhs(posiciones, horizonte: int = 252, n_sims: int = 4000,
+                   deriva_anual: dict = None, vol_anual: dict = None) -> dict:
+    """Lab 11: `por_activo` con el modelo propuesto. Los activos se simulan
+    JUNTOS (los mismos escenarios), así que la suma de sus peores casos contra
+    el de la cartera mide la diversificación con correlaciones reales."""
+    cal = _ajustar(calibrar(posiciones, horizonte), deriva_anual, vol_anual)
+    if "error" in cal:
+        return cal
+    rng = np.random.default_rng(_SEMILLA)
+    fin = np.concatenate([np.exp(L[:, -1]) * cal["valor"]
+                          for L in _log_trayectorias(cal, n_sims, horizonte, rng)])   # s × N
+    return _armar_por_activo(cal["tickers"], cal["valor"], fin, fin.sum(1),
+                             "fhs", horizonte, n_sims)
 
 
 def comparar_motores(posiciones, horizonte: int = 252, n_sims: int = 10_000) -> dict:
@@ -223,7 +671,7 @@ def por_activo(posiciones, horizonte: int = 252, n_sims: int = 4000,
     """
     from core.models.portfolio import matriz_retornos, value_weights
 
-    ret_df, precios = matriz_retornos(posiciones)
+    ret_df, precios = matriz_retornos(posiciones, larga=False)
     if ret_df.empty:
         return {"error": "Sin datos para simular."}
 
@@ -233,50 +681,49 @@ def por_activo(posiciones, horizonte: int = 252, n_sims: int = 4000,
                       for p in posiciones
                       for t in [str(p["ticker"]).upper()] if t in precios)
     rng = np.random.default_rng(_SEMILLA)
-
-    filas = []
+    cols, valores = [], []
     for i, t in enumerate(tickers):
-        r = ret_df[t].to_numpy()
         valor = float(w[i]) * valor_total
         if valor <= 0:
             continue
-        finales = valor * np.exp(
-            _sortear(motor, r, n_sims, horizonte, rng).sum(axis=1))
-        var95 = float(np.percentile(finales, 5))
-        filas.append({
+        cols.append(valor * np.exp(_sortear(motor, ret_df[t].to_numpy(), n_sims, horizonte, rng).sum(axis=1)))
+        valores.append((t, valor))
+    cartera = ret_df[tickers].to_numpy() @ w
+    finales_c = valor_total * np.exp(_sortear(motor, cartera, n_sims, horizonte, rng).sum(axis=1))
+    return _armar_por_activo([t for t, _ in valores], np.array([v for _, v in valores]),
+                             np.column_stack(cols), finales_c, motor, horizonte, n_sims)
+
+
+def _armar_por_activo(tickers, valores, finales, finales_c, motor, horizonte, n_sims) -> dict:
+    """La tabla por activo y la de la cartera, desde los valores finales
+    simulados (`finales`: escenarios × activos)."""
+    valor_total = float(valores.sum())
+
+    def fila(t, valor, fin):
+        var95 = float(np.percentile(fin, 5))
+        return {
             "ticker": t,
             "valor_inicial": round(valor, 2),
-            "peso_pct": round(float(w[i]) * 100, 2),
-            "mediana": round(float(np.median(finales)), 2),
+            "peso_pct": round(valor / valor_total * 100, 2),
+            "mediana": round(float(np.median(fin)), 2),
             "p5": round(var95, 2),
-            "p95": round(float(np.percentile(finales, 95)), 2),
+            "p95": round(float(np.percentile(fin, 95)), 2),
             "perdida_var95_pct": round((valor - var95) / valor * 100, 2),
-            "prob_ganancia": round(float((finales > valor).mean()) * 100, 1),
+            "prob_ganancia": round(float((fin > valor).mean()) * 100, 1),
             # Rango entre el buen y el mal escenario, como múltiplo del valor de
             # hoy: cuánta incertidumbre trae este activo a la cartera.
-            "amplitud": round(float(np.percentile(finales, 95) - var95) / valor, 2),
-        })
+            "amplitud": round(float(np.percentile(fin, 95) - var95) / valor, 2),
+        }
 
-    cartera = ret_df[tickers].to_numpy() @ w
-    finales_c = valor_total * np.exp(
-        _sortear(motor, cartera, n_sims, horizonte, rng).sum(axis=1))
-    var95_c = float(np.percentile(finales_c, 5))
-
+    filas = [fila(t, float(valores[i]), finales[:, i]) for i, t in enumerate(tickers)]
+    cart = fila("CARTERA", valor_total, finales_c)
     suma_individual = sum(f["valor_inicial"] - f["p5"] for f in filas)
-    perdida_cartera = valor_total - var95_c
+    perdida_cartera = valor_total - float(np.percentile(finales_c, 5))
 
     return {
         "motor": motor, "horizonte_ruedas": horizonte, "n_simulaciones": n_sims,
         "por_activo": sorted(filas, key=lambda f: -f["perdida_var95_pct"]),
-        "cartera": {
-            "ticker": "CARTERA", "valor_inicial": round(valor_total, 2), "peso_pct": 100.0,
-            "mediana": round(float(np.median(finales_c)), 2),
-            "p5": round(var95_c, 2),
-            "p95": round(float(np.percentile(finales_c, 95)), 2),
-            "perdida_var95_pct": round(perdida_cartera / valor_total * 100, 2),
-            "prob_ganancia": round(float((finales_c > valor_total).mean()) * 100, 1),
-            "amplitud": round(float(np.percentile(finales_c, 95) - var95_c) / valor_total, 2),
-        },
+        "cartera": cart,
         "ahorro_diversificacion_usd": round(suma_individual - perdida_cartera, 2),
         "nota": "Si los activos cayeran todos a la vez en su escenario malo, la pérdida "
                 f"sería ${suma_individual:,.0f}. La de la cartera es ${perdida_cartera:,.0f}: "

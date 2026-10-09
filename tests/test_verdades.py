@@ -3024,6 +3024,146 @@ def test_un_ticker_sin_fuente_con_precios_sueltos_no_se_reintenta_en_cada_pedido
     assert salidas == ["yf", "byma"], f"sale una vez y no vuelve a salir, salió {salidas}"
 
 
+def test_montecarlo_fhs_no_extrapola_una_racha_y_respeta_la_volatilidad():
+    """Lab 11: el Monte Carlo propuesto (`simular_fhs`).
+
+    Previene dos cosas. Uno: estirar tal cual la deriva de unos pocos años — la
+    app le daba 96 % de chances de ganar a una cartera con cuatro años de
+    historia alcista. Un activo que rindió ~60 % anual en tres años tiene que
+    quedar mucho más cerca del CAPM que de su racha. Dos: que el ancho del
+    abanico sea el de la volatilidad real (dos activos independientes al 20 %,
+    mitad y mitad → 14 % de la cartera).
+    """
+    import numpy as np
+    import pandas as pd
+    from core.data import sources
+    from core.models import montecarlo, rates
+    rng = np.random.default_rng(3)
+    dias = pd.bdate_range("2020-01-01", periods=756)
+    serie = lambda mu, sd: pd.Series(100 * np.exp(np.cumsum(rng.normal(mu / 252, sd / np.sqrt(252), len(dias)))), dias)
+    series = {"AAA": serie(0.0, 0.20), "BBB": serie(0.0, 0.20), "RACHA": serie(0.47, 0.30), "SPY": serie(0.05, 0.18)}
+    antes, pais_antes = (sources.precios_base, rates.risk_free_para), montecarlo._pais_y_mercado
+    try:
+        sources.precios_base = lambda t, *a, **k: series.get(t.upper(), pd.Series(dtype=float))
+        rates.risk_free_para = lambda *a, **k: (0.04, "fija")
+        montecarlo._pais_y_mercado = lambda *a, **k: ("United States", None)
+        r = montecarlo.simular_fhs([{"ticker": "AAA", "qty": 1}, {"ticker": "BBB", "qty": 1}], n_sims=4000)
+        ancho = np.log(r["final"]["p95"] / r["final"]["p5"])
+        esperado = 2 * 1.645 * 0.20 / np.sqrt(2)
+        assert abs(ancho / esperado - 1) < 0.2, f"el abanico 5–95 mide {ancho:.3f} y debería rondar {esperado:.3f}"
+        a = montecarlo.simular_fhs([{"ticker": "RACHA", "qty": 1}], n_sims=500)["modelo"]["activos"][0]
+        assert a["deriva_historica_pct"] > 40, a
+        assert abs(a["deriva_usada_pct"] - a["deriva_capm_pct"]) < abs(a["deriva_usada_pct"] - a["deriva_historica_pct"]), \
+            f"tres años de racha no pueden pesar más que el CAPM: {a}"
+        # El mismo activo, argentino: su CAPM suma β × la prima de riesgo país.
+        montecarlo._pais_y_mercado = lambda *a, **k: ("Argentina", None)
+        ar = montecarlo.simular_fhs([{"ticker": "RACHA", "qty": 1}], n_sims=500)["modelo"]["activos"][0]
+        assert ar["crp_pct"] > 5 and ar["mercado"] == "SPY", ar
+        assert ar["deriva_capm_pct"] - a["deriva_capm_pct"] > 0.8 * ar["beta"] * ar["crp_pct"], (a, ar)
+        # Markowitz con esos insumos no le carga la cartera a la racha: con μ
+        # histórica el máximo Sharpe le daba 67 % y prometía 54 % anual.
+        from core.models import markowitz
+        montecarlo._pais_y_mercado = lambda *a, **k: ("United States", None)
+        pos = [{"ticker": t, "qty": 1} for t in ("AAA", "BBB", "RACHA")]
+        hist, lab = markowitz.optimizar(pos), markowitz.optimizar(pos, lab=True)
+        peso = lambda r: dict(zip(r["tickers"], r["max_sharpe"]["pesos"]))["RACHA"]
+        assert peso(lab) < peso(hist) - 15 and lab["max_sharpe"]["ret_pct"] < 25, (peso(hist), peso(lab))
+    finally:
+        sources.precios_base, rates.risk_free_para = antes
+        montecarlo._pais_y_mercado = pais_antes
+
+
+def test_escenario_analistas_una_opa_no_se_anualiza_y_usa_tu_rango():
+    """Monte Carlo "según los analistas" con un evento fijado a mano (B2).
+
+    Una OPA que paga 10 % en 3 meses no rinde 46 % en el año (la tasa
+    anualizada con que entra a BL): rinde ese 10 % y después la tasa libre. Y
+    su volatilidad es la del rango fijado, no la de la historia del papel: con
+    un rango de ±2 % la cartera de sólo ese papel no puede perder en el año.
+    """
+    import numpy as np
+    import pandas as pd
+    from core.data import sources
+    from core.models import momentum, montecarlo, rates, targets
+    rng = np.random.default_rng(9)
+    dias = pd.bdate_range("2020-01-01", periods=756)
+    serie = lambda sd: pd.Series(100 * np.exp(np.cumsum(rng.normal(0, sd / np.sqrt(252), len(dias)))), dias)
+    series = {"AAA": serie(0.2), "OPA": serie(0.6), "SPY": serie(0.18)}
+    antes = (sources.precios_base, rates.risk_free_para, targets.analizar, momentum.analizar,
+             montecarlo._pais_y_mercado)
+    try:
+        sources.precios_base = lambda t, *a, **k: series.get(t.upper(), pd.Series(dtype=float))
+        rates.risk_free_para = lambda *a, **k: (0.04, "fija")
+        precio = float(series["OPA"].iloc[-1])
+        targets.analizar = lambda p: {"por_activo": [{"ticker": "OPA", "actual": precio}, {"ticker": "AAA", "actual": 1}]}
+        momentum.analizar = lambda p: {"por_activo": []}
+        montecarlo._pais_y_mercado = lambda *a, **k: ("United States", None)
+        pos = [{"ticker": "AAA", "qty": 0.001}, {"ticker": "OPA", "qty": 1000}]
+        r = montecarlo.escenario_analistas(pos, {"OPA": {"modo": "B2", "bajo": precio * 1.08,
+                                                          "alto": precio * 1.12, "meses": 3}})
+        ev = r["escenario"]["eventos"][0]
+        esperado = (1.10 * 1.04 ** (9 / 12) - 1) * 100
+        assert abs(ev["ret_12m_pct"] - esperado) < 0.05, ev
+        assert ev["vol_pct"] < 2 and r["final"]["p5"] > r["valor_inicial"], (ev, r["final"])
+    finally:
+        (sources.precios_base, rates.risk_free_para, targets.analizar, momentum.analizar,
+         montecarlo._pais_y_mercado) = antes
+
+
+def test_lab11_matriz_larga_no_inventa_ceros_y_var_filtrado():
+    """Lab 11: `matriz_retornos(larga=True)` y el VaR filtrado de `risk`.
+
+    La matriz de siempre rellenaba con retorno 0 a un activo que todavía no
+    cotizaba (GLDD figuraba quieto el 65 % de los días en KARIN) y el VaR salía
+    15–20 % más chico. La larga arranca cuando existen todos. Y el VaR de FHS,
+    con retornos normales al 1 % diario, tiene que dar el cuantil normal.
+    """
+    import numpy as np
+    import pandas as pd
+    from core.data import sources
+    from core.models import portfolio, risk
+    rng = np.random.default_rng(5)
+    dias = pd.bdate_range("2020-01-01", periods=1000)
+    viejo = pd.Series(100 * np.exp(np.cumsum(rng.normal(0, 0.01, 1000))), dias)
+    nuevo = viejo.iloc[600:] * 0 + 50 * np.exp(np.cumsum(rng.normal(0, 0.02, 400)))
+    series = {"VIEJO": viejo, "NUEVO": nuevo}
+    antes = sources.precios_base
+    try:
+        sources.precios_base = lambda t, *a, **k: series.get(t.upper(), pd.Series(dtype=float))
+        pos = [{"ticker": "VIEJO", "qty": 1}, {"ticker": "NUEVO", "qty": 1}]
+        corta, _ = portfolio.matriz_retornos(pos, larga=False)
+        larga, _ = portfolio.matriz_retornos(pos, larga=True)
+        assert (corta["NUEVO"] == 0).sum() > 500, "la matriz de siempre sí rellena con ceros"
+        assert len(larga) == 399 and (larga["NUEVO"] == 0).sum() == 0, (len(larga), (larga["NUEVO"] == 0).sum())
+    finally:
+        sources.precios_base = antes
+    v = risk._var_fhs(rng.normal(0, 0.01, 3000), 1000)
+    assert abs(v["var95_pct"] / -1.645 - 1) < 0.1 and abs(v["var99_pct"] / -2.326 - 1) < 0.15, v
+    # La serie día por día (sólo con el pasado) tiene que quedar calibrada
+    # aunque la volatilidad cambie de régimen: ~5 % de días peores que su VaR.
+    r = np.concatenate([rng.normal(0, 0.01, 1500), rng.normal(0, 0.03, 500), rng.normal(0, 0.01, 1000)])
+    var, _ = risk._var_fhs_serie(r)
+    ok = ~np.isnan(var)
+    assert 0.035 < (r[ok] < var[ok]).mean() < 0.065, (r[ok] < var[ok]).mean()
+
+
+def test_cedear_de_micron_no_es_el_etf_bajista_mud():
+    """MUD.BA es Micron: si el subyacente ya es una acción, el ticker con la D
+    (MUD, un ETF bajista sobre Micron) no lo pisa. GLDD.BA sigue siendo oro."""
+    from core.models import composicion
+    fichas = {"MUD.BA": {"quoteType": "EQUITY"}, "MU": {"quoteType": "EQUITY", "longName": "Micron"},
+              "MUD": {"quoteType": "ETF", "longName": "Direxion Daily MU Bear 1X"},
+              "GLDD.BA": {"quoteType": "EQUITY"}, "GLD": {"quoteType": "ETF", "category": "Commodities Focused"}}
+    original = composicion.sources.info
+    composicion.sources.info = lambda t: fichas.get(t, {})
+    try:
+        tipo, ficha = composicion._clasificar_tipo("MUD.BA", "MU", None)
+        assert tipo == "Renta Variable" and "Direxion" not in str(ficha.get("longName")), (tipo, ficha)
+        assert composicion._clasificar_tipo("GLDD.BA", "GLD", None)[0] != "Renta Variable"
+    finally:
+        composicion.sources.info = original
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

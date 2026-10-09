@@ -193,6 +193,7 @@ def analizar(posiciones, benchmark: str = None) -> dict:
     if ret_df.empty:
         return {"error": "Sin datos suficientes para calcular riesgo."}
 
+    from core.models.portfolio import HISTORIA_LARGA
     tickers = list(ret_df.columns)
     w = value_weights(posiciones, precios, tickers)
     cartera = ret_df[tickers].to_numpy() @ w
@@ -201,6 +202,17 @@ def analizar(posiciones, benchmark: str = None) -> dict:
                       for t in [str(p["ticker"]).upper()] if t in precios)
 
     rf, rf_label = risk_free_para(benchmark, "corto")
+    lab = HISTORIA_LARGA.get()
+    if lab:
+        # Dos preguntas distintas (lab 11). "¿Cuánto puedo perder mañana?" va
+        # con FHS sobre toda la historia; "¿cómo se portó?", con los últimos
+        # tres años —comparables con lo de siempre, pero sin ceros— y aparte la
+        # historia larga de la composición, que es la que ve 2008.
+        toda = cartera
+        extra = {"var_fhs": _var_fhs(toda, valor_total),
+                 "historia_larga": _resumen(toda, ret_df.index, rf),
+                 "ventana_principal": "últimos 3 años"}
+        ret_df, cartera = ret_df.iloc[-3 * RUEDAS:], toda[-3 * RUEDAS:]
     cov = np.cov(ret_df[tickers].to_numpy(), rowvar=False) * RUEDAS
     if cov.ndim == 0:
         cov = cov.reshape(1, 1)
@@ -248,7 +260,83 @@ def analizar(posiciones, benchmark: str = None) -> dict:
         "rf": round(rf, 4),
         "rf_label": rf_label,
         "moneda": "USD",
+        **({"desde": str(ret_df.index[0].date()), **extra} if lab else {}),
     }
+
+
+_LAMBDA_VAR = 0.94
+
+
+def _var_fhs(r, valor_total) -> dict:
+    """VaR y CVaR de mañana por simulación histórica filtrada (Barone-Adesi).
+
+    La volatilidad EWMA de hoy por el cuantil de los shocks estandarizados de
+    toda la historia. Backtest de 2026-10 (1,07 millones de pronósticos por
+    método, 303 carteras, 2007–2025): es el único que pasa el test de Kupiec
+    en la tasa esperada (lo rechaza en 5 % de las carteras al 95 %, contra 56 %
+    el histórico de toda la ventana y 65 % Cornish-Fisher) y el que menos se
+    amontona en las crisis (2008: 7,1 % de violaciones del VaR 95 %, contra
+    17 % el histórico). Cornish-Fisher, con la curtosis de estas carteras,
+    ACHICA el VaR 95 % (LEANDRO: 3,0 % contra 4,5 % del histórico): la
+    expansión deja de ser monótona con colas tan gordas.
+    """
+    r = np.asarray(r, dtype=float)
+    v = np.empty(len(r))
+    v[0] = r[:21].var()
+    for t in range(1, len(r)):
+        v[t] = _LAMBDA_VAR * v[t - 1] + (1 - _LAMBDA_VAR) * r[t - 1] ** 2
+    hoy = float(np.sqrt(_LAMBDA_VAR * v[-1] + (1 - _LAMBDA_VAR) * r[-1] ** 2))
+    z = r / np.sqrt(v)
+    q95, q99 = np.quantile(z, [0.05, 0.01])
+    cola = z[z <= q95].mean()
+    salida = {"vol_hoy_anual_pct": round(hoy * np.sqrt(RUEDAS) * 100, 2),
+              "vol_historica_anual_pct": round(float(r.std(ddof=1)) * np.sqrt(RUEDAS) * 100, 2)}
+    for k, q in (("var95", q95), ("var99", q99), ("cvar95", cola)):
+        salida[f"{k}_pct"] = round(float(hoy * q) * 100, 3)
+        salida[f"{k}_usd"] = round(float(hoy * q) * valor_total, 2)
+    return salida
+
+
+def _var_fhs_serie(r, minimo: int = 252):
+    """VaR y CVaR 95 % filtrados de cada rueda, con datos ANTERIORES a ella.
+
+    Es la serie que midió el backtest: σ EWMA del día × el 5 % peor de los
+    shocks vistos hasta entonces. NaN mientras no haya `minimo` shocks.
+    """
+    import bisect
+    r = np.asarray(r, dtype=float)
+    v = np.empty(len(r))
+    v[0] = r[:21].var()
+    for t in range(1, len(r)):
+        v[t] = _LAMBDA_VAR * v[t - 1] + (1 - _LAMBDA_VAR) * r[t - 1] ** 2
+    sig = np.sqrt(v)
+    z = r / sig
+    var = np.full(len(r), np.nan)
+    cvar = np.full(len(r), np.nan)
+    vistos = []
+    for t in range(len(r)):
+        if len(vistos) >= minimo:
+            k = max(1, int(0.05 * len(vistos)))
+            var[t] = sig[t] * vistos[k - 1]
+            cvar[t] = sig[t] * float(np.mean(vistos[:k]))
+        bisect.insort(vistos, z[t])
+    return var, cvar
+
+
+def _resumen(r, fechas, rf) -> dict:
+    """Cómo se habría portado esta composición en toda su historia."""
+    nav = np.cumprod(1 + r)
+    caida = nav / np.maximum.accumulate(nav) - 1
+    piso = int(np.argmin(caida))
+    pico = int(np.argmax(nav[:piso + 1])) if piso else 0
+    return {"desde": str(fechas[0].date()), "n_ruedas": int(len(r)),
+            "retorno_anual_pct": round(float((1 + r.mean()) ** RUEDAS - 1) * 100, 2),
+            "volatilidad_anual_pct": round(float(r.std(ddof=1)) * np.sqrt(RUEDAS) * 100, 2),
+            "sharpe": round(sharpe(r, rf), 3), "sortino": round(sortino(r, rf), 3),
+            "calmar": round(calmar(r), 3),
+            "max_drawdown_pct": round(float(caida.min()) * 100, 2),
+            "peor_caida": {"desde": str(fechas[pico].date()), "hasta": str(fechas[piso].date())},
+            "peor_anio_pct": round(float(pd.Series(r, index=fechas).add(1).groupby(fechas.year).prod().sub(1).min()) * 100, 2)}
 
 
 def _ajustar_distribucion(retornos, var95: float, var99: float) -> dict:
@@ -547,6 +635,31 @@ def var_rolling(posiciones, ventana: int = 21, activo: str = None) -> dict:
         cartera = ret_df[activo].to_numpy()
         valor_total *= float(w[tickers.index(activo)])
 
+    from core.models.portfolio import HISTORIA_LARGA
+    if HISTORIA_LARGA.get():
+        var, cvar = _var_fhs_serie(cartera)
+        ok = ~np.isnan(var)
+        if ok.sum() < 30:
+            return {"error": "Hace falta al menos un año de historia común para el VaR filtrado."}
+        idx = np.flatnonzero(ok)
+        serie = [{"fecha": str(ret_df.index[i].date()),
+                  "var95_pct": round(float(var[i]) * 100, 3),
+                  "cvar95_pct": round(float(cvar[i]) * 100, 3),
+                  "var95_usd": round(float(var[i]) * valor_total, 2)} for i in idx]
+        viol = cartera[idx] < var[idx]
+        desde, hasta = serie[0]["fecha"], serie[-1]["fecha"]
+        return {
+            "serie": serie, "ventana_ruedas": None, "metodo": "fhs",
+            "activos": tickers, "activo": activo if activo in tickers else None,
+            "valor_total": round(valor_total, 2),
+            "violaciones": int(viol.sum()), "ruedas": int(len(idx)),
+            "tasa_violacion_pct": round(float(viol.mean()) * 100, 2),
+            "violaciones_fechas": [serie[j]["fecha"] for j in np.flatnonzero(viol)],
+            "eventos": [{"fecha": f, "alcance": a, "descripcion": d}
+                        for f, a, d in EVENTOS if desde <= f <= hasta],
+            "nota": "VaR 95 % filtrado de cada rueda con datos anteriores a ella.",
+        }
+
     serie = []
     for i in range(ventana, len(cartera)):
         v = cartera[i - ventana:i]
@@ -707,7 +820,25 @@ def rebalancear_a_var(posiciones, var_objetivo_pct: float,
     def var_parametrico(w):
         return float(w @ mu + z * np.sqrt(w @ cov @ w))
 
-    var_actual_hist = var_historico(ret_df[tickers].to_numpy() @ w0, 0.05)
+    from core.models.portfolio import HISTORIA_LARGA
+    lab = HISTORIA_LARGA.get()
+    R = ret_df[tickers].to_numpy()
+    medir = lambda r: var_historico(r, 0.05)                              # noqa: E731
+    if lab:
+        # Lab 11: el límite se compara con el VaR de mañana (filtrado), el de
+        # los KPI. Para optimizar, la covarianza EWMA de hoy de cada mezcla por
+        # el cuantil de los shocks de la cartera actual —derivable—; después se
+        # mide exacto. Sin μ: el promedio histórico diario es ruido y en la
+        # versión de siempre era el sesgo de rachas de todo lo demás.
+        S = np.cov(R[:21].T).reshape(n, n)
+        for fila in R:
+            S = _LAMBDA_VAR * S + (1 - _LAMBDA_VAR) * np.outer(fila, fila)
+        r0_ = R @ w0
+        q0 = _var_fhs(r0_, 1)["var95_pct"] / 100 / float(np.sqrt(w0 @ S @ w0))
+        var_parametrico = lambda w: float(q0 * np.sqrt(w @ S @ w))       # noqa: E731
+        medir = lambda r: _var_fhs(r, 1)["var95_pct"] / 100               # noqa: E731
+
+    var_actual_hist = medir(R @ w0)
     var_actual_param = var_parametrico(w0)
     if var_actual_hist >= objetivo and var_actual_param >= objetivo:
         return {"ya_cumple": True,
@@ -752,9 +883,23 @@ def rebalancear_a_var(posiciones, var_objetivo_pct: float,
         ),
         options={"maxiter": 300, "ftol": 1e-10})
 
-    w1 = resultado.x if resultado.success else w_min
+    # Sin convergencia, la mezcla de menor VaR posible: cumple el límite (se
+    # verificó arriba que es alcanzable). Antes decía `w_min`, que no existía:
+    # un NameError justo en el caso difícil.
+    w1 = resultado.x if resultado.success else w_piso
     r1 = ret_df[tickers].to_numpy() @ w1
     r0 = ret_df[tickers].to_numpy() @ w0
+    # "Retorno anual esperado": en el lab, el del modelo propuesto (el mismo de
+    # Markowitz y del Monte Carlo); el promedio histórico es el sesgo de rachas.
+    esperado = lambda r, w: float((1 + r.mean()) ** RUEDAS - 1)          # noqa: E731
+    if lab:
+        from core.models.montecarlo import esperados
+        e = esperados(posiciones)
+        if "error" not in e:
+            mu_e = dict(zip(e["tickers"], e["mu"]))
+            if all(t in mu_e for t in tickers):
+                vec = np.array([mu_e[t] for t in tickers])
+                esperado = lambda r, w: float(w @ vec)                     # noqa: E731
 
     ordenes = []
     for i, t in enumerate(tickers):
@@ -780,14 +925,14 @@ def rebalancear_a_var(posiciones, var_objetivo_pct: float,
             "var95_pct": round(var_actual_hist * 100, 3),
             "var95_usd": round(var_actual_hist * valor_total, 2),
             "volatilidad_pct": round(float(r0.std(ddof=1)) * np.sqrt(RUEDAS) * 100, 2),
-            "retorno_anual_pct": round(float((1 + r0.mean()) ** RUEDAS - 1) * 100, 2),
+            "retorno_anual_pct": round(esperado(r0, w0) * 100, 2),
         },
         "despues": {
-            "var95_pct": round(var_historico(r1, 0.05) * 100, 3),
-            "var95_usd": round(var_historico(r1, 0.05) * valor_total, 2),
+            "var95_pct": round(medir(r1) * 100, 3),
+            "var95_usd": round(medir(r1) * valor_total, 2),
             "var95_parametrico_pct": round(var_parametrico(w1) * 100, 3),
             "volatilidad_pct": round(float(r1.std(ddof=1)) * np.sqrt(RUEDAS) * 100, 2),
-            "retorno_anual_pct": round(float((1 + r1.mean()) ** RUEDAS - 1) * 100, 2),
+            "retorno_anual_pct": round(esperado(r1, w1) * 100, 2),
         },
         "ordenes": sorted(ordenes, key=lambda o: o["monto_usd"]),
         "rotacion_pct": round(rotacion * 100, 2),
@@ -795,7 +940,12 @@ def rebalancear_a_var(posiciones, var_objetivo_pct: float,
         "nota": "La cartera queda invertida al 100 %: se cambia la mezcla, no el nivel de "
                 "exposición. Se busca el movimiento más chico que cumple el límite, para "
                 "no deshacer decisiones que ya tomaste.",
-        "nota_metodo": "La optimización usa el VaR paramétrico porque es derivable; el "
-                       "histórico del resultado se calcula aparte y se muestra al lado, "
-                       "así la diferencia entre ambos queda a la vista.",
+        "nota_metodo": ("El límite se mide con el VaR de mañana (filtrado), el mismo "
+                        "de los indicadores de arriba. Para buscar la mezcla se usa su "
+                        "aproximación derivable —la volatilidad EWMA de hoy de cada mezcla por "
+                        "el cuantil de los shocks— y el resultado se mide exacto."
+                        if lab else
+                        "La optimización usa el VaR paramétrico porque es derivable; el "
+                        "histórico del resultado se calcula aparte y se muestra al lado, "
+                        "así la diferencia entre ambos queda a la vista."),
     }

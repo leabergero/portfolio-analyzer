@@ -95,7 +95,8 @@ _TTL_CORRIDA_S = TTL_SPOT_H * 3600
 
 
 def _huella(nombre_cartera, posiciones, elegidos) -> str:
-    crudo = json.dumps([store.quien(), mercado.actual(), nombre_cartera,
+    from core.models.portfolio import HISTORIA_LARGA
+    crudo = json.dumps([store.quien(), mercado.actual(), HISTORIA_LARGA.get(), nombre_cartera,
                         sorted(elegidos), posiciones],
                        sort_keys=True, default=str)
     return hashlib.sha1(crudo.encode()).hexdigest()[:16]

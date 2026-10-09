@@ -274,6 +274,43 @@ def _montecarlo(alineadas, horizonte: int = 252, n_sims: int = 5000,
             "base": 100, "carteras": salida}
 
 
+def _montecarlo_fhs(carteras: dict, horizonte: int = 252, n_sims: int = 5000) -> dict:
+    """Lab 11: el abanico de cada cartera con el Monte Carlo propuesto.
+
+    Cada una se calibra con su propia historia larga (no sobre el tramo que
+    comparten: la deriva y la vol de largo plazo salen de la historia completa
+    de cada activo, que es lo que el backtest midió) y con la misma semilla,
+    así lo que separa a los abanicos es la cartera y no la suerte del sorteo.
+    """
+    from core.models.montecarlo import _SEMILLA, _log_trayectorias, calibrar
+
+    paso = max(1, horizonte // 60)
+    cortes = sorted(set(list(range(0, horizonte, paso)) + [horizonte - 1]))
+    salida = {}
+    for n, posiciones in carteras.items():
+        cal = calibrar(posiciones, horizonte)
+        if "error" in cal:
+            continue
+        rng = np.random.default_rng(_SEMILLA)
+        tray = np.concatenate([100.0 * (np.exp(L) @ cal["w"])
+                               for L in _log_trayectorias(cal, n_sims, horizonte, rng)])
+        recorte, fin = tray[:, cortes], tray[:, -1]
+        pctl = lambda q: [round(float(v), 2) for v in np.percentile(recorte, q, axis=0)]  # noqa: E731
+        salida[n] = {
+            "dias": [i + 1 for i in cortes],
+            "p5": pctl(5), "mediana": pctl(50), "p95": pctl(95),
+            "final": {
+                "p5": round(float(np.percentile(fin, 5)), 2),
+                "mediana": round(float(np.percentile(fin, 50)), 2),
+                "p95": round(float(np.percentile(fin, 95)), 2),
+                "peor_1_pct": round(float(np.percentile(fin, 1)), 2),
+                "prob_perdida_pct": round(100 * float((fin < 100).mean()), 1),
+            },
+        }
+    return {"horizonte": horizonte, "simulaciones": n_sims, "motor": "fhs",
+            "base": 100, "carteras": salida}
+
+
 def _media_pares(matriz, tickers) -> float:
     pares = [float(matriz.loc[a, b])
              for i, a in enumerate(tickers) for b in tickers[i + 1:]]
@@ -351,6 +388,7 @@ def comparar(carteras: dict, benchmark: str = None) -> dict:
 
     carteras: {nombre: [posiciones]}
     """
+    from core.models.portfolio import HISTORIA_LARGA
     from core.models.rates import risk_free_para
 
     alineadas, propias, comunes, detalle = _series(carteras)
@@ -449,7 +487,8 @@ def comparar(carteras: dict, benchmark: str = None) -> dict:
                     "mercado, no estrategias.",
         },
         "rf": round(rf, 4), "rf_label": rf_label,
-        "montecarlo": _montecarlo(alineadas),
+        "montecarlo": (_montecarlo_fhs(carteras) if HISTORIA_LARGA.get()
+                       else _montecarlo(alineadas)),
         "correlacion": _correlacion(carteras, detalle, alineadas.index),
         "curva_valor": [
             {"fecha": str(f.date()),

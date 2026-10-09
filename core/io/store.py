@@ -180,6 +180,32 @@ def fijar_retenciones(nombre: str, datos) -> None:
         del todas[nombre]
     _escribir(_retenciones(), todas)
 
+def _opiniones() -> Path:
+    return _dir() / "opiniones.json"
+
+
+def opiniones(nombre: str) -> dict:
+    """Los precios que el usuario fijó a mano en Black-Litterman para esa
+    cartera: {ticker: {"modo": "B1"|"B2", "bajo", "alto", "meses"}}.
+
+    Viven acá y no sólo en la pantalla porque son un dato del usuario —una OPA
+    de Metrogas no se olvida al recargar— y porque el escenario "según los
+    analistas" del Monte Carlo tiene que verlas igual que BL.
+    """
+    return _leer(_opiniones()).get(nombre) or {}
+
+
+def fijar_opiniones(nombre: str, datos) -> None:
+    """Guarda las opiniones de una cartera. Vacías, se borran."""
+    todas = _leer(_opiniones())
+    if datos:
+        todas[nombre] = datos
+    elif nombre not in todas:
+        return
+    else:
+        del todas[nombre]
+    _escribir(_opiniones(), todas)
+
 _CAMPOS = ("ticker", "buy_date", "buy_price", "qty",
            "commissions", "source", "currency", "asset_type", "notes")
 
