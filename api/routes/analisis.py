@@ -113,8 +113,18 @@ def riesgo_activos(nombre):
 @bp.get("/riesgo/<nombre>/rolling")
 def riesgo_rolling(nombre):
     """VaR en ventana móvil con los eventos macro superpuestos."""
-    return _simple(nombre, risk.var_rolling, request.args.get("ventana", 21, type=int),
-                   request.args.get("activo"))
+    pos = _posiciones(nombre)
+    if not pos:
+        return _falta(nombre)
+    d = risk.var_rolling(pos, request.args.get("ventana", 21, type=int),
+                         request.args.get("activo"))
+    # Desde cuándo está invertido, contando lo ya cerrado: el gráfico arranca
+    # con el zoom ahí, porque lo anterior no le pasó a esta cartera.
+    fechas = [f for f in (str(x.get("buy_date") or "")
+                          for x in store.cargar(nombre) + store.cargar_realizado(nombre)) if f]
+    if fechas and "serie" in d:
+        d["primera_inversion"] = min(fechas)
+    return jsonify(d)
 
 
 @bp.get("/riesgo/<nombre>/cambiario")

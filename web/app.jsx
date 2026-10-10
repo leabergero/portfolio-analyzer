@@ -4577,6 +4577,10 @@ function RiesgoActivos({ cartera }) {
   );
 }
 
+// El doble clic siempre abre la serie entera: con el default de Plotly volvía
+// al rango inicial, que acá es el zoom desde la primera inversión.
+const DOBLE_CLIC_TODO = { doubleClick: "autosize" };
+
 function RiesgoEvolucion({ cartera }) {
   const c = colores();
   const [d, setD] = useState(null);
@@ -4599,6 +4603,15 @@ function RiesgoEvolucion({ cartera }) {
       Math.abs(new Date(p.fecha) - new Date(f)) < Math.abs(new Date(mejor.fecha) - new Date(f))
         ? p : mejor, d.serie[0]).var95_pct);
 
+  // Arranca con el zoom en lo que la cartera vivió: desde la primera inversión.
+  // La serie entera sigue ahí (doble clic la muestra), y el eje vertical se
+  // ajusta a lo visible para que un pico de antes no aplaste la línea.
+  const vista = d.serie.filter((p) => p.fecha >= (d.primera_inversion || ""));
+  const zoom = vista.length > 1 && vista.length < d.serie.length;
+  const yMin = Math.min(...vista.map((p) => p.cvar95_pct));
+  const yMax = Math.max(...vista.map((p) => p.var95_pct));
+  const aire = (yMax - yMin) * 0.06 || 0.1;
+
   return (
     <>
       <div className="panel">
@@ -4608,7 +4621,7 @@ function RiesgoEvolucion({ cartera }) {
             <option value="">{t("Toda la cartera", "Whole portfolio")}</option>
             {(d.activos || []).map((a) => <option key={a} value={a}>{a}</option>)}
           </select></h3>
-        <Grafico alto={400}
+        <Grafico alto={400} config={DOBLE_CLIC_TODO}
           datos={[
             { type: "scatter", mode: "lines", name: t("día malo (VaR 95 %)", "bad day (VaR 95 %)"),
               x: d.serie.map((p) => p.fecha), y: d.serie.map((p) => p.var95_pct),
@@ -4641,8 +4654,12 @@ function RiesgoEvolucion({ cartera }) {
             shapes: ev.map((e) => ({ type: "line", x0: e.fecha, x1: e.fecha, yref: "paper",
               y0: 0, y1: 1, line: { color: e.alcance === "AR" ? c.series[3] : c.series[4],
                                     width: 1, dash: "dot" }, opacity: 0.5 })),
-            yaxis: { title: t("Pérdida diaria", "Daily loss"), ticksuffix: " %" } }} />
+            ...(zoom ? { xaxis: { range: [vista[0].fecha, vista[vista.length - 1].fecha] } } : {}),
+            yaxis: { title: t("Pérdida diaria", "Daily loss"), ticksuffix: " %",
+                     ...(zoom ? { range: [yMin - aire, yMax + aire] } : {}) } }} />
         <div className="pie">
+          {zoom && t(`Se muestra desde tu primera inversión (${vista[0].fecha}); doble clic en el gráfico para ver toda la serie. `,
+                     `Shown from your first investment (${vista[0].fecha}); double-click the chart to see the whole series. `)}
           {d.metodo === "fhs" ? t(`VaR 95 % filtrado de cada rueda, calculado sólo con lo anterior a ella: la volatilidad de ese momento por los peores días vistos hasta entonces. Cuando la línea baja, la cartera se volvió más riesgosa. Las cruces son los días que perdieron más que eso: ${d.violaciones} de ${d.ruedas.toLocaleString("es-AR")} ruedas, ${pct(d.tasa_violacion_pct, 1)} (lo esperado es 5 %). Los`,
               `95 % filtered VaR for each session, computed only with what came before it: that moment's volatility times the worst days seen until then. When the line drops, the portfolio became riskier. The crosses are the days that lost more than that: ${d.violaciones} of ${d.ruedas.toLocaleString("en-US")} sessions, ${pct(d.tasa_violacion_pct, 1)} (5 % is expected). The`)
            : t(`VaR 95 % sobre las últimas ${d.ventana_ruedas} ruedas en cada punto: cuando la línea `
