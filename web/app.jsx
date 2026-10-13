@@ -2189,12 +2189,15 @@ function Posicion({ d, cartera, recargar, lanzar, extras, bench, sim, setSim }) 
           )}
         </div>
       )}
+      {/* `?lab=12`: la TIR de la cartera sube, justo debajo de los ratios de
+          riesgo y antes del valor: es la tasa con la que se lee todo lo demás. */}
       {ev && !ev.error && (<>
+        {LAB_CAPITAL && <TirVentana ev={ev} />}
         <div className="fila f2">
           <ValorCartera ev={ev} mep={d.mep_hoy} />
           <RendimientoTotal ev={ev} />
         </div>
-        <TirVentana ev={ev} />
+        {!LAB_CAPITAL && <TirVentana ev={ev} />}
       </>)}
       {d.sin_precio?.length > 0 && (
         <div className="aviso ojo">
@@ -3988,7 +3991,7 @@ function ValorCartera({ ev, mep }) {
   ].filter(Boolean).join(" · ");
 
   return (
-    <div className="panel lab-valor" title={detalle || undefined}>
+    <div className={"panel lab-valor" + (LAB_CAPITAL ? " con-cifra" : "")} title={detalle || undefined}>
       <div className="et">{t("Valor de cartera", "Portfolio value")}</div>
       <div className="cifra">{moneda} {cifra}</div>
       <div className={"delta " + signo(cambio)}>
