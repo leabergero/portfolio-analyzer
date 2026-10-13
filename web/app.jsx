@@ -2126,7 +2126,7 @@ function Posicion({ d, cartera, recargar, lanzar, extras, bench, sim, setSim }) 
           que uno mira a la mañana. El resumen reemplaza a la fila de KPIs de
           tenencia, que repetía los mismos números en tarjetas sueltas. */}
       {LAB_PIEL && <Resumen d={d} ev={ev && !ev.error ? ev : null} cartera={cartera}
-                       cerrado={cerrado} real={real} filas={filas} />}
+                       real={crudo ? quitarFci(crudo) : null} filas={filas} />}
 
       {/* 1 · Cómo se comporta la cartera, antes que el detalle de qué tiene */}
       {r && !r.error && <KpisRiesgo d={r} capm={extras?.capm} />}
@@ -4486,12 +4486,22 @@ function KpisRiesgo({ d, capm }) {
 
 /* El resumen de los labs: la cartera en una línea. En el 1 es una tira de
    cifras; en el 2 además una frase, como el primer párrafo de un informe. */
-function Resumen({ d, ev, cartera, cerrado, real, filas }) {
+function Resumen({ d, ev, cartera, real, filas }) {
+  // La tira es de bolsa: los FCI no entran en ninguna de sus cifras de
+  // resultado, esté como esté el interruptor de Posiciones cerradas —que es
+  // donde se miran—. Antes «Abierto» y «Realizado» los traían y «Resultado
+  // total» no, así que las dos primeras no sumaban la tercera. El valor de
+  // cartera sí los cuenta: es plata tuya y tiene que coincidir con el broker.
+  const enBolsa = filas.filter((f) => f.source !== "cocos-fci" && f.valor_usd != null && f.costo_usd != null);
+  const costoAbierto = enBolsa.reduce((s, f) => s + f.costo_usd, 0);
+  const abierto = enBolsa.reduce((s, f) => s + f.valor_usd - f.costo_usd, 0);
+  const abiertoPct = costoAbierto ? (abierto / costoAbierto) * 100 : null;
+  const cerrado = real?.n ? real.total_usd : null;
   const moneda = MERCADOS[MERCADO].simbolo === "$" ? "US$" : MERCADOS[MERCADO].simbolo;
   const valor = ev?.valor_hoy_usd ?? d.valor_total;
   const cifra = Number(valor).toLocaleString(IDIOMA === "en" ? "en-US" : "es-AR",
                                              { maximumFractionDigits: 0 });
-  const total = ev ? ev.resultado_usd : cerrado != null ? d.pnl + cerrado : d.pnl;
+  const total = ev ? ev.resultado_usd : cerrado != null ? abierto + cerrado : abierto;
   const totalPct = ev ? (conCapital(ev) ? ev.rendimiento_capital_pct : ev.rendimiento_pct) : null;
   const tir = tirCartera(ev);
   const activos = new Set(filas.map((f) => f.ticker)).size;
@@ -4536,7 +4546,7 @@ function Resumen({ d, ev, cartera, cerrado, real, filas }) {
                     : t(`${pct(totalPct, 1)} sobre ${usd(ev.puesto_neto_usd, 0)} puestos`,
                         `${pct(totalPct, 1)} on ${usd(ev.puesto_neto_usd, 0)} put in`))
                 : t("abierto + cerrado", "open + realized"))}
-        {fig(t("Abierto", "Open"), usd(d.pnl), signo(d.pnl), pct(d.pnl_pct, 1))}
+        {fig(t("Abierto", "Open"), usd(abierto), signo(abierto), pct(abiertoPct, 1))}
         {cerrado != null && fig(t("Realizado", "Realized"), usd(cerrado), signo(cerrado),
              t(`${real.n} operaciones`, `${real.n} trades`))}
         {conCapital(ev) && fig(t("Rendimiento total", "Total return"), pct(totalPct, 1), signo(total),
