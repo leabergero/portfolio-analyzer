@@ -34,6 +34,12 @@ const LAB = ["1", "2", "3", "4", "5", "6", "7"].includes(new URLSearchParams(loc
 // no un callejón con un botón de volver. Por eso es piel y es información.
 // El 11 es el 1 con los modelos nuevos (Monte Carlo FHS, Markowitz, BL, HRP y riesgo con historia larga): misma piel y vistas.
 const LAB1 = LAB === "1" || LAB === "11";
+// `?lab=12` (en evaluación): el rendimiento se mide sobre lo máximo que hubo
+// invertido a la vez, no sobre lo que queda puesto hoy —que baja con cada venta
+// aunque la plata espere en el FCI—, y al lado va el promedio por operación.
+// Es la app de todos los días con ese único cambio.
+const LAB_CAPITAL = new URLSearchParams(location.search).get("lab") === "12";
+const conCapital = (ev) => LAB_CAPITAL && ev?.rendimiento_capital_pct != null;
 const LAB_PIEL = ["1", "2", "3", "4", "11"].includes(LAB);
 const LAB_INFO = ["1", "5", "6", "7", "11"].includes(LAB);
 if (LAB) {
@@ -1112,13 +1118,24 @@ function senales(R) {
     const anual = ev.tir_anual_pct;
     add({ id: "rend", q: "ganancia",
       nivel: ev.resultado_usd < 0 ? "mal" : anual != null && anual < rf ? "ojo" : "ok",
+      ...(conCapital(ev) ? {
+        titulo: t("Sobre lo que invertiste", "On what you invested"), valor: pct(ev.rendimiento_capital_pct, 1),
+        frase: t(`Lo máximo que tuviste invertido a la vez fueron ${usd(ev.puesto_max_usd, 0)} y, contando lo que vale hoy, lo que vendiste y los dividendos, `
+                 + `estás ${usd(Math.abs(ev.resultado_usd), 0)} ${ev.resultado_usd < 0 ? "abajo" : "arriba"}: ${pct(ev.rendimiento_capital_pct, 1)}.`
+                 + (ev.rendimiento_operacion_pct != null ? ` Por cada dólar comprado (${usd(ev.comprado_usd, 0)} en total) quedó en promedio ${pct(ev.rendimiento_operacion_pct, 1)}.` : "")
+                 + (anual != null ? ` Repartido en el tiempo que estuvo puesta la plata, ${pct(anual, 1)} por año; una letra del Tesoro daba ${pct(rf, 1)}.` : ""),
+                 `The most you had invested at once was ${usd(ev.puesto_max_usd, 0)} and, counting what it's worth today, what you sold and the dividends, `
+                 + `you're ${usd(Math.abs(ev.resultado_usd), 0)} ${ev.resultado_usd < 0 ? "down" : "up"}: ${pct(ev.rendimiento_capital_pct, 1)}.`
+                 + (ev.rendimiento_operacion_pct != null ? ` Each dollar bought (${usd(ev.comprado_usd, 0)} in total) left ${pct(ev.rendimiento_operacion_pct, 1)} on average.` : "")
+                 + (anual != null ? ` Spread over the time the money was in, ${pct(anual, 1)} a year; a T-bill paid ${pct(rf, 1)}.` : "")) } : {}),
+      ...(conCapital(ev) ? {} : {
       titulo: t("Sobre lo que pusiste", "On what you put in"), valor: pct(ev.rendimiento_pct, 1),
       frase: t(`Pusiste ${usd(ev.puesto_neto_usd, 0)} y, contando lo que vale hoy, lo que vendiste y los dividendos, `
                + `estás ${usd(Math.abs(ev.resultado_usd), 0)} ${ev.resultado_usd < 0 ? "abajo" : "arriba"}: ${pct(ev.rendimiento_pct, 1)}.`
                + (anual != null ? ` Repartido en el tiempo que estuvo puesta la plata, ${pct(anual, 1)} por año; una letra del Tesoro daba ${pct(rf, 1)}.` : ""),
                `You put in ${usd(ev.puesto_neto_usd, 0)} and, counting what it's worth today, what you sold and the dividends, `
                + `you're ${usd(Math.abs(ev.resultado_usd), 0)} ${ev.resultado_usd < 0 ? "down" : "up"}: ${pct(ev.rendimiento_pct, 1)}.`
-               + (anual != null ? ` Spread over the time the money was in, ${pct(anual, 1)} a year; a T-bill paid ${pct(rf, 1)}.` : "")) });
+               + (anual != null ? ` Spread over the time the money was in, ${pct(anual, 1)} a year; a T-bill paid ${pct(rf, 1)}.` : "")) }) });
   }
   const lotes = (ev?.bajo_agua || []).filter((x) => x.dias >= 180);
   if (ev) add({ id: "agua", q: "ganancia", nivel: lotes.length ? "ojo" : "ok",
@@ -1356,8 +1373,9 @@ function InfoCifras({ R }) {
       {fig(diaEtiqueta(p.dia_fecha) === t("hoy", "today") ? t("Hoy", "Today") : t(`Rueda ${diaEtiqueta(p.dia_fecha)}`, `Session ${diaEtiqueta(p.dia_fecha)}`),
            usd(p.pnl_dia, 0), signo(p.pnl_dia), pct(p.pnl_dia_pct, 1))}
       {ev && fig(t("Resultado total", "Total result"), usd(ev.resultado_usd, 0), signo(ev.resultado_usd),
-                 t(`sobre ${usd(ev.puesto_neto_usd, 0)} puestos`, `on ${usd(ev.puesto_neto_usd, 0)} put in`))}
-      {ev?.rendimiento_pct != null && fig(t("Rendimiento", "Return"), pct(ev.rendimiento_pct, 1), signo(ev.resultado_usd),
+                 conCapital(ev) ? t(`sobre ${usd(ev.puesto_max_usd, 0)} invertidos como máximo`, `on ${usd(ev.puesto_max_usd, 0)} invested at most`)
+                                : t(`sobre ${usd(ev.puesto_neto_usd, 0)} puestos`, `on ${usd(ev.puesto_neto_usd, 0)} put in`))}
+      {ev?.rendimiento_pct != null && fig(t("Rendimiento", "Return"), pct(conCapital(ev) ? ev.rendimiento_capital_pct : ev.rendimiento_pct, 1), signo(ev.resultado_usd),
                  anual != null ? t(`${pct(anual, 1)} por año desde la primera compra`, `${pct(anual, 1)} a year since the first purchase`)
                                : t("sobre lo que pusiste", "on what you put in"))}
     </div>);
@@ -3481,10 +3499,19 @@ function RendimientoTotal({ ev }) {
             <div key={opc} className="pie" style={{ margin: 0, padding: "7px 11px", cursor: "pointer" }}>{opc}</div>))}
         </div>)}
       <div style={{ fontSize: 30, fontWeight: 700, marginTop: 6 }}
-           className={signo(ev.resultado_usd)}>{pct(ev.rendimiento_pct)}</div>
+           className={signo(ev.resultado_usd)}>{pct(conCapital(ev) ? ev.rendimiento_capital_pct : ev.rendimiento_pct)}</div>
       <div style={{ fontSize: 15, marginTop: 2 }} className={signo(ev.resultado_usd)}>
-        {t(`${usd(ev.resultado_usd)} sobre ${usd(ev.puesto_neto_usd)} puestos de tu bolsillo`,
-           `${usd(ev.resultado_usd)} on ${usd(ev.puesto_neto_usd)} out of your own pocket`)}</div>
+        {conCapital(ev)
+          ? t(`${usd(ev.resultado_usd)} sobre ${usd(ev.puesto_max_usd)}, lo máximo que tuviste invertido`,
+              `${usd(ev.resultado_usd)} on ${usd(ev.puesto_max_usd)}, the most you had invested`)
+          : t(`${usd(ev.resultado_usd)} sobre ${usd(ev.puesto_neto_usd)} puestos de tu bolsillo`,
+              `${usd(ev.resultado_usd)} on ${usd(ev.puesto_neto_usd)} out of your own pocket`)}</div>
+      {conCapital(ev) && ev.rendimiento_operacion_pct != null && (
+        <div className="pie" style={{ marginTop: 6 }}>
+          {t(`Promedio por operación: `, `Average per trade: `)}<b>{pct(ev.rendimiento_operacion_pct)}</b>
+          {t(` · el mismo resultado sobre los ${usd(ev.comprado_usd)} que compraste en total. Es más bajo porque la plata que rota cuenta cada vez que compra.`,
+             ` · the same result on the ${usd(ev.comprado_usd)} you bought in total. It's lower because money that rotates counts every time it buys.`)}
+        </div>)}
       <div className="pie" style={{ marginTop: 8 }}>
         <span className={signo(delta)}>{delta >= 0 ? "▲" : "▼"} {usd(Math.abs(delta))}</span>
         {" "}{t(`desde el cierre del mes pasado · arranca el ${ev.desde}, con la primera compra`,
@@ -4374,7 +4401,7 @@ function Resumen({ d, ev, cartera, cerrado, real, filas }) {
   const cifra = Number(valor).toLocaleString(IDIOMA === "en" ? "en-US" : "es-AR",
                                              { maximumFractionDigits: 0 });
   const total = ev ? ev.resultado_usd : cerrado != null ? d.pnl + cerrado : d.pnl;
-  const totalPct = ev ? ev.rendimiento_pct : null;
+  const totalPct = ev ? (conCapital(ev) ? ev.rendimiento_capital_pct : ev.rendimiento_pct) : null;
   const tir = ev?.ultimos_12m?.tir_pct;
   const activos = new Set(filas.map((f) => f.ticker)).size;
   const dia = diaEtiqueta(d.dia_fecha);
@@ -4408,8 +4435,11 @@ function Resumen({ d, ev, cartera, cerrado, real, filas }) {
         {d.pnl_dia != null && fig(dia === t("hoy", "today") ? t("Hoy", "Today") : t(`Rueda ${dia}`, `Session ${dia}`),
              usd(d.pnl_dia), signo(d.pnl_dia), pct(d.pnl_dia_pct))}
         {fig(t("Resultado total", "Total result"), usd(total), signo(total),
-             ev ? t(`${pct(totalPct, 1)} sobre ${usd(ev.puesto_neto_usd, 0)} puestos`,
-                    `${pct(totalPct, 1)} on ${usd(ev.puesto_neto_usd, 0)} put in`)
+             ev ? (conCapital(ev)
+                    ? t(`${pct(totalPct, 1)} sobre ${usd(ev.puesto_max_usd, 0)} invertidos como máximo`,
+                        `${pct(totalPct, 1)} on ${usd(ev.puesto_max_usd, 0)} invested at most`)
+                    : t(`${pct(totalPct, 1)} sobre ${usd(ev.puesto_neto_usd, 0)} puestos`,
+                        `${pct(totalPct, 1)} on ${usd(ev.puesto_neto_usd, 0)} put in`))
                 : t("abierto + cerrado", "open + realized"))}
         {fig(t("Abierto", "Open"), usd(d.pnl), signo(d.pnl), pct(d.pnl_pct, 1))}
         {cerrado != null && fig(t("Realizado", "Realized"), usd(cerrado), signo(cerrado),

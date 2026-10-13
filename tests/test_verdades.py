@@ -1308,6 +1308,47 @@ def test_el_vencimiento_de_una_letra_cierra_la_posicion():
         "(502.549,25 − 497.609,72) al MEP de 1.000."
 
 
+def test_rendimiento_sobre_el_capital_y_por_operacion_no_son_el_mismo_numero():
+    """Mil dólares que rotan: A sube 10 % y se vende, con eso se compra B, que
+    sube otro 10 % y se vende; al final se compran 500 de D y el resto queda en
+    caja. Se ganaron 210.
+
+    · sobre el capital: 210 sobre los 1.000 que hubo invertidos como máximo;
+    · por operación: 210 sobre los 2.600 comprados (la misma plata, tres veces);
+    · y lo que NO puede pasar: que vender y dejar la plata afuera infle el
+      número — sobre los 290 que quedan puestos daría 72 %.
+    """
+    import pandas as pd
+
+    sources = require("core.data", "sources")
+    portfolio = require("core.models", "portfolio")
+
+    fechas = pd.date_range("2026-01-01", periods=15, freq="B")
+    series = {"AAA": pd.Series(100.0, index=fechas), "BBB": pd.Series(110.0, index=fechas),
+              "DDD": pd.Series(500.0, index=fechas)}
+    pb, pa = sources.precios_base, portfolio.precios_actuales
+    sources.precios_base = lambda t, **k: series[t]
+    portfolio.precios_actuales = lambda pos, **k: {"DDD": 500.0}
+    venta = {"currency": "USD", "buy_comm": 0.0, "sell_comm": 0.0, "mep_compra": 1.0, "mep_venta": 1.0}
+    try:
+        ev = portfolio.evolucion(
+            [{"ticker": "DDD", "qty": 1, "buy_price": 500.0, "buy_date": "2026-01-15",
+              "currency": "USD", "commissions": 0.0}],
+            [dict(venta, ticker="AAA", qty=10, buy_price=100.0, sell_price=110.0,
+                  buy_date="2026-01-01", sell_date="2026-01-08"),
+             dict(venta, ticker="BBB", qty=10, buy_price=110.0, sell_price=121.0,
+                  buy_date="2026-01-08", sell_date="2026-01-15")])
+    finally:
+        sources.precios_base, portfolio.precios_actuales = pb, pa
+
+    assert casi(ev["resultado_usd"], 210.0, 0.01), f"se ganaron 210, dio {ev['resultado_usd']}"
+    assert casi(ev["puesto_max_usd"], 1000.0, 0.01) and casi(ev["rendimiento_capital_pct"], 21.0, 0.01), \
+        f"210 sobre 1.000 de máximo: {ev['puesto_max_usd']} → {ev['rendimiento_capital_pct']} %"
+    assert casi(ev["comprado_usd"], 2600.0, 0.01) and casi(ev["rendimiento_operacion_pct"], 8.08, 0.01), \
+        f"210 sobre 2.600 comprados: {ev['comprado_usd']} → {ev['rendimiento_operacion_pct']} %"
+    assert casi(ev["puesto_neto_usd"], 290.0, 0.01), "quedan 290 puestos: lo que el divisor viejo usaba"
+
+
 def test_el_tiempo_bajo_el_agua_cuenta_la_racha_en_curso():
     """TWU: días corridos que el lote lleva SIN volver a lo que costó.
 

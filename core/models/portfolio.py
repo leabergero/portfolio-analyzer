@@ -686,6 +686,7 @@ def evolucion(posiciones, trades=None, n_ruedas: int = 30) -> dict:
     cant = pd.DataFrame(0.0, index=px.index, columns=px.columns)
     flujo = pd.Series(0.0, index=px.index)
     caja = pd.Series(0.0, index=px.index)
+    comprado = 0.0
     for ticker, qty, desde, hasta, costo, ingreso in tramos:
         d = pd.Timestamp(desde)
         h = pd.Timestamp(hasta) if hasta else None
@@ -695,6 +696,7 @@ def evolucion(posiciones, trades=None, n_ruedas: int = 30) -> dict:
         # anterior ya está en el capital inicial, no es plata que entró.
         if d >= px.index[0] and (f := rueda(d)) is not None:
             flujo.loc[f] += costo
+            comprado += costo
         if h is not None and (f := rueda(h)) is not None:
             flujo.loc[f] -= ingreso
 
@@ -758,6 +760,11 @@ def evolucion(posiciones, trades=None, n_ruedas: int = 30) -> dict:
 
     neto = float(puesto.iloc[-1])
     final = float(resultado.iloc[-1])
+    # Lo máximo que hubo invertido a la vez. `neto` baja con cada venta aunque
+    # la plata quede en el FCI esperando: KARIN vendió GLDD el 2026-10-07 y su
+    # rendimiento saltó de ~12 % a 18,4 % sin ganar un dólar. El máximo no se
+    # mueve al vender ni al recomprar con esa plata; sólo sube con plata nueva.
+    tope = float(puesto.max())
 
     # ── Dos tasas anuales, que contestan preguntas distintas ─────────────────
     # La histórica arrastra todo lo que pasó por la cartera, aciertos y errores
@@ -834,6 +841,14 @@ def evolucion(posiciones, trades=None, n_ruedas: int = 30) -> dict:
         "resultado_usd": round(final, 2),
         "puesto_neto_usd": round(neto, 2),
         "rendimiento_pct": round(final / neto * 100, 2) if neto > 0 else None,
+        # Dos medidas, dos preguntas (en evaluación, `?lab=12`). Sobre el
+        # capital: cuánto creció la plata destinada a invertir. Por operación:
+        # cuánto deja en promedio cada dólar comprado — la misma plata que rota
+        # tres veces cuenta tres veces, por eso es más baja y no es lo mismo.
+        "puesto_max_usd": round(tope, 2),
+        "rendimiento_capital_pct": round(final / tope * 100, 2) if tope > 0 else None,
+        "comprado_usd": round(comprado, 2),
+        "rendimiento_operacion_pct": round(final / comprado * 100, 2) if comprado > 0 else None,
         "resultado_mes_anterior_usd": round(ref, 2),
         "desde": str(px.index[0].date()),
         "aportado_usd": round(float(flujo[flujo > 0].sum()), 2),
