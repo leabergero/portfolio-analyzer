@@ -76,13 +76,12 @@
   transition:background .15s,color .15s}
 [data-lab="1"] .bl-item:hover,[data-lab="1"] .bl-cartera:hover,[data-lab="1"] .bl-tema:hover{
   background:var(--panel-2);color:var(--texto)}
-[data-lab="1"] .bl-item.on{background:var(--acento-suave);color:var(--texto);font-weight:500;
-  box-shadow:inset 2px 0 0 var(--acento)}
+[data-lab="1"] .bl-item.on{background:var(--acento-suave);color:var(--texto);font-weight:500}
 [data-lab="1"] .bl-item.on .ico{stroke:var(--acento)}
 [data-lab="1"] .ico{width:17px;height:17px;flex:none;fill:none;stroke:currentColor;stroke-width:1.8;
   stroke-linecap:round;stroke-linejoin:round}
 [data-lab="1"] .bl-cartera{font-family:var(--mono);font-size:12.5px}
-[data-lab="1"] .bl-cartera.on{color:var(--texto);background:var(--acento-suave);box-shadow:inset 2px 0 0 var(--acento)}
+[data-lab="1"] .bl-cartera.on{color:var(--texto);background:var(--acento-suave)}
 [data-lab="1"] .bl-cartera.on::after{content:"";margin-left:auto;width:6px;height:6px;border-radius:50%;
   background:var(--acento)}
 [data-lab="1"] .bl-plaza{font-size:9.5px;letter-spacing:.06em;color:var(--texto-3);border:1px solid var(--borde);
