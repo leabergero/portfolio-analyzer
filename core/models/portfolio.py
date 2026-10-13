@@ -919,7 +919,7 @@ def evolucion(posiciones, trades=None, n_ruedas: int = 30, flujos_fci: dict = No
         "tir_anual_pct": tir(movimientos) if anos >= 0.25 else None,
         "anos": round(anos, 2),
         "ultimos_12m": ventana(12),
-        # En evaluación (`?lab=12`): ver los dos bloques de arriba.
+        # Ver los dos bloques de arriba.
         "cartera_12m": cartera_12m,
         "tir_con_fci_pct": tir_con_fci,
         "con_fci_aproximado": resultado_con_fci is not None and not (flujos_fci and not fci_sin_flujos),
@@ -933,7 +933,7 @@ def evolucion(posiciones, trades=None, n_ruedas: int = 30, flujos_fci: dict = No
         "resultado_usd": round(final, 2),
         "puesto_neto_usd": round(neto, 2),
         "rendimiento_pct": round(final / neto * 100, 2) if neto > 0 else None,
-        # Dos medidas, dos preguntas (en evaluación, `?lab=12`). Sobre el
+        # Dos medidas, dos preguntas. Sobre el
         # capital: cuánto creció la plata destinada a invertir. Por operación:
         # cuánto deja en promedio cada dólar comprado — la misma plata que rota
         # tres veces cuenta tres veces, por eso es más baja y no es lo mismo.

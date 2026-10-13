@@ -34,15 +34,14 @@ const LAB = ["1", "2", "3", "4", "5", "6", "7"].includes(new URLSearchParams(loc
 // no un callejón con un botón de volver. Por eso es piel y es información.
 // El 11 es el 1 con los modelos nuevos (Monte Carlo FHS, Markowitz, BL, HRP y riesgo con historia larga): misma piel y vistas.
 const LAB1 = LAB === "1" || LAB === "11";
-// `?lab=12` (en evaluación): el rendimiento se mide sobre lo máximo que hubo
-// invertido a la vez, no sobre lo que queda puesto hoy —que baja con cada venta
-// aunque la plata espere en el FCI—, y al lado va el promedio por operación.
-// Es la app de todos los días con ese único cambio.
-const LAB_CAPITAL = new URLSearchParams(location.search).get("lab") === "12";
-const conCapital = (ev) => LAB_CAPITAL && ev?.rendimiento_capital_pct != null;
-// También en el 12: la TIR de la cartera es la de HOY tenida doce meses (la que
-// se compara contra un plazo fijo), no la de la historia real del último año.
-const conCartera12m = (ev) => LAB_CAPITAL && ev?.cartera_12m?.tir_pct != null;
+// Aprobado el 2026-10-13 (fue el lab 12). El rendimiento se mide sobre lo máximo
+// que hubo invertido a la vez, no sobre lo que queda puesto hoy —que baja con
+// cada venta aunque la plata espere en el FCI—. Y la TIR de la cartera es la
+// de HOY tenida doce meses (la que se compara contra un plazo fijo), no la de
+// la historia real del último año. Lo anterior queda sólo de respaldo, para
+// cuando el dato nuevo no se puede calcular.
+const conCapital = (ev) => ev?.rendimiento_capital_pct != null;
+const conCartera12m = (ev) => ev?.cartera_12m?.tir_pct != null;
 const tirCartera = (ev) => (conCartera12m(ev) ? ev.cartera_12m.tir_pct : ev?.ultimos_12m?.tir_pct);
 const LAB_PIEL = ["1", "2", "3", "4", "11"].includes(LAB);
 const LAB_INFO = ["1", "5", "6", "7", "11"].includes(LAB);
@@ -2189,15 +2188,14 @@ function Posicion({ d, cartera, recargar, lanzar, extras, bench, sim, setSim }) 
           )}
         </div>
       )}
-      {/* `?lab=12`: la TIR de la cartera sube, justo debajo de los ratios de
-          riesgo y antes del valor: es la tasa con la que se lee todo lo demás. */}
+      {/* La TIR de la cartera va justo debajo de los ratios de riesgo y antes
+          del valor: es la tasa con la que se lee todo lo demás. */}
       {ev && !ev.error && (<>
-        {LAB_CAPITAL && <TirVentana ev={ev} />}
+        <TirVentana ev={ev} />
         <div className="fila f2">
           <ValorCartera ev={ev} mep={d.mep_hoy} />
           <RendimientoTotal ev={ev} />
         </div>
-        {!LAB_CAPITAL && <TirVentana ev={ev} />}
       </>)}
       {d.sin_precio?.length > 0 && (
         <div className="aviso ojo">
@@ -3512,7 +3510,7 @@ function RendimientoTotal({ ev }) {
             <div key={opc} className="pie" style={{ margin: 0, padding: "7px 11px", cursor: "pointer" }}>{opc}</div>))}
         </div>)}
       {conCapital(ev) ? (
-        /* `?lab=12`: el rendimiento total, con los fondos y sin ellos, uno al
+        /* El rendimiento total, con los fondos y sin ellos, uno al
            lado del otro. Es lo ganado sobre lo máximo que hubo invertido, no una
            tasa anual: la TIR de la cartera va en su propio panel. */
         <div style={{ display: "flex", gap: 36, flexWrap: "wrap", marginTop: 6 }}>
@@ -3991,7 +3989,7 @@ function ValorCartera({ ev, mep }) {
   ].filter(Boolean).join(" · ");
 
   return (
-    <div className={"panel lab-valor" + (LAB_CAPITAL ? " con-cifra" : "")} title={detalle || undefined}>
+    <div className="panel lab-valor" title={detalle || undefined}>
       <div className="et">{t("Valor de cartera", "Portfolio value")}</div>
       <div className="cifra">{moneda} {cifra}</div>
       <div className={"delta " + signo(cambio)}>
@@ -4040,7 +4038,7 @@ function PasosModelos({ M, listos }) {
 /* PNL-05 · la tasa anual de los últimos doce meses y cómo llegó hasta ahí.
    Va en su propia tarjeta: mezclada con el resultado acumulado eran dos curvas
    en distinta unidad compitiendo por la misma mirada. */
-/* `?lab=12` · la tasa de la cartera: ¿lo que tengo hoy le gana a un plazo fijo o a un bono? Mira
+/* La tasa de la cartera: ¿lo que tengo hoy le gana a un plazo fijo o a un bono? Mira
    la cartera de hoy como si se hubiera tenido doce meses, aunque se haya
    comprado ayer. Cuánto se ganó desde que se invierte no es una tasa anual: va
    en el panel de rendimiento total, con FCI y sin FCI. */
