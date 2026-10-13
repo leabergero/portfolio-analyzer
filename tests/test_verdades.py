@@ -3147,6 +3147,84 @@ def test_lab11_matriz_larga_no_inventa_ceros_y_var_filtrado():
     assert 0.035 < (r[ok] < var[ok]).mean() < 0.065, (r[ok] < var[ok]).mean()
 
 
+def test_la_memoria_de_precios_no_sirve_un_precio_pisado():
+    """Las series leídas se recuerdan para no releer la base cientos de veces
+    por corrida. Lo que no puede pasar: que después de guardar un cierre nuevo
+    —o de borrar el ticker— se siga viendo el anterior.
+    """
+    import pandas as pd
+
+    def serie(valor, dia):
+        return pd.DataFrame({"Close": [valor]}, index=pd.DatetimeIndex([dia]))
+
+    with cache_aparte() as cache:
+        cache.guardar_precios("MEMO", serie(10.0, "2026-10-01"))
+        primera = cache.leer_precios("MEMO", "2026-01-01", "2026-12-31")
+        primera.loc[:, "Close"] = -1          # el que recibe puede tocar su copia
+        assert cache.leer_precios("MEMO", "2026-01-01", "2026-12-31")["Close"].tolist() == [10.0], \
+            "lo recordado no se ensucia con lo que haga quien lo pidió"
+
+        cache.guardar_precios("MEMO", serie(12.0, "2026-10-02"))
+        assert cache.leer_precios("MEMO", "2026-01-01", "2026-12-31")["Close"].tolist() == [10.0, 12.0], \
+            "un cierre recién guardado se ve en la lectura siguiente"
+
+        cache.borrar_ticker("MEMO")
+        assert cache.leer_precios("MEMO", "2026-01-01", "2026-12-31").empty, \
+            "un ticker borrado no sigue vivo en la memoria"
+
+
+def test_lo_que_el_lote_adelanta_no_se_calcula_dos_veces_ni_sobrevive_a_un_recalculo():
+    """El lote deja calculado lo que cada pestaña pide por su endpoint
+    (`jobs.suelto`). Tres cosas tienen que valer: el mismo pedido no se calcula
+    de nuevo, un pedido con otros parámetros sí, y una corrida nueva —recalcular—
+    no sirve números de la anterior. Un error no se recuerda.
+    """
+    jobs = require("api", "jobs")
+    llamadas = []
+
+    def falso(posiciones, x=0):
+        llamadas.append(x)
+        return {"error": "sin red"} if x == "roto" else {"x": x, "n": len(llamadas)}
+
+    pos = [{"ticker": "X"}]
+    previos_s, previos_m = dict(jobs.SUELTOS), dict(jobs.MODELOS)
+    try:
+        jobs.SUELTOS["falso"] = falso
+        primero = jobs.suelto("test-suelto", "falso", pos, 1)
+        assert jobs.suelto("test-suelto", "falso", pos, 1) is primero and llamadas == [1], \
+            f"el mismo pedido se calculó otra vez: {llamadas}"
+        jobs.suelto("test-suelto", "falso", pos, 2)
+        assert llamadas == [1, 2], "otros parámetros son otro cálculo"
+
+        jobs.suelto("test-suelto", "falso", pos, "roto")
+        jobs.suelto("test-suelto", "falso", pos, "roto")
+        assert llamadas.count("roto") == 2, "un error se reintenta, no se recuerda"
+
+        jobs.MODELOS.clear()
+        jobs.MODELOS["m"] = ("Modelo", lambda p, c: {})
+        jobs.lanzar("test-suelto", pos, forzar=True)
+        assert jobs.suelto("test-suelto", "falso", pos, 1)["n"] != primero["n"], \
+            "después de recalcular se sirvió el número de la corrida anterior"
+    finally:
+        jobs.SUELTOS.clear(); jobs.SUELTOS.update(previos_s)
+        jobs.MODELOS.clear(); jobs.MODELOS.update(previos_m)
+
+
+def test_el_lote_corre_posicion_primero_y_monte_carlo_al_final():
+    """El orden de `MODELOS` es la prioridad con la que la VM los calcula: lo
+    que muestra Posición antes que nada, Optimización con BL y HRP antes que
+    Monte Carlo, y Monte Carlo último."""
+    orden = list(require("api", "jobs").MODELOS)
+    pos = orden.index
+    assert orden[0] == "posicion", f"lo primero es la tenencia, no {orden[0]}"
+    assert max(pos("benchmarks"), pos("evolucion")) < pos("stress") < pos("riesgo_rolling") \
+        < pos("markowitz"), "Posición, después Riesgo, después Optimización"
+    assert max(pos("blacklitterman"), pos("hrp"), pos("regimenes")) < pos("montecarlo"), \
+        "BL, HRP y Regímenes van antes que Monte Carlo"
+    assert all(pos(m) > pos("montecarlo") for m in orden if m.startswith("mc_")), \
+        "los paneles de Monte Carlo cierran la fila"
+
+
 def test_cedear_de_micron_no_es_el_etf_bajista_mud():
     """MUD.BA es Micron: si el subyacente ya es una acción, el ticker con la D
     (MUD, un ETF bajista sobre Micron) no lo pisa. GLDD.BA sigue siendo oro."""

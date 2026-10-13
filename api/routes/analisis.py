@@ -75,6 +75,16 @@ def _simple(nombre, fn, *args, **kwargs):
     return jsonify(fn(pos, *args, **kwargs))
 
 
+def _suelto(nombre, clave, *args, **kwargs):
+    """Como `_simple`, pero de los que el lote ya dejó calculados: si la
+    pestaña pide lo mismo que el lote adelantó, sale al instante. Ver
+    `jobs.suelto`."""
+    pos = _posiciones(nombre)
+    if not pos:
+        return _falta(nombre)
+    return jsonify(jobs.suelto(nombre, clave, pos, *args, **kwargs))
+
+
 @bp.get("/posicion/<nombre>")
 def posicion(nombre):
     return _simple(nombre, portfolio.valuar)
@@ -107,7 +117,7 @@ def riesgo(nombre):
 @bp.get("/riesgo/<nombre>/por-activo")
 def riesgo_activos(nombre):
     """VaR, CVaR, VaR 99 y peor caída de cada activo, no solo del agregado."""
-    return _simple(nombre, risk.por_activo, request.args.get("benchmark"))
+    return _suelto(nombre, "riesgo_activos", request.args.get("benchmark"))
 
 
 @bp.get("/riesgo/<nombre>/rolling")
@@ -116,8 +126,10 @@ def riesgo_rolling(nombre):
     pos = _posiciones(nombre)
     if not pos:
         return _falta(nombre)
-    d = risk.var_rolling(pos, request.args.get("ventana", 21, type=int),
-                         request.args.get("activo"))
+    # Copia: lo recordado es de todos los pedidos, y abajo se le agrega un campo.
+    d = dict(jobs.suelto(nombre, "riesgo_rolling", pos,
+                         request.args.get("ventana", 21, type=int),
+                         request.args.get("activo") or None))
     # Desde cuándo está invertido, contando lo ya cerrado: el gráfico arranca
     # con el zoom ahí, porque lo anterior no le pasó a esta cartera.
     fechas = [f for f in (str(x.get("buy_date") or "")
@@ -130,7 +142,7 @@ def riesgo_rolling(nombre):
 @bp.get("/riesgo/<nombre>/cambiario")
 def riesgo_fx(nombre):
     """Cuánto del riesgo viene del activo y cuánto del tipo de cambio."""
-    return _simple(nombre, risk.riesgo_cambiario)
+    return _suelto(nombre, "riesgo_cambiario")
 
 
 @bp.get("/riesgo/<nombre>/ajustar")
@@ -153,7 +165,7 @@ def correlaciones(nombre):
 @bp.get("/markowitz/<nombre>/backtest")
 def mk_backtest(nombre):
     """¿La cartera optimizada habría funcionado fuera de muestra?"""
-    return _simple(nombre, markowitz.backtest,
+    return _suelto(nombre, "backtest",
                    request.args.get("meses", 6, type=int),
                    request.args.get("benchmark"), _lab())
 
@@ -173,7 +185,7 @@ def mk(nombre):
 @bp.get("/hrp/<nombre>")
 def hrp_ep(nombre):
     """Hierarchical Risk Parity: pesos por clustering, sin invertir la covarianza."""
-    return _simple(nombre, hrp.optimizar, request.args.get("benchmark"), _lab())
+    return _suelto(nombre, "hrp", request.args.get("benchmark"), _lab())
 
 
 @bp.get("/montecarlo/<nombre>")
@@ -195,7 +207,7 @@ def mc_fhs(nombre):
 def mc_analistas(nombre):
     """El Monte Carlo con el rendimiento de Black-Litterman: precios objetivo
     y los precios fijados a mano (una OPA) incluidos."""
-    return _simple(nombre, montecarlo.escenario_analistas, store.opiniones(nombre),
+    return _suelto(nombre, "mc_analistas", store.opiniones(nombre),
                    request.args.get("horizonte", 252, type=int))
 
 
@@ -216,7 +228,7 @@ def opiniones_put(nombre):
 def mc_motores(nombre):
     """Los tres motores lado a lado: cuánto cambia el supuesto de distribución."""
     if _lab():
-        return _simple(nombre, montecarlo.motores_fhs, request.args.get("horizonte", 252, type=int))
+        return _suelto(nombre, "mc_motores", request.args.get("horizonte", 252, type=int))
     return _simple(nombre, montecarlo.comparar_motores,
                    request.args.get("horizonte", 252, type=int))
 
@@ -236,7 +248,7 @@ def mc_activos(nombre):
             if "error" in aj:
                 return jsonify(aj)
             ajustes = {"deriva_anual": aj["deriva"], "vol_anual": aj["vol"]}
-        return _simple(nombre, montecarlo.por_activo_fhs,
+        return _suelto(nombre, "mc_activos",
                        request.args.get("horizonte", 252, type=int),
                        request.args.get("simulaciones", 4000, type=int), **ajustes)
     return _simple(nombre, montecarlo.por_activo,
@@ -248,7 +260,7 @@ def mc_activos(nombre):
 @bp.get("/montecarlo/<nombre>/correlaciones")
 def mc_correlaciones(nombre):
     """Correlación móvil para animar: las correlaciones no son estables."""
-    return _simple(nombre, montecarlo.correlaciones_moviles,
+    return _suelto(nombre, "mc_correlaciones",
                    request.args.get("ventana", 63, type=int),
                    request.args.get("pasos", 40, type=int))
 
@@ -333,8 +345,8 @@ def bl(nombre):
     # manuales pisen activo por activo. Es el uso normal: BL automático, con la
     # posibilidad de imponer una opinión propia donde el usuario la tenga.
     if views is None:
-        views = blacklitterman.views_combinadas(
-            targets.analizar(pos), momentum.analizar(pos), manuales)
+        return jsonify(jobs.suelto(nombre, "blacklitterman", pos, manuales,
+                                   cuerpo.get("benchmark"), cuerpo.get("max_weight"), _lab()))
 
     return jsonify(blacklitterman.analizar(
         pos, views, cuerpo.get("benchmark"), cuerpo.get("max_weight"), _lab()))

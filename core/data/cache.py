@@ -6,6 +6,8 @@ fuentes. Por eso está en .gitignore y por eso no hay migraciones.
 """
 
 import sqlite3
+import threading
+import time
 from pathlib import Path
 
 import pandas as pd
@@ -106,11 +108,59 @@ def guardar_precios(ticker: str, df: pd.DataFrame) -> int:
     with conectar() as con:
         con.executemany(
             "INSERT OR REPLACE INTO precios VALUES (?,?,?,?,?,?,?)", filas)
+    _olvidar(tk)
     return len(filas)
+
+
+# ── Lo leído se recuerda un rato ──────────────────────────────────────────────
+# Una corrida de análisis lee la misma serie decenas de veces: catorce modelos,
+# cada uno arma su matriz de retornos y cada matriz pide todos los tickers. Con
+# MAMI eran 433 lecturas para 15 papeles, el 40 % del cómputo de la corrida, y
+# en la VM —que rinde una fracción de un núcleo— eso son decenas de segundos.
+#
+# Quien escribe en este proceso borra lo del ticker que tocó, así que acá nunca
+# se sirve un precio pisado. El vencimiento corto es por los OTROS procesos que
+# escriben en la misma base (un script, otro worker): no avisan.
+# ponytail: hasta _MEMO_S de atraso si escribe otro proceso; si eso molesta,
+# comparar `PRAGMA data_version` sobre una conexión que quede abierta.
+_MEMO_S = 60
+_MEMO_MAX = 400
+_memo = {}
+_memo_lock = threading.Lock()
+
+
+_rondas = {}
+
+
+def _olvidar(ticker: str) -> None:
+    with _memo_lock:
+        _rondas[ticker] = _rondas.get(ticker, 0) + 1
+        for k in [k for k in _memo if k[0] == ticker]:
+            del _memo[k]
 
 
 def leer_precios(ticker: str, desde: str, hasta: str) -> pd.DataFrame:
     """DataFrame [Open, High, Low, Close, Volume] indexado por fecha."""
+    # La base va en la clave: los tests la cambian por una temporal.
+    clave = (ticker.upper(), desde, hasta, DB_PATH)
+    with _memo_lock:
+        hallado = _memo.get(clave)
+    if hallado and time.monotonic() - hallado[0] < _MEMO_S:
+        return hallado[1].copy()
+    # El reloj se toma ANTES de leer: si alguien escribe mientras tanto, su
+    # `_olvidar` pudo haber corrido antes de que esto se guarde, y entonces lo
+    # guardado ya nació viejo. Por eso se guarda sólo si nadie olvidó en el medio.
+    marca, ronda = time.monotonic(), _rondas.get(clave[0], 0)
+    df = _leer_precios(*clave[:3])
+    with _memo_lock:
+        if _rondas.get(clave[0], 0) == ronda:
+            if len(_memo) >= _MEMO_MAX:
+                _memo.clear()
+            _memo[clave] = (marca, df)
+    return df.copy()
+
+
+def _leer_precios(ticker: str, desde: str, hasta: str) -> pd.DataFrame:
     with conectar() as con:
         filas = con.execute(
             "SELECT fecha, open, high, low, close, volume FROM precios "
@@ -127,7 +177,8 @@ def leer_precios(ticker: str, desde: str, hasta: str) -> pd.DataFrame:
 def borrar_ticker(ticker: str) -> int:
     with conectar() as con:
         cur = con.execute("DELETE FROM precios WHERE ticker=?", (ticker.upper(),))
-        return cur.rowcount
+    _olvidar(ticker.upper())
+    return cur.rowcount
 
 
 def estadisticas() -> dict:

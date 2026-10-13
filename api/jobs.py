@@ -17,6 +17,7 @@ caché de precios, que sí vive en disco, es la que evita el trabajo de verdad.
 import contextvars
 import hashlib
 import json
+import os
 import threading
 import time
 import traceback
@@ -26,50 +27,161 @@ from concurrent.futures import ThreadPoolExecutor
 from core import mercado
 from core.data.sources import TTL_SPOT_H, spot_forzable
 from core.io import store
-from core.models import (blacklitterman, capm, composicion, markowitz,
+from core.models import (blacklitterman, capm, composicion, hrp, markowitz,
                          momentum, montecarlo, portfolio, regimenes, risk,
                          targets)
 
-# Cada entrada: nombre visible + función que recibe las posiciones.
-# Cada modelo recibe (posiciones, nombre de la cartera). El nombre casi nunca se
-# usa —los modelos trabajan sobre las posiciones y nada más— pero la evolución
-# necesita además lo que ya cerraste, que vive en el store bajo ese nombre.
+# ── Lo que cada pestaña pide por su cuenta, recordado ────────────────────────
+# La ventana de riesgo, el riesgo por activo, HRP, el backtest, los paneles de
+# Monte Carlo: cada uno tiene su endpoint y la pestaña lo pide al abrirse. El
+# lote los calcula antes, con los mismos argumentos que va a mandar la pantalla,
+# y los deja acá; cuando la pestaña pregunta, la respuesta ya está.
+#
+# Un candado por clave: si la pestaña pregunta ANTES de que el lote llegue, lo
+# calcula el request y el lote, al llegar, espera ese resultado en vez de
+# hacerlo de nuevo. Así lo que el usuario abrió pasa adelante solo.
+#
+# Con otros parámetros —otro índice, otro horizonte, un activo del selector— la
+# clave es otra y se calcula a pedido, como siempre.
+_recuerdos = {}
+_candados = {}
+_generacion = {}
+_MAX_RECUERDOS = 150
+
+
+def _bl(posiciones, manuales, benchmark, max_weight, lab):
+    return blacklitterman.analizar(
+        posiciones, blacklitterman.views_combinadas(
+            targets.analizar(posiciones), momentum.analizar(posiciones), manuales),
+        benchmark, max_weight, lab)
+
+
+SUELTOS = {
+    "benchmarks": capm.comparar_benchmarks,
+    "riesgo_rolling": risk.var_rolling,
+    "riesgo_activos": risk.por_activo,
+    "riesgo_cambiario": risk.riesgo_cambiario,
+    "blacklitterman": _bl,
+    "hrp": hrp.optimizar,
+    "backtest": markowitz.backtest,
+    "mc_analistas": montecarlo.escenario_analistas,
+    "mc_activos": montecarlo.por_activo_fhs,
+    "mc_correlaciones": montecarlo.correlaciones_moviles,
+    "mc_motores": montecarlo.motores_fhs,
+}
+
+
+def suelto(cartera: str, clave: str, posiciones: list, *args, **kwargs):
+    """El resultado de `SUELTOS[clave]`, calculado una sola vez mientras no
+    cambie nada de lo que se analiza (lo mismo que mira `_huella`) ni se pida
+    recalcular. Los errores no se recuerdan: son el entorno, no un resultado."""
+    from core.models.portfolio import HISTORIA_LARGA
+    quien = store.quien()
+    crudo = json.dumps([quien, mercado.actual(), HISTORIA_LARGA.get(), cartera,
+                        _generacion.get((quien, cartera), 0), clave, args, kwargs, posiciones],
+                       sort_keys=True, default=str)
+    huella = hashlib.sha1(crudo.encode()).hexdigest()
+    with _lock:
+        candado = _candados.setdefault(huella, threading.Lock())
+    with candado:
+        with _lock:
+            hallado = _recuerdos.get(huella)
+        if hallado and time.time() - hallado[0] < _TTL_CORRIDA_S:
+            return hallado[1]
+        r = SUELTOS[clave](posiciones, *args, **kwargs)
+        if not (isinstance(r, dict) and "error" in r):
+            with _lock:
+                if len(_recuerdos) >= _MAX_RECUERDOS:
+                    for vieja in sorted(_recuerdos, key=lambda k: _recuerdos[k][0])[:_MAX_RECUERDOS // 3]:
+                        _recuerdos.pop(vieja, None)
+                        _candados.pop(vieja, None)
+                _recuerdos[huella] = (time.time(), r)
+        return r
+
+
+def _indice(p, c):
+    """El índice que la pantalla elige sola: el que mejor explica la cartera."""
+    return (suelto(c, "benchmarks", p) or {}).get("recomendado")
+
+
+def _tibio(clave, args=lambda p, c: ()):
+    """Deja calculado lo que una pestaña va a pedir. No devuelve el resultado:
+    viaja por su endpoint, no en cada consulta del estado de la corrida."""
+    def correr(p, c):
+        suelto(c, clave, p, *args(p, c))
+    return correr
+
+
+# Cada entrada: nombre visible + función que recibe (posiciones, nombre de la
+# cartera). El nombre casi nunca se usa —los modelos trabajan sobre las
+# posiciones y nada más— pero la evolución necesita además lo que ya cerraste,
+# que vive en el store bajo ese nombre.
+#
+# **El orden es la prioridad.** Se encolan así y, donde el pool tiene un solo
+# hilo (la VM), se calculan así: primero lo que muestra Posición, después
+# Riesgo, Optimización, Regímenes y al final Monte Carlo, que es lo más pesado
+# y lo que menos apuro tiene. Antes arrancaban todos juntos y cada uno
+# terminaba cuando le tocaba: en la VM, con MAMI, Posición quedaba completa a
+# los 80 s y Monte Carlo salía a los 55 (2026-10-13). En fila son 3 s y 12 s.
+#
+# Los argumentos de los `_tibio` son los que manda la pantalla por defecto: si
+# no coinciden, el cálculo adelantado no le sirve a nadie.
 MODELOS = {
+    # ── Posición ──
     # El único que pide precio en vivo: es la foto de la tenencia y la variación
     # del día. Todo lo demás mide sobre cierres, y así sigue.
     "posicion":     ("Posición",        lambda p, c: portfolio.valuar(p, vivo=True)),
     "composicion":  ("Composición",     lambda p, c: composicion.analizar(p)),
-    "riesgo":       ("Riesgo",          lambda p, c: risk.analizar(p)),
-    "stress":       ("Stress test",     lambda p, c: risk.stress_test(p)),
-    "markowitz":    ("Markowitz",       lambda p, c: markowitz.optimizar(p, lab=True)),
-    "montecarlo":   ("Monte Carlo",     lambda p, c: montecarlo.simular_fhs(p)),
-    "capm":         ("CAPM",            lambda p, c: capm.analizar(p)),
-    "momentum":     ("Momentum",        lambda p, c: momentum.analizar(p)),
-    "objetivos":    ("Objetivos",       lambda p, c: targets.analizar(p)),
-    "regimenes":    ("Regímenes",       lambda p, c: regimenes.analizar(p)),
-    # BL sin views devuelve el punto de partida y no sirve de nada: las views se
-    # arman desde los precios objetivo, recortando confianza donde el momentum
-    # va en contra. Es el uso para el que existe el modelo en esta aplicación.
-    "blacklitterman": ("Black-Litterman", lambda p, c: blacklitterman.analizar(
-        p, blacklitterman.views_combinadas(targets.analizar(p), momentum.analizar(p)), lab=True)),
-
-    # Estos tres los pedía cada panel por su cuenta, en paralelo a los once de
-    # arriba y compitiendo con ellos por el mismo procesador: en la VM sumaban
-    # unos 20 s a cada apertura de cartera —`benchmarks` 20,4 s, `evolucion`
-    # 20,4 s, `correlaciones` 8,2 s— y `benchmarks` encima repetía el CAPM que
-    # el lote ya había corrido, porque corre los tres índices y uno de ellos es
-    # el mismo. Entran al lote: se calculan una vez, en paralelo con el resto, y
-    # el frontend los recibe por el mismo canal que todo lo demás. Los endpoints
-    # sueltos siguen existiendo para recalcular con otros parámetros.
+    # Estos tres (evolución, correlaciones, índices) los pedía cada panel por su
+    # cuenta, en paralelo al lote y compitiendo con él por el mismo procesador.
+    # Entran al lote: se calculan una vez y el frontend los recibe por el mismo
+    # canal que todo lo demás. Los endpoints sueltos siguen existiendo para
+    # recalcular con otros parámetros.
     "evolucion":    ("Evolución",       lambda p, c: portfolio.evolucion(
         p, store.cargar_realizado(c))),
+    "riesgo":       ("Riesgo",          lambda p, c: risk.analizar(p)),
+    "momentum":     ("Momentum",        lambda p, c: momentum.analizar(p)),
     "correlaciones": ("Correlaciones",  lambda p, c: portfolio.correlaciones(p)),
-    "benchmarks":   ("Índices",         lambda p, c: capm.comparar_benchmarks(p)),
+    "capm":         ("CAPM",            lambda p, c: capm.analizar(p)),
+    "benchmarks":   ("Índices",         lambda p, c: suelto(c, "benchmarks", p)),
+
+    # ── Riesgo ──
+    "stress":       ("Stress test",     lambda p, c: risk.stress_test(p)),
+    "riesgo_rolling": ("Riesgo en el tiempo", _tibio("riesgo_rolling", lambda p, c: (21, None))),
+    "riesgo_activos": ("Riesgo por activo", _tibio("riesgo_activos", lambda p, c: (None,))),
+    "riesgo_cambiario": ("Riesgo cambiario", _tibio("riesgo_cambiario")),
+
+    # ── Optimización ──
+    "objetivos":    ("Objetivos",       lambda p, c: targets.analizar(p)),
+    "markowitz":    ("Markowitz",       lambda p, c: markowitz.optimizar(p, lab=True)),
+    # BL sin views devuelve el punto de partida y no sirve de nada: las views se
+    # arman desde los precios objetivo, recortando confianza donde el momentum
+    # va en contra, y las opiniones guardadas pisan activo por activo. Es el
+    # mismo pedido que hace la pestaña, contra el índice que ella elige sola.
+    "blacklitterman": ("Black-Litterman", lambda p, c: suelto(
+        c, "blacklitterman", p, store.opiniones(c), _indice(p, c), None, True)),
+    "hrp":          ("HRP",             _tibio("hrp", lambda p, c: (_indice(p, c), True))),
+    "backtest":     ("Backtest",        _tibio("backtest", lambda p, c: (6, _indice(p, c), True))),
+
+    "regimenes":    ("Regímenes",       lambda p, c: regimenes.analizar(p)),
+
+    # ── Monte Carlo, al final ──
+    "montecarlo":   ("Monte Carlo",     lambda p, c: montecarlo.simular_fhs(p)),
+    "mc_analistas": ("Monte Carlo según analistas",
+                     _tibio("mc_analistas", lambda p, c: (store.opiniones(c), 252))),
+    "mc_activos":   ("Monte Carlo por activo", _tibio("mc_activos", lambda p, c: (252, 4000))),
+    "mc_correlaciones": ("Correlaciones móviles", _tibio("mc_correlaciones", lambda p, c: (63, 40))),
+    "mc_motores":   ("Motores de Monte Carlo", _tibio("mc_motores", lambda p, c: (252,))),
 }
 
 _corridas = {}
 _lock = threading.Lock()
-_pool = ThreadPoolExecutor(max_workers=6, thread_name_prefix="modelo")
+# Cuántos modelos a la vez. Seis rinde en una máquina con núcleos de sobra; en
+# la VM, que recibe menos de un núcleo, seis hilos se pelean por él y la corrida
+# tarda más que con dos (MAMI, 2026-10-13: 65 s con seis, 48 s con dos). Por eso
+# es una perilla del entorno y no un número fijo.
+_pool = ThreadPoolExecutor(max_workers=int(os.environ.get("PA_HILOS_MODELOS", 6)),
+                           thread_name_prefix="modelo")
 
 # Las corridas viejas se descartan solas: sin esto la memoria crece sin techo en
 # una sesión larga.
@@ -138,6 +250,7 @@ def _guardar(run_id, modelo, estado, dato=None):
 
 
 def _ejecutar(run_id, modelo, fn, posiciones, cartera):
+    _guardar(run_id, modelo, "corriendo")
     try:
         r = fn(posiciones, cartera)
         _guardar(run_id, modelo, "error" if isinstance(r, dict) and "error" in r else "listo", r)
@@ -162,6 +275,9 @@ def lanzar(nombre_cartera: str, posiciones: list, modelos: list = None,
     run_id = uuid.uuid4().hex[:12]
 
     with _lock:
+        # Corrida nueva, números nuevos: lo recordado de la anterior no vale.
+        quien = (store.quien(), nombre_cartera)
+        _generacion[quien] = _generacion.get(quien, 0) + 1
         _corridas[run_id] = {
             "cartera": nombre_cartera, "estado": "corriendo",
             "inicio": time.time(), "huella": huella,
@@ -193,7 +309,6 @@ def lanzar(nombre_cartera: str, posiciones: list, modelos: list = None,
         fn_posicion = lambda p, c: portfolio.valuar(p, vivo=True, forzar=True)
 
     for m in elegidos:
-        _guardar(run_id, m, "corriendo")
         fn = fn_posicion if m == "posicion" and fn_posicion else MODELOS[m][1]
         fut = _pool.submit(contextvars.copy_context().run,
                            _ejecutar, run_id, m, fn, posiciones,

@@ -1834,8 +1834,8 @@ function Analisis({ cartera, recargar, sim, setSim }) {
                        `Calculated ${hace(estado.edad_s)} ago · in ${num(estado.duracion, 1)} s`)}</span>
             <button className={"lab-estados" + (corriendo ? " corriendo" : fresco ? " listo" : "")}
                     disabled={corriendo} onClick={() => lanzar(true)}
-                    title={t("Vuelve a correr los catorce modelos y a pedir precios frescos.",
-                             "Runs all fourteen models again and fetches fresh prices.")}>
+                    title={t("Vuelve a correr todos los modelos y a pedir precios frescos.",
+                             "Runs all the models again and fetches fresh prices.")}>
               <i className="punto" />
               <span>{corriendo ? t("recalculando", "recalculating") : t("recalcular", "recalculate")}</span>
             </button>
@@ -3932,9 +3932,10 @@ function ValorCartera({ ev, mep }) {
    pasos no entran once etiquetas: el nombre va en el nodo, al pasar el mouse, y
    abajo queda el que está corriendo, que es lo único que uno mira mientras espera. */
 function PasosModelos({ M, listos }) {
-  // Corren en paralelo, no en fila: si los nodos quedaran en su orden fijo, la
-  // línea de avance marcaría 6 y habría encendidos más allá. Ordenados por
-  // estado, lo lleno y lo vacío coinciden con la cuenta.
+  // Donde corren en paralelo, si los nodos quedaran en su orden fijo la línea de
+  // avance marcaría 6 y habría encendidos más allá. Ordenados por estado, lo
+  // lleno y lo vacío coinciden con la cuenta. (En la web van en fila, por
+  // prioridad: ver `MODELOS` en api/jobs.py.)
   const orden = { listo: 0, error: 1, corriendo: 2 };
   const claves = Object.keys(M).sort((a, b) =>
     (orden[M[a].estado] ?? 3) - (orden[M[b].estado] ?? 3));
