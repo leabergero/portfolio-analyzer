@@ -119,8 +119,8 @@ def _tibio(clave, args=lambda p, c: ()):
 #
 # **El orden es la prioridad.** Se encolan así y, donde el pool tiene un solo
 # hilo (la VM), se calculan así: primero lo que muestra Posición, después
-# Riesgo, Optimización, Regímenes y al final Monte Carlo, que es lo más pesado
-# y lo que menos apuro tiene. Antes arrancaban todos juntos y cada uno
+# Riesgo, Optimización, Monte Carlo y al final Regímenes, que es lo que menos
+# se consulta. Antes arrancaban todos juntos y cada uno
 # terminaba cuando le tocaba: en la VM, con MAMI, Posición quedaba completa a
 # los 80 s y Monte Carlo salía a los 55 (2026-10-13). En fila son 3 s y 12 s.
 #
@@ -163,15 +163,16 @@ MODELOS = {
     "hrp":          ("HRP",             _tibio("hrp", lambda p, c: (_indice(p, c), True))),
     "backtest":     ("Backtest",        _tibio("backtest", lambda p, c: (6, _indice(p, c), True))),
 
-    "regimenes":    ("Regímenes",       lambda p, c: regimenes.analizar(p)),
-
-    # ── Monte Carlo, al final ──
+    # ── Monte Carlo ──
     "montecarlo":   ("Monte Carlo",     lambda p, c: montecarlo.simular_fhs(p)),
     "mc_analistas": ("Monte Carlo según analistas",
                      _tibio("mc_analistas", lambda p, c: (store.opiniones(c), 252))),
     "mc_activos":   ("Monte Carlo por activo", _tibio("mc_activos", lambda p, c: (252, 4000))),
     "mc_correlaciones": ("Correlaciones móviles", _tibio("mc_correlaciones", lambda p, c: (63, 40))),
     "mc_motores":   ("Motores de Monte Carlo", _tibio("mc_motores", lambda p, c: (252,))),
+
+    # ── Regímenes, al final: se mira poco, para tener una idea general ──
+    "regimenes":    ("Regímenes",       lambda p, c: regimenes.analizar(p)),
 }
 
 _corridas = {}

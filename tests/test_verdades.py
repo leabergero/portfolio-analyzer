@@ -3210,19 +3210,20 @@ def test_lo_que_el_lote_adelanta_no_se_calcula_dos_veces_ni_sobrevive_a_un_recal
         jobs.MODELOS.clear(); jobs.MODELOS.update(previos_m)
 
 
-def test_el_lote_corre_posicion_primero_y_monte_carlo_al_final():
+def test_el_lote_corre_posicion_primero_y_regimenes_al_final():
     """El orden de `MODELOS` es la prioridad con la que la VM los calcula: lo
     que muestra Posición antes que nada, Optimización con BL y HRP antes que
-    Monte Carlo, y Monte Carlo último."""
+    Monte Carlo, y Regímenes —lo que menos se consulta— último."""
     orden = list(require("api", "jobs").MODELOS)
     pos = orden.index
     assert orden[0] == "posicion", f"lo primero es la tenencia, no {orden[0]}"
     assert max(pos("benchmarks"), pos("evolucion")) < pos("stress") < pos("riesgo_rolling") \
         < pos("markowitz"), "Posición, después Riesgo, después Optimización"
-    assert max(pos("blacklitterman"), pos("hrp"), pos("regimenes")) < pos("montecarlo"), \
-        "BL, HRP y Regímenes van antes que Monte Carlo"
+    assert max(pos("blacklitterman"), pos("hrp")) < pos("montecarlo"), \
+        "BL y HRP van antes que Monte Carlo"
     assert all(pos(m) > pos("montecarlo") for m in orden if m.startswith("mc_")), \
-        "los paneles de Monte Carlo cierran la fila"
+        "los paneles de Monte Carlo van después del principal"
+    assert orden[-1] == "regimenes", f"Regímenes cierra la fila, no {orden[-1]}"
 
 
 def test_cedear_de_micron_no_es_el_etf_bajista_mud():
