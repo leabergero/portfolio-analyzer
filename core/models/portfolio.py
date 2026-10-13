@@ -788,9 +788,24 @@ def evolucion(posiciones, trades=None, n_ruedas: int = 30, flujos_fci: dict = No
     # Si a un fondo que hoy tenés le faltan, no se calcula y se dice cuál.
     flujos_fci = flujos_fci or {}
     fci_sin_flujos = sorted(fci - set(flujos_fci))
-    tir_con_fci = None
+    tir_con_fci = resultado_con_fci = tope_con_fci = None
     if flujos_fci and not fci_sin_flujos:
         de_fci = [(pd.Timestamp(f), -float(usd)) for lista in flujos_fci.values() for f, usd in lista]
+        # El rendimiento total con los fondos adentro: el mismo resultado sobre
+        # lo máximo invertido, pero contando la caja. Lo que ganó o perdió cada
+        # fondo es lo que vale hoy más lo rescatado menos lo suscripto; y lo
+        # puesto es bolsa y fondos juntos, así que pasar plata de un lado al
+        # otro no lo mueve.
+        suscripto_neto = -sum(m for _, m in de_fci)
+        resultado_con_fci = final + valor_fci - suscripto_neto
+        juntos = pd.concat([flujo, pd.Series([-m for _, m in de_fci],
+                                             index=[f for f, _ in de_fci])])
+        nivel = juntos.groupby(level=0).sum().sort_index().cumsum().resample("D").last().ffill()
+        # Una compra se liquida un día y el rescate que la paga se anota otro:
+        # por un par de días la plata figura en los dos lados. Un nivel cuenta
+        # como invertido si se sostuvo; el de hoy cuenta siempre.
+        # ponytail: ventana fija de 5 días; si un broker liquida más lento, subirla.
+        tope_con_fci = float(max(nivel.rolling(5, min_periods=1).min().max(), nivel.iloc[-1]))
         con_fci = movimientos[:-1] + de_fci + [
             (hoy, float(tenencias.iloc[-1] + caja.iloc[-1]) + valor_fci)]
         if (hoy - min(f for f, _ in con_fci)).days / 365.25 >= 0.25:
@@ -897,6 +912,10 @@ def evolucion(posiciones, trades=None, n_ruedas: int = 30, flujos_fci: dict = No
         # En evaluación (`?lab=12`): ver los dos bloques de arriba.
         "cartera_12m": cartera_12m,
         "tir_con_fci_pct": tir_con_fci,
+        "resultado_con_fci_usd": None if resultado_con_fci is None else round(resultado_con_fci, 2),
+        "puesto_max_con_fci_usd": None if tope_con_fci is None else round(tope_con_fci, 2),
+        "rendimiento_con_fci_pct": (round(resultado_con_fci / tope_con_fci * 100, 2)
+                                    if tope_con_fci and tope_con_fci > 0 else None),
         "fci_sin_flujos": fci_sin_flujos,
         # Lo que ganó o perdió sobre la plata que salió del bolsillo: el mismo
         # número que suman los KPIs de arriba (abierto + realizado).

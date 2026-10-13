@@ -1126,12 +1126,12 @@ function senales(R) {
         titulo: t("Sobre lo que invertiste", "On what you invested"), valor: pct(ev.rendimiento_capital_pct, 1),
         frase: t(`Lo máximo que tuviste invertido a la vez fueron ${usd(ev.puesto_max_usd, 0)} y, contando lo que vale hoy, lo que vendiste y los dividendos, `
                  + `estás ${usd(Math.abs(ev.resultado_usd), 0)} ${ev.resultado_usd < 0 ? "abajo" : "arriba"}: ${pct(ev.rendimiento_capital_pct, 1)}.`
-                 + (ev.rendimiento_operacion_pct != null ? ` Por cada dólar comprado (${usd(ev.comprado_usd, 0)} en total) quedó en promedio ${pct(ev.rendimiento_operacion_pct, 1)}.` : "")
-                 + (anual != null ? ` Repartido en el tiempo que estuvo puesta la plata, ${pct(anual, 1)} por año; una letra del Tesoro daba ${pct(rf, 1)}.` : ""),
+                 + (ev.rendimiento_con_fci_pct != null ? ` Contando los FCI, ${pct(ev.rendimiento_con_fci_pct, 1)}.` : "")
+                 + (ev.rendimiento_operacion_pct != null ? ` Por cada dólar comprado (${usd(ev.comprado_usd, 0)} en total) quedó en promedio ${pct(ev.rendimiento_operacion_pct, 1)}.` : ""),
                  `The most you had invested at once was ${usd(ev.puesto_max_usd, 0)} and, counting what it's worth today, what you sold and the dividends, `
                  + `you're ${usd(Math.abs(ev.resultado_usd), 0)} ${ev.resultado_usd < 0 ? "down" : "up"}: ${pct(ev.rendimiento_capital_pct, 1)}.`
-                 + (ev.rendimiento_operacion_pct != null ? ` Each dollar bought (${usd(ev.comprado_usd, 0)} in total) left ${pct(ev.rendimiento_operacion_pct, 1)} on average.` : "")
-                 + (anual != null ? ` Spread over the time the money was in, ${pct(anual, 1)} a year; a T-bill paid ${pct(rf, 1)}.` : "")) } : {}),
+                 + (ev.rendimiento_con_fci_pct != null ? ` Counting the funds, ${pct(ev.rendimiento_con_fci_pct, 1)}.` : "")
+                 + (ev.rendimiento_operacion_pct != null ? ` Each dollar bought (${usd(ev.comprado_usd, 0)} in total) left ${pct(ev.rendimiento_operacion_pct, 1)} on average.` : "")) } : {}),
       ...(conCapital(ev) ? {} : {
       titulo: t("Sobre lo que pusiste", "On what you put in"), valor: pct(ev.rendimiento_pct, 1),
       frase: t(`Pusiste ${usd(ev.puesto_neto_usd, 0)} y, contando lo que vale hoy, lo que vendiste y los dividendos, `
@@ -1385,7 +1385,8 @@ function InfoCifras({ R }) {
                  conCapital(ev) ? t(`sobre ${usd(ev.puesto_max_usd, 0)} invertidos como máximo`, `on ${usd(ev.puesto_max_usd, 0)} invested at most`)
                                 : t(`sobre ${usd(ev.puesto_neto_usd, 0)} puestos`, `on ${usd(ev.puesto_neto_usd, 0)} put in`))}
       {ev?.rendimiento_pct != null && fig(t("Rendimiento", "Return"), pct(conCapital(ev) ? ev.rendimiento_capital_pct : ev.rendimiento_pct, 1), signo(ev.resultado_usd),
-                 anual != null ? t(`${pct(anual, 1)} por año desde la primera compra`, `${pct(anual, 1)} a year since the first purchase`)
+                 conCapital(ev) ? t("sin FCI, sobre lo máximo invertido", "without funds, on the most invested")
+                 : anual != null ? t(`${pct(anual, 1)} por año desde la primera compra`, `${pct(anual, 1)} a year since the first purchase`)
                                : t("sobre lo que pusiste", "on what you put in"))}
     </div>);
 }
@@ -3507,14 +3508,42 @@ function RendimientoTotal({ ev }) {
             t("Exportar CSV", "Export CSV")].map((opc) => (
             <div key={opc} className="pie" style={{ margin: 0, padding: "7px 11px", cursor: "pointer" }}>{opc}</div>))}
         </div>)}
+      {conCapital(ev) ? (
+        /* `?lab=12`: el rendimiento total, con los fondos y sin ellos, uno al
+           lado del otro. Es lo ganado sobre lo máximo que hubo invertido, no una
+           tasa anual: la TIR de la cartera va en su propio panel. */
+        <div style={{ display: "flex", gap: 36, flexWrap: "wrap", marginTop: 6 }}>
+          <div style={{ flex: "1 1 260px" }}>
+            <div className="pie" style={{ margin: 0 }}>{t("Desde que empezaste a invertir · con FCI", "Since you started investing · with funds")}</div>
+            {ev.rendimiento_con_fci_pct != null ? (<>
+              <div style={{ fontSize: 30, fontWeight: 700 }} className={signo(ev.resultado_con_fci_usd)}>{pct(ev.rendimiento_con_fci_pct)}</div>
+              <div style={{ fontSize: 15, marginTop: 2 }} className={signo(ev.resultado_con_fci_usd)}>
+                {t(`${usd(ev.resultado_con_fci_usd)} sobre ${usd(ev.puesto_max_con_fci_usd)}, lo máximo invertido entre bolsa y fondos`,
+                   `${usd(ev.resultado_con_fci_usd)} on ${usd(ev.puesto_max_con_fci_usd)}, the most invested across stocks and funds`)}</div>
+            </>) : (<>
+              <div style={{ fontSize: 30, fontWeight: 700, color: "var(--texto-3)" }}>—</div>
+              <div className="pie" style={{ marginTop: 2 }}>
+                {(ev.fci_sin_flujos || []).length > 0
+                  ? <>{t("Falta la historia de suscripciones y rescates de ", "The subscription and redemption history is missing for ")}
+                      <b>{ev.fci_sin_flujos.join(", ")}</b>
+                      {t(": se completa volviendo a importar los FCI desde Cocos.", ": it fills in by importing the funds from Cocos again.")}</>
+                  : t("Esta cartera no tiene FCI: es el mismo número de al lado.", "This portfolio has no funds: it's the same number as the one beside it.")}
+              </div></>)}
+          </div>
+          <div style={{ flex: "1 1 260px" }}>
+            <div className="pie" style={{ margin: 0 }}>{t("Sólo bolsa · sin FCI", "Stocks only · without funds")}</div>
+            <div style={{ fontSize: 30, fontWeight: 700 }} className={signo(ev.resultado_usd)}>{pct(ev.rendimiento_capital_pct)}</div>
+            <div style={{ fontSize: 15, marginTop: 2 }} className={signo(ev.resultado_usd)}>
+              {t(`${usd(ev.resultado_usd)} sobre ${usd(ev.puesto_max_usd)}, lo máximo que tuviste invertido`,
+                 `${usd(ev.resultado_usd)} on ${usd(ev.puesto_max_usd)}, the most you had invested`)}</div>
+          </div>
+        </div>
+      ) : (<>
       <div style={{ fontSize: 30, fontWeight: 700, marginTop: 6 }}
-           className={signo(ev.resultado_usd)}>{pct(conCapital(ev) ? ev.rendimiento_capital_pct : ev.rendimiento_pct)}</div>
+           className={signo(ev.resultado_usd)}>{pct(ev.rendimiento_pct)}</div>
       <div style={{ fontSize: 15, marginTop: 2 }} className={signo(ev.resultado_usd)}>
-        {conCapital(ev)
-          ? t(`${usd(ev.resultado_usd)} sobre ${usd(ev.puesto_max_usd)}, lo máximo que tuviste invertido`,
-              `${usd(ev.resultado_usd)} on ${usd(ev.puesto_max_usd)}, the most you had invested`)
-          : t(`${usd(ev.resultado_usd)} sobre ${usd(ev.puesto_neto_usd)} puestos de tu bolsillo`,
-              `${usd(ev.resultado_usd)} on ${usd(ev.puesto_neto_usd)} out of your own pocket`)}</div>
+        {t(`${usd(ev.resultado_usd)} sobre ${usd(ev.puesto_neto_usd)} puestos de tu bolsillo`,
+           `${usd(ev.resultado_usd)} on ${usd(ev.puesto_neto_usd)} out of your own pocket`)}</div></>)}
       {conCapital(ev) && ev.rendimiento_operacion_pct != null && (
         <div className="pie" style={{ marginTop: 6 }}>
           {t(`Promedio por operación: `, `Average per trade: `)}<b>{pct(ev.rendimiento_operacion_pct)}</b>
@@ -4000,14 +4029,12 @@ function PasosModelos({ M, listos }) {
 /* PNL-05 · la tasa anual de los últimos doce meses y cómo llegó hasta ahí.
    Va en su propia tarjeta: mezclada con el resultado acumulado eran dos curvas
    en distinta unidad compitiendo por la misma mirada. */
-/* `?lab=12` · dos tasas, cada una con su pregunta.
-   La de la cartera: ¿lo que tengo hoy le gana a un plazo fijo o a un bono? Mira
+/* `?lab=12` · la tasa de la cartera: ¿lo que tengo hoy le gana a un plazo fijo o a un bono? Mira
    la cartera de hoy como si se hubiera tenido doce meses, aunque se haya
-   comprado ayer. La total: ¿cuánto gané o perdí desde que invierto? Sin FCI es
-   la gestión activa; con FCI, activa más pasiva. */
+   comprado ayer. Cuánto se ganó desde que se invierte no es una tasa anual: va
+   en el panel de rendimiento total, con FCI y sin FCI. */
 function TirCartera({ ev }) {
   const k = ev.cartera_12m;
-  const faltan = ev.fci_sin_flujos || [];
   return (
     <div className="panel">
       <h3>{t("TIR de la cartera · 12 meses", "Portfolio IRR · 12 months")}
@@ -4039,31 +4066,6 @@ function TirCartera({ ev }) {
           {t(" cotiza hace menos de un mes: entra sin sumar ni restar.",
              " has been listed for less than a month: it enters flat.")}
         </div>)}
-      {ev.tir_anual_pct != null && (<>
-        <h3 style={{ marginTop: 18 }}>{t("TIR total · desde la primera compra", "Total IRR · since the first purchase")}
-          <span className="pie" style={{ margin: 0, marginLeft: "auto" }}>
-            {t(`${num(ev.anos, 1)} años, desde el ${ev.desde}`, `${num(ev.anos, 1)} years, since ${ev.desde}`)}</span>
-        </h3>
-        <div className="lab-tirgrande">
-          <b className={signo(ev.tir_anual_pct)}>{pct(ev.tir_anual_pct)}</b>
-          <span>{t("anual, sin FCI · gestión activa", "annual, without funds · active management")}</span>
-        </div>
-        {ev.tir_con_fci_pct != null && (
-          <div className="lab-tirgrande">
-            <b className={signo(ev.tir_con_fci_pct)}>{pct(ev.tir_con_fci_pct)}</b>
-            <span>{t("anual, con FCI · gestión activa + pasiva", "annual, with funds · active + passive management")}</span>
-          </div>)}
-        <div className="pie" style={{ marginTop: 6 }}>
-          {t("Cuánto ganaste o perdiste desde que invertís, como tasa anual: cada dólar cuenta desde el día que entró. "
-            + "Sin FCI mide sólo la bolsa. Con FCI suma la plata que espera en los fondos: vender un papel y dejarlo ahí no cuenta como retiro.",
-            "How much you made or lost since you started investing, as an annual rate: each dollar counts from the day it came in. "
-            + "Without funds it measures the stock side only. With funds it adds the money waiting there: selling a stock and parking it is not a withdrawal.")}
-          {ev.tir_con_fci_pct == null && faltan.length > 0 && <>{" "}
-            {t("Con FCI todavía no se puede calcular: falta la historia de suscripciones y rescates de ",
-               "With funds it can't be calculated yet: the subscription and redemption history is missing for ")}
-            <b>{faltan.join(", ")}</b>
-            {t(". Se completa volviendo a importar los FCI desde Cocos.", ". It fills in by importing the funds from Cocos again.")}</>}
-        </div></>)}
     </div>
   );
 }
@@ -4529,9 +4531,7 @@ function Resumen({ d, ev, cartera, cerrado, real, filas }) {
         {tir != null && fig(conCartera12m(ev) ? t("TIR cartera 12 m", "Portfolio IRR 12 m") : t("TIR 12 meses", "IRR 12 months"),
              pct(tir, 1), signo(tir),
              ev.tir_anual_pct == null ? null
-             : conCartera12m(ev)
-               ? t(`total ${pct(ev.tir_anual_pct, 1)}`, `total ${pct(ev.tir_anual_pct, 1)}`)
-                 + (ev.tir_con_fci_pct != null ? t(` · con FCI ${pct(ev.tir_con_fci_pct, 1)}`, ` · with funds ${pct(ev.tir_con_fci_pct, 1)}`) : "")
+             : conCartera12m(ev) ? t("lo que tenés hoy, tenido un año", "what you hold today, held for a year")
                : t(`desde el inicio ${pct(ev.tir_anual_pct, 1)}`,
                    `since inception ${pct(ev.tir_anual_pct, 1)}`))}
       </div>

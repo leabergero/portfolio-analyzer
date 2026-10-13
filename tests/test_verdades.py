@@ -971,6 +971,14 @@ def test_la_tir_con_fci_no_cuenta_como_retiro_lo_que_va_a_la_caja():
     assert casi(con["tir_con_fci_pct"], esperada, 0.02), f"{con['tir_con_fci_pct']} vs {esperada}"
     assert con["tir_anual_pct"] > con["tir_con_fci_pct"], \
         "la bolsa sola rindió 10 % en seis meses; con la caja adentro, 15 % en 21"
+    # El rendimiento total, uno al lado del otro: la bolsa ganó 100 sobre 1.000;
+    # con el fondo, 150 sobre los mismos 1.000 (pasar la plata a la caja no es
+    # capital nuevo).
+    assert casi(con["rendimiento_capital_pct"], 10.0, 0.01), con["rendimiento_capital_pct"]
+    assert casi(con["resultado_con_fci_usd"], 150.0, 0.01) and casi(con["puesto_max_con_fci_usd"], 1000.0, 0.01) \
+        and casi(con["rendimiento_con_fci_pct"], 15.0, 0.01), \
+        (con["resultado_con_fci_usd"], con["puesto_max_con_fci_usd"], con["rendimiento_con_fci_pct"])
+    assert sin["rendimiento_con_fci_pct"] is None, "sin flujos tampoco hay rendimiento con FCI"
 
 
 def test_los_flujos_de_un_fci_llevan_fecha_signo_y_el_mep_de_su_dia():
