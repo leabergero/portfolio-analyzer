@@ -578,7 +578,7 @@ def tir(movimientos) -> float:
     return round((bajo + alto) / 2 * 100, 2)
 
 
-def evolucion(posiciones, trades=None, n_ruedas: int = 30) -> dict:
+def evolucion(posiciones, trades=None, n_ruedas: int = 30, flujos_fci: dict = None) -> dict:
     """Cómo se movió la cartera en el tiempo: rendimiento acumulado y últimas ruedas.
 
     Reconstruye la cartera **como fue**, no como quedó: cada posición cerrada
@@ -779,6 +779,64 @@ def evolucion(posiciones, trades=None, n_ruedas: int = 30) -> dict:
     movimientos.append((hoy, float(tenencias.iloc[-1] + caja.iloc[-1])))
     anos = (hoy - px.index[0]).days / 365.25
 
+    # ── La TIR total con los FCI adentro: gestión activa + pasiva ────────────
+    # La de arriba mide la bolsa sola. Con los FCI, vender un papel y dejar la
+    # plata en el fondo no es un retiro —el rescate de un lado y la suscripción
+    # del otro se cancelan—, y lo que rindió la caja mientras esperaba suma.
+    # Hacen falta las suscripciones y rescates con su fecha (`store.flujos_fci`,
+    # que deja el importador de Cocos): con la tenencia resumida no hay tasa.
+    # Si a un fondo que hoy tenés le faltan, no se calcula y se dice cuál.
+    flujos_fci = flujos_fci or {}
+    fci_sin_flujos = sorted(fci - set(flujos_fci))
+    tir_con_fci = None
+    if flujos_fci and not fci_sin_flujos:
+        de_fci = [(pd.Timestamp(f), -float(usd)) for lista in flujos_fci.values() for f, usd in lista]
+        con_fci = movimientos[:-1] + de_fci + [
+            (hoy, float(tenencias.iloc[-1] + caja.iloc[-1]) + valor_fci)]
+        if (hoy - min(f for f, _ in con_fci)).days / 365.25 >= 0.25:
+            tir_con_fci = tir(con_fci)
+
+    # ── La cartera de HOY, como si se hubiera tenido los últimos 12 meses ────
+    # Es la tasa que se compara contra un plazo fijo o un bono: no pregunta qué
+    # hiciste, pregunta qué habría rendido en un año lo que tenés ahora, aunque
+    # lo hayas comprado ayer. Por eso usa las cantidades de hoy y los precios de
+    # hace doce meses, sin compras ni ventas en el medio. Sin dividendos: es
+    # variación de precio.
+    #
+    # Un papel que hace doce meses no cotizaba (una salida a bolsa) se estima:
+    # lo que rindió desde que cotiza, llevado a doce meses en proporción.
+    # ponytail: proporción lineal, con piso en −95 % y sólo desde _DIAS_MIN de
+    # cotización (antes entra plano, sin sumar ni restar). Si esos papeles
+    # llegan a pesar, usar la serie de un comparable en vez de estirar la suya.
+    _DIAS_MIN = 30
+    hace_un_ano = hoy - pd.DateOffset(months=12)
+    v0 = v1 = 0.0
+    estimados, planos = [], []
+    for t, q in cant.iloc[-1].items():
+        if q <= 0:
+            continue
+        s = series[t].dropna()
+        b = float(px[t].iloc[-1])
+        previos = s[s.index <= hace_un_ano]
+        if len(previos):
+            a = float(previos.iloc[-1])
+        else:
+            dias = (hoy - s.index[0]).days
+            if dias >= _DIAS_MIN and float(s.iloc[0]) > 0:
+                r = max((b / float(s.iloc[0]) - 1) * 365.25 / dias, -0.95)
+                a = b / (1 + r)
+                estimados.append({"ticker": t, "desde": str(s.index[0].date())})
+            else:
+                a = b
+                planos.append(t)
+        v0 += q * a
+        v1 += q * b
+    cartera_12m = None if v0 <= 0 else {
+        "tir_pct": round((v1 / v0 - 1) * 100, 2),
+        "desde": str(hace_un_ano.date()),
+        "valor_hace_12m_usd": round(v0, 2), "valor_hoy_usd": round(v1, 2),
+        "estimados": estimados, "planos": sorted(planos)}
+
     def movimientos_de(desde, hasta):
         """La cartera vista como una sola inversión entre dos fechas.
 
@@ -836,6 +894,10 @@ def evolucion(posiciones, trades=None, n_ruedas: int = 30) -> dict:
         "tir_anual_pct": tir(movimientos) if anos >= 0.25 else None,
         "anos": round(anos, 2),
         "ultimos_12m": ventana(12),
+        # En evaluación (`?lab=12`): ver los dos bloques de arriba.
+        "cartera_12m": cartera_12m,
+        "tir_con_fci_pct": tir_con_fci,
+        "fci_sin_flujos": fci_sin_flujos,
         # Lo que ganó o perdió sobre la plata que salió del bolsillo: el mismo
         # número que suman los KPIs de arriba (abierto + realizado).
         "resultado_usd": round(final, 2),

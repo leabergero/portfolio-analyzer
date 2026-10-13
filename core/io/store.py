@@ -206,6 +206,33 @@ def fijar_opiniones(nombre: str, datos) -> None:
         del todas[nombre]
     _escribir(_opiniones(), todas)
 
+def _flujos_fci() -> Path:
+    return _dir() / "fci_flujos.json"
+
+
+def flujos_fci(nombre: str) -> dict:
+    """Las suscripciones y rescates de cada FCI de la cartera, con su fecha y en
+    dólares: {ticker: [[fecha, usd], ...]}, suscripción positiva y rescate
+    negativo.
+
+    La tenencia y el resultado de un FCI se guardan resumidos (ver
+    `cocos.tenencias_fci`), y con un resumen no se puede calcular una tasa: hace
+    falta saber cuándo entró y salió cada peso. Esto es lo que permite la TIR
+    de la cartera con los FCI adentro, al lado de la de bolsa sola.
+    """
+    return _leer(_flujos_fci()).get(nombre) or {}
+
+
+def fijar_flujos_fci(nombre: str, flujos: dict) -> None:
+    """Pisa los flujos de FCI de una cartera con los de la última importación."""
+    # Por fondo y no la cartera entera: dos cuentas pueden volcar a la misma
+    # cartera, y lo que una importó no lo borra la otra. Un fondo ya rescatado
+    # del todo se queda: sus flujos siguen siendo historia cierta.
+    todas = _leer(_flujos_fci())
+    todas[nombre] = {**(todas.get(nombre) or {}), **(flujos or {})}
+    _escribir(_flujos_fci(), todas)
+
+
 _CAMPOS = ("ticker", "buy_date", "buy_price", "qty",
            "commissions", "source", "currency", "asset_type", "notes")
 

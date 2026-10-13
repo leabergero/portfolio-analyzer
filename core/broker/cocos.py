@@ -738,6 +738,9 @@ def fci_tracking():
     salida.sort(key=lambda x: x["valor_actual"], reverse=True)
     return {"fci": salida, "cortado": hist["cortado"], "total_movs": len(movs),
             "trades": cerradas["trades"], "total_usd": cerradas["total_usd"],
+            # Con el historial cortado faltan los movimientos más viejos: una
+            # tasa armada con eso sería otra cosa, así que no se guarda nada.
+            "flujos": None if hist["cortado"] else _flujos_fci(movs),
             "cuenta": _est().get("cuenta")}
 
 
@@ -759,6 +762,31 @@ def fci_tracking():
 #      operaciones cerradas sin decir nada que el total no diga mejor.
 
 LOTE_RESULTADOS_FCI = "cocos-fci"
+
+
+def _flujos_fci(movs: list) -> dict:
+    """Cada suscripción y rescate con su fecha, en dólares al MEP de ese día:
+    {ticker: [[fecha, usd], ...]}, suscripción positiva y rescate negativo.
+
+    Es el mismo criterio de conversión que `_resultados_realizados`, sin
+    aparear nada: para una tasa lo que importa es cuándo se movió la plata.
+    """
+    flujos = {}
+    for m in reversed(movs):
+        tipo = m.get("movementType")
+        if tipo not in ("SUBSCRIPTION", "REDEMPTION"):
+            continue
+        tk, fecha = m.get("ticker"), m.get("fecha")
+        importe = abs(m.get("amount") or 0)
+        if not tk or not fecha or not importe:
+            continue
+        usd = (importe if (m.get("currency") or "ARS").upper() != "ARS"
+               else mep.a_usd(importe, fecha))
+        if not usd:
+            continue
+        flujos.setdefault(tk, []).append(
+            [str(fecha)[:10], round(usd if tipo == "SUBSCRIPTION" else -usd, 4)])
+    return flujos
 
 
 def _resultados_realizados(movs: list) -> dict:
@@ -1172,7 +1200,8 @@ def tenencias_fci():
             "currency": moneda, "asset_type": "FCI",
             "notes": p.get("instrument_short_name") or "",
         })
-    return {"lotes": lotes, "cuenta": _est().get("cuenta")}
+    return {"lotes": lotes, "cuenta": _est().get("cuenta"),
+            "flujos": seguimiento.get("flujos")}
 
 
 def fondos_disponibles():

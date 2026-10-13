@@ -40,6 +40,10 @@ const LAB1 = LAB === "1" || LAB === "11";
 // Es la app de todos los días con ese único cambio.
 const LAB_CAPITAL = new URLSearchParams(location.search).get("lab") === "12";
 const conCapital = (ev) => LAB_CAPITAL && ev?.rendimiento_capital_pct != null;
+// También en el 12: la TIR de la cartera es la de HOY tenida doce meses (la que
+// se compara contra un plazo fijo), no la de la historia real del último año.
+const conCartera12m = (ev) => LAB_CAPITAL && ev?.cartera_12m?.tir_pct != null;
+const tirCartera = (ev) => (conCartera12m(ev) ? ev.cartera_12m.tir_pct : ev?.ultimos_12m?.tir_pct);
 const LAB_PIEL = ["1", "2", "3", "4", "11"].includes(LAB);
 const LAB_INFO = ["1", "5", "6", "7", "11"].includes(LAB);
 if (LAB) {
@@ -1175,11 +1179,16 @@ function senales(R) {
     valor: `${pct(capm.retorno_cartera_pct, 0)} vs ${pct(capm.retorno_benchmark_pct, 0)}`,
     frase: t(`Rindió ${pct(capm.retorno_cartera_pct, 1)} anual contra ${pct(capm.retorno_benchmark_pct, 1)} del ${capm.benchmark_nombre}. Cuando el índice sube 10 %, la cartera tiende a subir ${num(capm.beta * 10, 1)} %.`,
              `It returned ${pct(capm.retorno_cartera_pct, 1)} a year against ${pct(capm.retorno_benchmark_pct, 1)} for the ${capm.benchmark_nombre}. When the index rises 10 %, the portfolio tends to rise ${num(capm.beta * 10, 1)} %.`) });
-  if (ev?.ultimos_12m?.tir_pct != null) {
-    const tir = ev.ultimos_12m.tir_pct;
+  if (tirCartera(ev) != null) {
+    const tir = tirCartera(ev);
     add({ id: "tir12", q: "mercado", nivel: tir < 0 ? "mal" : tir < rf ? "ojo" : "ok",
       titulo: t("La cartera, últimos 12 meses", "The portfolio, last 12 months"), valor: pct(tir, 1),
-      frase: t(`En los últimos 12 meses la cartera rindió ${pct(tir, 1)} anual, contra ${pct(rf, 1)} de una letra del Tesoro. `
+      frase: conCartera12m(ev)
+        ? t(`Lo que tenés hoy, tenido los últimos 12 meses, habría rendido ${pct(tir, 1)}, contra ${pct(rf, 1)} de una letra del Tesoro. `
+            + "Es la tasa para compararla con otra inversión, no lo que ganaste: no mira cuándo compraste.",
+            `What you hold today, held over the last 12 months, would have returned ${pct(tir, 1)}, against ${pct(rf, 1)} for a T-bill. `
+            + "It's the rate to compare it with another investment, not what you made: it ignores when you bought.")
+        : t(`En los últimos 12 meses la cartera rindió ${pct(tir, 1)} anual, contra ${pct(rf, 1)} de una letra del Tesoro. `
                + "Es la tasa para compararla con otra inversión, no lo que ganaste sobre lo que pusiste.",
                `Over the last 12 months the portfolio returned ${pct(tir, 1)} a year, against ${pct(rf, 1)} for a T-bill. `
                + "It's the rate to compare it with another investment, not what you made on what you put in.") });
@@ -3991,7 +4000,76 @@ function PasosModelos({ M, listos }) {
 /* PNL-05 · la tasa anual de los últimos doce meses y cómo llegó hasta ahí.
    Va en su propia tarjeta: mezclada con el resultado acumulado eran dos curvas
    en distinta unidad compitiendo por la misma mirada. */
+/* `?lab=12` · dos tasas, cada una con su pregunta.
+   La de la cartera: ¿lo que tengo hoy le gana a un plazo fijo o a un bono? Mira
+   la cartera de hoy como si se hubiera tenido doce meses, aunque se haya
+   comprado ayer. La total: ¿cuánto gané o perdí desde que invierto? Sin FCI es
+   la gestión activa; con FCI, activa más pasiva. */
+function TirCartera({ ev }) {
+  const k = ev.cartera_12m;
+  const faltan = ev.fci_sin_flujos || [];
+  return (
+    <div className="panel">
+      <h3>{t("TIR de la cartera · 12 meses", "Portfolio IRR · 12 months")}
+        <span className="pie" style={{ margin: 0, marginLeft: "auto" }}>
+          {t(`la cartera de hoy, tenida desde el ${k.desde}`, `today's portfolio, held since ${k.desde}`)}</span>
+      </h3>
+      <div className="lab-tirgrande">
+        <b className={signo(k.tir_pct)}>{pct(k.tir_pct)}</b>
+        <span>{t("anual, comparable contra un plazo fijo o un bono", "annual, comparable against a term deposit or a bond")}</span>
+      </div>
+      <div className="pie" style={{ marginTop: 6 }}>
+        {t(`Lo que tenés hoy valía ${usd(k.valor_hace_12m_usd)} hace doce meses y vale ${usd(k.valor_hoy_usd)}. `
+          + `Es lo que habría rendido esta cartera si la hubieras tenido todo el año, aunque la hayas comprado ayer: `
+          + `no cuenta compras, ventas ni dividendos.`,
+          `What you hold today was worth ${usd(k.valor_hace_12m_usd)} twelve months ago and is worth ${usd(k.valor_hoy_usd)}. `
+          + `It's what this portfolio would have returned had you held it all year, even if you bought it yesterday: `
+          + `it ignores purchases, sales and dividends.`)}
+      </div>
+      {k.estimados.length > 0 && (
+        <div className="pie">
+          {t("Estimado: ", "Estimated: ")}
+          <b>{k.estimados.map((e) => `${e.ticker} (${t("cotiza desde", "listed since")} ${e.desde})`).join(", ")}</b>
+          {t(". No tiene un año de historia: lo que rindió desde que cotiza se llevó a doce meses en proporción.",
+             ". It lacks a year of history: its return since listing was scaled to twelve months.")}
+        </div>)}
+      {k.planos.length > 0 && (
+        <div className="pie">
+          <b>{k.planos.join(", ")}</b>
+          {t(" cotiza hace menos de un mes: entra sin sumar ni restar.",
+             " has been listed for less than a month: it enters flat.")}
+        </div>)}
+      {ev.tir_anual_pct != null && (<>
+        <h3 style={{ marginTop: 18 }}>{t("TIR total · desde la primera compra", "Total IRR · since the first purchase")}
+          <span className="pie" style={{ margin: 0, marginLeft: "auto" }}>
+            {t(`${num(ev.anos, 1)} años, desde el ${ev.desde}`, `${num(ev.anos, 1)} years, since ${ev.desde}`)}</span>
+        </h3>
+        <div className="lab-tirgrande">
+          <b className={signo(ev.tir_anual_pct)}>{pct(ev.tir_anual_pct)}</b>
+          <span>{t("anual, sin FCI · gestión activa", "annual, without funds · active management")}</span>
+        </div>
+        {ev.tir_con_fci_pct != null && (
+          <div className="lab-tirgrande">
+            <b className={signo(ev.tir_con_fci_pct)}>{pct(ev.tir_con_fci_pct)}</b>
+            <span>{t("anual, con FCI · gestión activa + pasiva", "annual, with funds · active + passive management")}</span>
+          </div>)}
+        <div className="pie" style={{ marginTop: 6 }}>
+          {t("Cuánto ganaste o perdiste desde que invertís, como tasa anual: cada dólar cuenta desde el día que entró. "
+            + "Sin FCI mide sólo la bolsa. Con FCI suma la plata que espera en los fondos: vender un papel y dejarlo ahí no cuenta como retiro.",
+            "How much you made or lost since you started investing, as an annual rate: each dollar counts from the day it came in. "
+            + "Without funds it measures the stock side only. With funds it adds the money waiting there: selling a stock and parking it is not a withdrawal.")}
+          {ev.tir_con_fci_pct == null && faltan.length > 0 && <>{" "}
+            {t("Con FCI todavía no se puede calcular: falta la historia de suscripciones y rescates de ",
+               "With funds it can't be calculated yet: the subscription and redemption history is missing for ")}
+            <b>{faltan.join(", ")}</b>
+            {t(". Se completa volviendo a importar los FCI desde Cocos.", ". It fills in by importing the funds from Cocos again.")}</>}
+        </div></>)}
+    </div>
+  );
+}
+
 function TirVentana({ ev }) {
+  if (conCartera12m(ev)) return <TirCartera ev={ev} />;
   const c = colores();
   const v = ev.ultimos_12m;
   if (!v || v.tir_pct == null) return null;
@@ -4402,7 +4480,7 @@ function Resumen({ d, ev, cartera, cerrado, real, filas }) {
                                              { maximumFractionDigits: 0 });
   const total = ev ? ev.resultado_usd : cerrado != null ? d.pnl + cerrado : d.pnl;
   const totalPct = ev ? (conCapital(ev) ? ev.rendimiento_capital_pct : ev.rendimiento_pct) : null;
-  const tir = ev?.ultimos_12m?.tir_pct;
+  const tir = tirCartera(ev);
   const activos = new Set(filas.map((f) => f.ticker)).size;
   const dia = diaEtiqueta(d.dia_fecha);
   const fig = (et, val, tono, sub, cls = "") => (
@@ -4418,13 +4496,17 @@ function Resumen({ d, ev, cartera, cerrado, real, filas }) {
           <b>{cartera}</b> is worth <b>{moneda} {cifra}</b>.
           {d.pnl_dia != null && <> On the {dia === "today" ? "session today" : `session of ${dia}`} it{" "}
             {d.pnl_dia >= 0 ? "gained" : "lost"} <b className={signo(d.pnl_dia)}>{usd(Math.abs(d.pnl_dia))}</b>.</>}
-          {tir != null && <> Over the last twelve months it returned <b className={signo(tir)}>{pct(tir, 1)}</b> a year</>}
+          {tir != null && (conCartera12m(ev)
+            ? <> What you hold today would have returned <b className={signo(tir)}>{pct(tir, 1)}</b> over the last twelve months</>
+            : <> Over the last twelve months it returned <b className={signo(tir)}>{pct(tir, 1)}</b> a year</>)}
           {totalPct != null && <>; since the first purchase, <b className={signo(totalPct)}>{pct(totalPct, 1)}</b> in total</>}.
         </> : <>
           <b>{cartera}</b> vale <b>{moneda} {cifra}</b>.
           {d.pnl_dia != null && <> En la rueda {dia === "hoy" ? "de hoy" : `del ${dia}`}{" "}
             {d.pnl_dia >= 0 ? "ganó" : "perdió"} <b className={signo(d.pnl_dia)}>{usd(Math.abs(d.pnl_dia))}</b>.</>}
-          {tir != null && <> En los últimos doce meses rindió <b className={signo(tir)}>{pct(tir, 1)}</b> anual</>}
+          {tir != null && (conCartera12m(ev)
+            ? <> Lo que tenés hoy habría rendido <b className={signo(tir)}>{pct(tir, 1)}</b> en los últimos doce meses</>
+            : <> En los últimos doce meses rindió <b className={signo(tir)}>{pct(tir, 1)}</b> anual</>)}
           {totalPct != null && <>; desde la primera compra, <b className={signo(totalPct)}>{pct(totalPct, 1)}</b> en total</>}.
         </>}
       </p>
@@ -4444,9 +4526,14 @@ function Resumen({ d, ev, cartera, cerrado, real, filas }) {
         {fig(t("Abierto", "Open"), usd(d.pnl), signo(d.pnl), pct(d.pnl_pct, 1))}
         {cerrado != null && fig(t("Realizado", "Realized"), usd(cerrado), signo(cerrado),
              t(`${real.n} operaciones`, `${real.n} trades`))}
-        {tir != null && fig(t("TIR 12 meses", "IRR 12 months"), pct(tir, 1), signo(tir),
-             ev.tir_anual_pct != null ? t(`desde el inicio ${pct(ev.tir_anual_pct, 1)}`,
-                                          `since inception ${pct(ev.tir_anual_pct, 1)}`) : null)}
+        {tir != null && fig(conCartera12m(ev) ? t("TIR cartera 12 m", "Portfolio IRR 12 m") : t("TIR 12 meses", "IRR 12 months"),
+             pct(tir, 1), signo(tir),
+             ev.tir_anual_pct == null ? null
+             : conCartera12m(ev)
+               ? t(`total ${pct(ev.tir_anual_pct, 1)}`, `total ${pct(ev.tir_anual_pct, 1)}`)
+                 + (ev.tir_con_fci_pct != null ? t(` · con FCI ${pct(ev.tir_con_fci_pct, 1)}`, ` · with funds ${pct(ev.tir_con_fci_pct, 1)}`) : "")
+               : t(`desde el inicio ${pct(ev.tir_anual_pct, 1)}`,
+                   `since inception ${pct(ev.tir_anual_pct, 1)}`))}
       </div>
     </section>
   );

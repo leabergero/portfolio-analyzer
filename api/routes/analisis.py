@@ -106,7 +106,8 @@ def evolucion(nombre):
     if not pos:
         return _falta(nombre)
     return jsonify(portfolio.evolucion(pos, store.cargar_realizado(nombre),
-                                       request.args.get("ruedas", 30, type=int)))
+                                       request.args.get("ruedas", 30, type=int),
+                                       flujos_fci=store.flujos_fci(nombre)))
 
 
 @bp.get("/riesgo/<nombre>")

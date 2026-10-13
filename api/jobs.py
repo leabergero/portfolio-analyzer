@@ -138,7 +138,7 @@ MODELOS = {
     # canal que todo lo demás. Los endpoints sueltos siguen existiendo para
     # recalcular con otros parámetros.
     "evolucion":    ("Evolución",       lambda p, c: portfolio.evolucion(
-        p, store.cargar_realizado(c))),
+        p, store.cargar_realizado(c), flujos_fci=store.flujos_fci(c))),
     "riesgo":       ("Riesgo",          lambda p, c: risk.analizar(p)),
     "momentum":     ("Momentum",        lambda p, c: momentum.analizar(p)),
     "correlaciones": ("Correlaciones",  lambda p, c: portfolio.correlaciones(p)),

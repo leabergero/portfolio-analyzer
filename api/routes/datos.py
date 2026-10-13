@@ -391,6 +391,8 @@ def cocos_fci_resultados_importar():
                                  "Desasociala antes de importarla en otra."}), 409
 
     r = store.agregar_realizado(cartera, t["trades"], lote=cocos.LOTE_RESULTADOS_FCI)
+    if t.get("flujos") is not None:
+        store.fijar_flujos_fci(cartera, t["flujos"])
     if t.get("cuenta"):
         store.asociar_cuenta(t["cuenta"], cartera)
     return jsonify({"ok": True, "cartera": cartera, "total_usd": t["total_usd"],
@@ -429,6 +431,8 @@ def cocos_fci_importar():
                                  "Desasociala antes de importarla en otra."}), 409
 
     r = store.reemplazar_source(cartera, sources.SOURCE_FCI, t["lotes"])
+    if t.get("flujos") is not None:
+        store.fijar_flujos_fci(cartera, t["flujos"])
     if t.get("cuenta"):
         store.asociar_cuenta(t["cuenta"], cartera)
     return jsonify({"ok": True, "cartera": cartera, "cuenta_nueva": not previa,

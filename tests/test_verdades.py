@@ -907,6 +907,97 @@ def test_un_fci_suma_al_valor_pero_no_a_la_tir():
     assert "FONDO" in con["fci_aparte"], "y se dice en pantalla"
 
 
+def test_la_tir_de_la_cartera_es_la_de_hoy_tenida_doce_meses():
+    """La tasa que se compara contra un plazo fijo no mira qué hiciste: mira qué
+    habría rendido en un año lo que tenés hoy, aunque lo hayas comprado ayer.
+
+    AAA valía 100 hace doce meses y hoy 120. NUEVA salió a cotizar hace unas
+    diez semanas a 100 y vale 110: lo que rindió desde entonces se lleva a doce
+    meses en proporción, y se avisa que es una estimación.
+    """
+    import pandas as pd
+    from core.data import sources
+    evolucion = require("core.models.portfolio", "evolucion")
+    fechas = pd.bdate_range(end="2026-10-09", periods=400)
+    aaa = pd.Series(100.0, index=fechas); aaa.iloc[-1] = 120.0
+    nueva = pd.Series(100.0, index=fechas[-51:]); nueva.iloc[-1] = 110.0
+    series = {"AAA": aaa, "NUEVA": nueva}
+    pos = [{"ticker": "AAA", "buy_date": "2026-10-01", "buy_price": 119.0, "qty": 10, "currency": "USD"},
+           {"ticker": "NUEVA", "buy_date": "2026-10-01", "buy_price": 109.0, "qty": 1, "currency": "USD"}]
+    antes = sources.precios_base
+    try:
+        sources.precios_base = lambda t, *a, **k: series.get(t.upper(), pd.Series(dtype=float))
+        c = evolucion(pos, [])["cartera_12m"]
+    finally:
+        sources.precios_base = antes
+
+    dias = (fechas[-1] - fechas[-51]).days
+    nueva_hace_un_ano = 110.0 / (1 + 0.10 * 365.25 / dias)
+    esperado = (1200.0 + 110.0) / (1000.0 + nueva_hace_un_ano) - 1
+    assert casi(c["valor_hace_12m_usd"], 1000.0 + nueva_hace_un_ano, 0.01), c
+    assert casi(c["tir_pct"], esperado * 100, 0.01), f"{c['tir_pct']} vs {esperado * 100:.2f}"
+    assert [e["ticker"] for e in c["estimados"]] == ["NUEVA"], "el papel sin un año de historia se nombra"
+
+
+def test_la_tir_con_fci_no_cuenta_como_retiro_lo_que_va_a_la_caja():
+    """Gestión activa + pasiva. Se compran 1.000 de AAA, se venden a 1.100 y esa
+    plata se suscribe entera al fondo, que hoy vale 1.150.
+
+    Mirando la bolsa sola, la plata salió a los seis meses con 10 % de ganancia.
+    Con el FCI adentro, la venta y la suscripción se cancelan: quedan 1.000
+    puestos el primer día y 1.150 hoy, 21 meses después.
+    """
+    import pandas as pd
+    from core.data import sources
+    portfolio = require("core.models", "portfolio")
+    fechas = pd.bdate_range("2025-01-02", "2026-10-09")
+    series = {"AAA": pd.Series(100.0, index=fechas), "FONDO": pd.Series(1.15, index=fechas[-1:])}
+    fondo = {"ticker": "FONDO", "buy_date": "2025-07-01", "buy_price": 1.1, "qty": 1000,
+             "currency": "USD", "source": sources.SOURCE_FCI}
+    venta = {"ticker": "AAA", "qty": 10, "buy_price": 100.0, "sell_price": 110.0,
+             "buy_date": "2025-01-02", "sell_date": "2025-07-01", "currency": "USD",
+             "buy_comm": 0.0, "sell_comm": 0.0, "mep_compra": 1.0, "mep_venta": 1.0}
+    antes = sources.precios_base
+    try:
+        sources.precios_base = lambda t, *a, **k: series.get(t.upper(), pd.Series(dtype=float))
+        sin = portfolio.evolucion([fondo], [venta])
+        con = portfolio.evolucion([fondo], [venta], flujos_fci={"FONDO": [["2025-07-01", 1100.0]]})
+    finally:
+        sources.precios_base = antes
+
+    assert sin["tir_con_fci_pct"] is None and sin["fci_sin_flujos"] == ["FONDO"], \
+        "sin los flujos fechados no hay tasa, y se dice qué fondo falta"
+    esperada = portfolio.tir([(fechas[0], -1000.0), (fechas[-1], 1150.0)])
+    assert casi(con["tir_con_fci_pct"], esperada, 0.02), f"{con['tir_con_fci_pct']} vs {esperada}"
+    assert con["tir_anual_pct"] > con["tir_con_fci_pct"], \
+        "la bolsa sola rindió 10 % en seis meses; con la caja adentro, 15 % en 21"
+
+
+def test_los_flujos_de_un_fci_llevan_fecha_signo_y_el_mep_de_su_dia():
+    """Para la TIR con FCI hace falta cada suscripción y cada rescate con su
+    fecha, en dólares al MEP de ESE día: suscripción positiva, rescate negativo."""
+    flujos = require("core.broker.cocos", "_flujos_fci")
+    from core.broker import cocos as mod
+
+    mep_por_fecha = {"2025-01-10": 1000.0, "2026-01-10": 2000.0}
+    original = mod.mep.a_usd
+    mod.mep.a_usd = lambda importe, fecha, *a, **k: importe / mep_por_fecha[fecha]
+    try:
+        r = flujos([      # como los entrega el broker: del más nuevo al más viejo
+            {"movementType": "REDEMPTION", "ticker": "COCOSPPA", "fecha": "2026-01-10",
+             "currency": "ARS", "amount": 150000.0, "quantity": {"executed": -100.0}},
+            {"movementType": "SUBSCRIPTION", "ticker": "COCOUSDPA", "fecha": "2026-01-10",
+             "currency": "USD", "amount": 500.0, "quantity": {"executed": 480.0}},
+            {"movementType": "DIVIDEND", "ticker": "KO", "fecha": "2025-06-01", "currency": "USD", "amount": 3.0},
+            {"movementType": "SUBSCRIPTION", "ticker": "COCOSPPA", "fecha": "2025-01-10",
+             "currency": "ARS", "amount": 100000.0, "quantity": {"executed": 100.0}},
+        ])
+    finally:
+        mod.mep.a_usd = original
+    assert r == {"COCOSPPA": [["2025-01-10", 100.0], ["2026-01-10", -75.0]],
+                 "COCOUSDPA": [["2026-01-10", 500.0]]}, r
+
+
 def test_el_csv_propio_lleva_dividendos_y_cerradas():
     """Exportar es respaldar TODO: si no, cada reimportación pierde lo cargado a mano.
 
