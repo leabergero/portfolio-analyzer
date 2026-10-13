@@ -17,23 +17,16 @@
 
 const { useState, useEffect, useRef, useCallback, useMemo } = React;
 
-/* Rediseños en prueba: `?lab=1` (terminal), `?lab=2` (informe editorial),
-   `?lab=3` (neo-brutalista) y `?lab=4` (monitor CRT de fósforo). Esos cuatro
-   cambian la piel. Los labs 5, 6 y 7 dejan la piel de producción y cambian la
-   información: qué se muestra, en qué orden y qué se saca (ver `Info`).
-   Cada uno es una hoja aparte (web/labN.css) que pisa tokens y componentes,
-   más los pocos cambios de estructura que van detrás de `LAB` en este archivo.
-   Sin el flag la app queda exactamente como la de todos los días. La CSP no
-   deja scripts inline, por eso la hoja se cuelga desde acá y no desde el HTML. */
-// Sin `?lab` la app es el 11: desde el 2026-10-09 es la de todos los días. Los
-// otros quedan para mirar las pieles y vistas de referencia.
-const LAB = ["1", "2", "3", "4", "5", "6", "7"].includes(new URLSearchParams(location.search).get("lab"))
-  ? new URLSearchParams(location.search).get("lab") : "11";
-// El 1 junta lo elegido de los otros: su piel de terminal con la columna que se
-// esconde, y las preguntas del 6 como vista simple, que acá es un interruptor y
-// no un callejón con un botón de volver. Por eso es piel y es información.
-// El 11 es el 1 con los modelos nuevos (Monte Carlo FHS, Markowitz, BL, HRP y riesgo con historia larga): misma piel y vistas.
-const LAB1 = LAB === "1" || LAB === "11";
+/* Ya no hay labs: `?lab=N` no hace nada (dados de baja el 2026-10-13, con todo
+   aprobado). La app es la que fue el lab 11 —la piel de terminal del 1, las
+   vistas del 5 y los modelos nuevos—; sus hojas se siguen llamando lab1.css y
+   lab5.css, y el `data-lab="1"` del <html> es de lo que cuelgan sus reglas. La
+   CSP no deja scripts inline, por eso las hojas se cuelgan desde acá.
+   ponytail: las banderas quedaron fijas en vez de borradas. Las ramas que ya
+   no corren (otras pieles, el Monte Carlo viejo, la barra sin columna) se
+   podan al tocar cada sección, no de un saque sobre la app en producción. */
+const LAB = "11";
+const LAB1 = true;
 // Aprobado el 2026-10-13 (fue el lab 12). El rendimiento se mide sobre lo máximo
 // que hubo invertido a la vez, no sobre lo que queda puesto hoy —que baja con
 // cada venta aunque la plata espere en el FCI—. Y la TIR de la cartera es la
@@ -43,8 +36,8 @@ const LAB1 = LAB === "1" || LAB === "11";
 const conCapital = (ev) => ev?.rendimiento_capital_pct != null;
 const conCartera12m = (ev) => ev?.cartera_12m?.tir_pct != null;
 const tirCartera = (ev) => (conCartera12m(ev) ? ev.cartera_12m.tir_pct : ev?.ultimos_12m?.tir_pct);
-const LAB_PIEL = ["1", "2", "3", "4", "11"].includes(LAB);
-const LAB_INFO = ["1", "5", "6", "7", "11"].includes(LAB);
+const LAB_PIEL = true;
+const LAB_INFO = true;
 if (LAB) {
   document.documentElement.dataset.lab = LAB1 ? "1" : LAB;
   for (const n of LAB1 ? ["1", "5"] : [LAB]) {
@@ -188,7 +181,6 @@ const api = async (ruta, opciones) => {
   if (guardadoInviu) o.headers = { ...(o.headers || {}), "X-Sesion-Inviu": guardadoInviu };
   if (SIM_ACTIVA) o.headers = { ...(o.headers || {}), "X-Sim": SIM_ACTIVA };
   o.headers = { ...(o.headers || {}), "X-Mercado": MERCADO };
-  if (LAB === "11") o.headers["X-Lab"] = "11";
 
   // Si se corta la conexión (la notebook se durmió, cambió la red) `fetch`
   // rechaza y nadie llama al setState: la pantalla quedaba en "Calculando…"
@@ -5073,7 +5065,7 @@ function Markowitz({ d, cartera, bench, extras }) {
   useEffect(() => {
     let vivo = true;
     setBt(null);
-    api(`/api/markowitz/${encodeURIComponent(cartera)}/backtest?meses=${meses}&benchmark=${bench}${LAB === "11" ? "&lab=11" : ""}`)
+    api(`/api/markowitz/${encodeURIComponent(cartera)}/backtest?meses=${meses}&benchmark=${bench}`)
       .then((r) => vivo && setBt(r));
     return () => { vivo = false; };
   }, [cartera, meses, bench]);
@@ -5335,7 +5327,7 @@ function McPorActivo({ cartera, horizonte, escenario }) {
   const c = colores();
   const [d, setD] = useState(null);
   useEffect(() => { setD(null);
-    api(`/api/montecarlo/${encodeURIComponent(cartera)}/por-activo?horizonte=${horizonte}${LAB === "11" ? "&lab=11" : ""}${escenario ? `&escenario=${escenario}` : ""}`).then(setD);
+    api(`/api/montecarlo/${encodeURIComponent(cartera)}/por-activo?horizonte=${horizonte}${escenario ? `&escenario=${escenario}` : ""}`).then(setD);
   }, [cartera, horizonte, escenario]);
   if (!d) return <div className="cargando">{t("Simulando cada activo por separado…", "Simulating each asset separately…")}</div>;
   if (d.error) return <div className="aviso mal">{d.error}</div>;
@@ -5565,7 +5557,7 @@ function McMotores({ cartera, horizonte }) {
   // filas y la pregunta que contesta —¿el resultado depende del supuesto de
   // distribución?— hay que hacérsela siempre, no solo cuando uno se acuerda.
   useEffect(() => { setMotores(null);
-    api(`/api/montecarlo/${encodeURIComponent(cartera)}/motores?horizonte=${horizonte}${LAB === "11" ? "&lab=11" : ""}`)
+    api(`/api/montecarlo/${encodeURIComponent(cartera)}/motores?horizonte=${horizonte}`)
       .then(setMotores);
   }, [cartera, horizonte]);
 
@@ -5976,7 +5968,7 @@ function ObjetivosYBL({ cartera, extras, d, bench }) {
     // En el lab 11 se pide siempre: el BL que viene con el análisis es el de producción.
     if (Object.keys(manuales).length === 0 && LAB !== "11") { setBl(extras?.bl || null); return; }
     setBl("cargando");
-    api(`/api/blacklitterman/${encodeURIComponent(cartera)}${LAB === "11" ? "?lab=11" : ""}`, {
+    api(`/api/blacklitterman/${encodeURIComponent(cartera)}`, {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ manuales, benchmark: bench }) })
       .then((r) => vivo && setBl(r));
@@ -5988,7 +5980,7 @@ function ObjetivosYBL({ cartera, extras, d, bench }) {
   // `manuales`.
   useEffect(() => {
     let vivo = true;
-    api(`/api/hrp/${encodeURIComponent(cartera)}?benchmark=${bench}${LAB === "11" ? "&lab=11" : ""}`).then((r) => vivo && setHrp(r));
+    api(`/api/hrp/${encodeURIComponent(cartera)}?benchmark=${bench}`).then((r) => vivo && setHrp(r));
     return () => { vivo = false; };
   }, [cartera, bench]);
 
