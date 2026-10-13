@@ -67,7 +67,7 @@ def analizar(posiciones, views=None, benchmark: str = None,
              max_weight: float = None, lab: bool = False) -> dict:
     """views: [{"ticker", "ret" (% anual esperado), "confidence" (1-90)}]
 
-    lab (`?lab=11`): el punto de partida no es la ingeniería inversa de tus
+    lab (el modelo vigente; el nombre viene de cuando estaba a prueba): el punto de partida no es la ingeniería inversa de tus
     pesos sino el rendimiento esperado del modelo propuesto (historia encogida
     al CAPM de su mercado + riesgo país, `montecarlo.esperados`), con su Σ de
     largo plazo. Es lo que el equilibrio de BL quiere ser —el CAPM— medido

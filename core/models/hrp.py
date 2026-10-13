@@ -73,7 +73,7 @@ def _bisección_recursiva(cov: np.ndarray) -> np.ndarray:
 def optimizar(posiciones, benchmark: str = None, lab: bool = False) -> dict:
     """Pesos de HRP para esta cartera, comparables con los de Markowitz.
 
-    lab (`?lab=11`): Σ y ρ del modelo propuesto (`montecarlo.esperados`):
+    lab (el modelo vigente; el nombre viene de cuando estaba a prueba): Σ y ρ del modelo propuesto (`montecarlo.esperados`):
     historia larga de cada activo y ventana común sin ceros inventados; μ, que
     HRP no usa para los pesos, es el del modelo propuesto.
     """

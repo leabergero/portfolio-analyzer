@@ -62,8 +62,8 @@ def consultar(nombre, run_id):
 # ── Modelos sueltos ───────────────────────────────────────────────────────────
 
 def _lab() -> bool:
-    """`?lab=11`: el modelo propuesto (Monte Carlo FHS y Markowitz con sus
-    insumos) en vez del de producción, hasta que se apruebe."""
+    """Si va el modelo vigente desde el 2026-10-09 (Monte Carlo FHS y Markowitz
+    con sus insumos, historia larga). Siempre sí, salvo que un test lo apague."""
     from core.models.portfolio import HISTORIA_LARGA
     return HISTORIA_LARGA.get()
 
