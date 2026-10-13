@@ -978,7 +978,11 @@ def test_la_tir_con_fci_no_cuenta_como_retiro_lo_que_va_a_la_caja():
     assert casi(con["resultado_con_fci_usd"], 150.0, 0.01) and casi(con["puesto_max_con_fci_usd"], 1000.0, 0.01) \
         and casi(con["rendimiento_con_fci_pct"], 15.0, 0.01), \
         (con["resultado_con_fci_usd"], con["puesto_max_con_fci_usd"], con["rendimiento_con_fci_pct"])
-    assert sin["rendimiento_con_fci_pct"] is None, "sin flujos tampoco hay rendimiento con FCI"
+    assert not con["con_fci_aproximado"]
+    # Sin los movimientos fechados el resultado igual se conoce —lo que el fondo
+    # gana está en su costo y en lo cerrado—; la base es la de hoy, y se avisa.
+    assert casi(sin["resultado_con_fci_usd"], 150.0, 0.01) and casi(sin["rendimiento_con_fci_pct"], 15.0, 0.01) \
+        and sin["con_fci_aproximado"], (sin["resultado_con_fci_usd"], sin["rendimiento_con_fci_pct"])
 
 
 def test_los_flujos_de_un_fci_llevan_fecha_signo_y_el_mep_de_su_dia():

@@ -3518,8 +3518,16 @@ function RendimientoTotal({ ev }) {
             {ev.rendimiento_con_fci_pct != null ? (<>
               <div style={{ fontSize: 30, fontWeight: 700 }} className={signo(ev.resultado_con_fci_usd)}>{pct(ev.rendimiento_con_fci_pct)}</div>
               <div style={{ fontSize: 15, marginTop: 2 }} className={signo(ev.resultado_con_fci_usd)}>
-                {t(`${usd(ev.resultado_con_fci_usd)} sobre ${usd(ev.puesto_max_con_fci_usd)}, lo máximo invertido entre bolsa y fondos`,
-                   `${usd(ev.resultado_con_fci_usd)} on ${usd(ev.puesto_max_con_fci_usd)}, the most invested across stocks and funds`)}</div>
+                {ev.con_fci_aproximado
+                  ? t(`${usd(ev.resultado_con_fci_usd)} sobre ${usd(ev.puesto_max_con_fci_usd)} invertidos entre bolsa y fondos`,
+                      `${usd(ev.resultado_con_fci_usd)} on ${usd(ev.puesto_max_con_fci_usd)} invested across stocks and funds`)
+                  : t(`${usd(ev.resultado_con_fci_usd)} sobre ${usd(ev.puesto_max_con_fci_usd)}, lo máximo invertido entre bolsa y fondos`,
+                      `${usd(ev.resultado_con_fci_usd)} on ${usd(ev.puesto_max_con_fci_usd)}, the most invested across stocks and funds`)}</div>
+              {ev.con_fci_aproximado && (
+                <div className="pie" style={{ marginTop: 4 }}>
+                  {t("El resultado es exacto. La base es lo invertido hoy: para saber el máximo que hubo entre bolsa y fondos hacen falta las fechas de suscripciones y rescates, que se guardan al volver a importar los FCI desde Cocos.",
+                     "The result is exact. The base is what's invested today: knowing the most ever invested across stocks and funds needs the dates of subscriptions and redemptions, saved when the funds are imported from Cocos again.")}
+                </div>)}
             </>) : (<>
               <div style={{ fontSize: 30, fontWeight: 700, color: "var(--texto-3)" }}>—</div>
               <div className="pie" style={{ marginTop: 2 }}>

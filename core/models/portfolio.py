@@ -609,10 +609,11 @@ def evolucion(posiciones, trades=None, n_ruedas: int = 30, flujos_fci: dict = No
     # daba 14,9 % en vez de 11,6 %. Su valor sí suma al de la cartera: es plata
     # tuya y tiene que coincidir con el broker.
     fci = {str(p["ticker"]).upper() for p in posiciones if p.get("source") == _src.SOURCE_FCI}
-    valor_fci = 0.0
+    valor_fci = costo_fci = pnl_fci_cerrado = 0.0
     for l in lotes:
         if l["ticker"].upper() in fci:
             valor_fci += l.get("valor_usd") or 0.0
+            costo_fci += l.get("costo_usd") or 0.0
             fci_aparte.add(l["ticker"].upper())
             continue
         if l["costo_usd"] is None or not l["buy_date"]:
@@ -647,6 +648,7 @@ def evolucion(posiciones, trades=None, n_ruedas: int = 30, flujos_fci: dict = No
         # COCOUSDPA.
         if t.get("tipo") == "fci":
             fci_aparte.add(ticker)
+            pnl_fci_cerrado += ingreso - costo
             continue
         tramos.append((ticker, t["qty"], t["buy_date"], t["sell_date"], costo, ingreso))
 
@@ -810,6 +812,14 @@ def evolucion(posiciones, trades=None, n_ruedas: int = 30, flujos_fci: dict = No
             (hoy, float(tenencias.iloc[-1] + caja.iloc[-1]) + valor_fci)]
         if (hoy - min(f for f, _ in con_fci)).days / 365.25 >= 0.25:
             tir_con_fci = tir(con_fci)
+    elif fci or pnl_fci_cerrado:
+        # Sin los movimientos fechados igual se sabe cuánto ganaron los fondos:
+        # lo abierto contra su costo, y lo cerrado, que ya está en la historia.
+        # Lo que no se sabe es cuánto llegó a haber invertido entre bolsa y
+        # fondos en el pasado; queda lo de hoy (o el máximo de la bolsa sola, si
+        # es mayor), que es un piso: el porcentaje puede salir algo alto.
+        resultado_con_fci = final + (valor_fci - costo_fci) + pnl_fci_cerrado
+        tope_con_fci = max(tope, neto + costo_fci)
 
     # ── La cartera de HOY, como si se hubiera tenido los últimos 12 meses ────
     # Es la tasa que se compara contra un plazo fijo o un bono: no pregunta qué
@@ -912,6 +922,7 @@ def evolucion(posiciones, trades=None, n_ruedas: int = 30, flujos_fci: dict = No
         # En evaluación (`?lab=12`): ver los dos bloques de arriba.
         "cartera_12m": cartera_12m,
         "tir_con_fci_pct": tir_con_fci,
+        "con_fci_aproximado": resultado_con_fci is not None and not (flujos_fci and not fci_sin_flujos),
         "resultado_con_fci_usd": None if resultado_con_fci is None else round(resultado_con_fci, 2),
         "puesto_max_con_fci_usd": None if tope_con_fci is None else round(tope_con_fci, 2),
         "rendimiento_con_fci_pct": (round(resultado_con_fci / tope_con_fci * 100, 2)
