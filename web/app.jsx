@@ -4531,14 +4531,16 @@ function Resumen({ d, ev, cartera, cerrado, real, filas }) {
              usd(d.pnl_dia), signo(d.pnl_dia), pct(d.pnl_dia_pct))}
         {fig(t("Resultado total", "Total result"), usd(total), signo(total),
              ev ? (conCapital(ev)
-                    ? t(`${pct(totalPct, 1)} sobre ${usd(ev.puesto_max_usd, 0)} invertidos como máximo`,
-                        `${pct(totalPct, 1)} on ${usd(ev.puesto_max_usd, 0)} invested at most`)
+                    // El porcentaje tiene su propia cifra más abajo: acá no se repite.
+                    ? t("en bolsa, sin FCI", "stocks, without funds")
                     : t(`${pct(totalPct, 1)} sobre ${usd(ev.puesto_neto_usd, 0)} puestos`,
                         `${pct(totalPct, 1)} on ${usd(ev.puesto_neto_usd, 0)} put in`))
                 : t("abierto + cerrado", "open + realized"))}
         {fig(t("Abierto", "Open"), usd(d.pnl), signo(d.pnl), pct(d.pnl_pct, 1))}
         {cerrado != null && fig(t("Realizado", "Realized"), usd(cerrado), signo(cerrado),
              t(`${real.n} operaciones`, `${real.n} trades`))}
+        {conCapital(ev) && fig(t("Rendimiento total", "Total return"), pct(totalPct, 1), signo(total),
+             t(`sin FCI · sobre ${usd(ev.puesto_max_usd, 0)} invertidos`, `without funds · on ${usd(ev.puesto_max_usd, 0)} invested`))}
         {tir != null && fig(conCartera12m(ev) ? t("TIR cartera 12 m", "Portfolio IRR 12 m") : t("TIR 12 meses", "IRR 12 months"),
              pct(tir, 1), signo(tir),
              ev.tir_anual_pct == null ? null
