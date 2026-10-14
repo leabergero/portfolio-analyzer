@@ -28,6 +28,10 @@ const { useState, useEffect, useRef, useCallback, useMemo } = React;
 // de HOY tenida doce meses (la que se compara contra un plazo fijo), no la de
 // la historia real del último año. Lo anterior queda sólo de respaldo, para
 // cuando el dato nuevo no se puede calcular.
+// En evaluación (`?lab=1`): la tarjeta de valor de cartera de la vista completa
+// pasa a ser el gráfico de la vista simple —lo que vale contra lo que pusiste—
+// con el monto arriba. Sin el flag, la de siempre.
+const LAB_VALOR = new URLSearchParams(location.search).get("lab") === "1";
 const conCapital = (ev) => ev?.rendimiento_capital_pct != null;
 const conCartera12m = (ev) => ev?.cartera_12m?.tir_pct != null;
 const tirCartera = (ev) => (conCartera12m(ev) ? ev.cartera_12m.tir_pct : ev?.ultimos_12m?.tir_pct);
@@ -3735,6 +3739,21 @@ function ValorCartera({ ev, mep }) {
       ? t(`${bajoAgua ? "por debajo de" : "por encima de"} los ${usd(ev.puesto_neto_usd)} puestos`,
           `${bajoAgua ? "below" : "above"} the ${usd(ev.puesto_neto_usd)} put in`) : null,
   ].filter(Boolean).join(" · ");
+
+  if (LAB_VALOR) return (
+    <div className="panel" title={detalle || undefined}>
+      <div style={{ fontSize: 10.5, letterSpacing: ".14em", textTransform: "uppercase",
+                    color: "var(--texto-3)", fontWeight: 600 }}>{t("Valor de cartera", "Portfolio value")}</div>
+      <div style={{ fontFamily: "var(--mono)", fontSize: 28, fontWeight: 500, marginTop: 8 }}>{moneda} {cifra}</div>
+      {/* El monto lleva los FCI y la curva no (son la caja, no la gestión): con
+          eje a la vista la diferencia salta, así que se dice de dónde sale. */}
+      {ev.valor_fci_usd > 0 && (
+        <div className="pie" style={{ marginTop: 2 }}>
+          {t(`en bolsa ${usd(ev.valor_hoy_usd - ev.valor_fci_usd, 0)} —la curva— y en FCI ${usd(ev.valor_fci_usd, 0)}`,
+             `${usd(ev.valor_hoy_usd - ev.valor_fci_usd, 0)} in stocks —the curve— and ${usd(ev.valor_fci_usd, 0)} in funds`)}
+        </div>)}
+      <div style={{ marginTop: 6 }}><InfoValor ev={ev} alto={420} /></div>
+    </div>);
 
   return (
     <div className="panel lab-valor" title={detalle || undefined}>
