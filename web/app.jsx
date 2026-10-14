@@ -28,10 +28,6 @@ const { useState, useEffect, useRef, useCallback, useMemo } = React;
 // de HOY tenida doce meses (la que se compara contra un plazo fijo), no la de
 // la historia real del último año. Lo anterior queda sólo de respaldo, para
 // cuando el dato nuevo no se puede calcular.
-// En evaluación (`?lab=1`): la tarjeta de valor de cartera de la vista completa
-// pasa a ser el gráfico de la vista simple —lo que vale contra lo que pusiste—
-// con el monto arriba. Sin el flag, la de siempre.
-const LAB_VALOR = new URLSearchParams(location.search).get("lab") === "1";
 const conCapital = (ev) => ev?.rendimiento_capital_pct != null;
 const conCartera12m = (ev) => ev?.cartera_12m?.tir_pct != null;
 const tirCartera = (ev) => (conCartera12m(ev) ? ev.cartera_12m.tir_pct : ev?.ultimos_12m?.tir_pct);
@@ -493,6 +489,16 @@ function colores() {
 
 /* ═══════════════ Gráfico ═══════════════ */
 
+// Plotly escribe los meses de los ejes en inglés salvo que se le dé un locale:
+// sólo los nombres, porque los números de la app van con punto decimal.
+if (window.Plotly) Plotly.register({ moduleType: "locale", name: "es", dictionary: {}, format: {
+  days: ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"],
+  shortDays: ["dom", "lun", "mar", "mié", "jue", "vie", "sáb"],
+  months: ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto",
+           "septiembre", "octubre", "noviembre", "diciembre"],
+  shortMonths: ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"],
+  date: "%d/%m/%Y" } });
+
 function Grafico({ datos, layout, alto = 280, config: configExtra }) {
   const nodo = useRef(null);
   const tema = document.documentElement.dataset.theme || "auto";
@@ -523,7 +529,8 @@ function Grafico({ datos, layout, alto = 280, config: configExtra }) {
     // Plotly pide los contornos de países a cdn.plot.ly por default; acá se
     // sirve todo local (nada de red externa), así que el atlas va vendoreado.
     Plotly.react(nodo.current, datos, mezcla,
-                 { displayModeBar: false, responsive: true, topojsonURL: "/vendor/topojson/", ...configExtra });
+                 { displayModeBar: false, responsive: true, topojsonURL: "/vendor/topojson/",
+                   locale: IDIOMA === "en" ? "en-US" : "es", ...configExtra });
   }, [datos, layout, alto, tema, configExtra]);
 
   useEffect(() => () => { if (nodo.current) Plotly.purge(nodo.current); }, []);
@@ -3712,23 +3719,14 @@ function marcasTiempo(fechas, cada = 3, tope = 11) {
   return armar(12);
 }
 
-/* PNL-16 · el valor de la cartera con su curva, en lugar del KPI suelto.
-   Título chico, cifra grande sin decimales, variación del último mes y un área
-   de yema que llega a los bordes, sin ejes. La yema es superficie, no tinta (ver
-   la paleta en index.html): acá es relleno, que es donde funciona. El detalle que
-   antes se dibujaba —la línea del capital puesto y los tramos en rojo— queda en
-   el tooltip como texto. */
+/* PNL-16 · el valor de la cartera: el monto arriba y, debajo, lo que vale contra
+   lo que pusiste —el mismo gráfico de la vista simple—. Si la línea llena está
+   arriba de la punteada, la cartera ganó plata. El monto lleva los FCI y la
+   curva no (son la caja, no la gestión): con el eje a la vista la diferencia
+   salta, así que se dice de dónde sale. */
 function ValorCartera({ ev, mep }) {
   const v = ev.valor_usd || [];
   const puesto = ev.puesto_serie || [];
-  const W = 300, H = 100;
-  const mn = Math.min(...v), mx = Math.max(...v), rango = mx - mn || 1;
-  // Deja piso de yema debajo del mínimo y aire arriba del máximo.
-  const y = (x) => H - 26 - ((x - mn) / rango) * (H - 52);
-  const px = (i) => (i / Math.max(1, v.length - 1)) * W;
-  const linea = v.map((x, i) => (i ? "L" : "M") + px(i).toFixed(1) + "," + y(x).toFixed(1)).join(" ");
-  const mesAtras = v[Math.max(0, v.length - 22)];
-  const cambio = mesAtras ? (v[v.length - 1] / mesAtras - 1) * 100 : 0;
   const bajoAgua = puesto.length === v.length && v[v.length - 1] < puesto[puesto.length - 1];
   const moneda = MERCADOS[MERCADO].simbolo === "$" ? "US$" : MERCADOS[MERCADO].simbolo;
   const cifra = Number(ev.valor_hoy_usd).toLocaleString(IDIOMA === "en" ? "en-US" : "es-AR",
@@ -3740,13 +3738,11 @@ function ValorCartera({ ev, mep }) {
           `${bajoAgua ? "below" : "above"} the ${usd(ev.puesto_neto_usd)} put in`) : null,
   ].filter(Boolean).join(" · ");
 
-  if (LAB_VALOR) return (
+  return (
     <div className="panel" title={detalle || undefined}>
       <div style={{ fontSize: 10.5, letterSpacing: ".14em", textTransform: "uppercase",
                     color: "var(--texto-3)", fontWeight: 600 }}>{t("Valor de cartera", "Portfolio value")}</div>
       <div style={{ fontFamily: "var(--mono)", fontSize: 28, fontWeight: 500, marginTop: 8 }}>{moneda} {cifra}</div>
-      {/* El monto lleva los FCI y la curva no (son la caja, no la gestión): con
-          eje a la vista la diferencia salta, así que se dice de dónde sale. */}
       {ev.valor_fci_usd > 0 && (
         <div className="pie" style={{ marginTop: 2 }}>
           {t(`en bolsa ${usd(ev.valor_hoy_usd - ev.valor_fci_usd, 0)} —la curva— y en FCI ${usd(ev.valor_fci_usd, 0)}`,
@@ -3754,19 +3750,6 @@ function ValorCartera({ ev, mep }) {
         </div>)}
       <div style={{ marginTop: 6 }}><InfoValor ev={ev} alto={420} /></div>
     </div>);
-
-  return (
-    <div className="panel lab-valor" title={detalle || undefined}>
-      <div className="et">{t("Valor de cartera", "Portfolio value")}</div>
-      <div className="cifra">{moneda} {cifra}</div>
-      <div className={"delta " + signo(cambio)}>
-        {cambio >= 0 ? "▲" : "▼"} {pct(Math.abs(cambio), 1)} {t("en el último mes", "over the last month")}
-      </div>
-      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" aria-hidden="true">
-        <path className="area" d={`${linea} L${W},${H} L0,${H} Z`} />
-      </svg>
-    </div>
-  );
 }
 
 /* PRG-07 · un nodo por modelo, encendido cuando ese modelo terminó. Con once

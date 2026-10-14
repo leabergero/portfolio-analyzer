@@ -183,12 +183,6 @@
 [data-lab="1"] .ayuda:hover{border-color:var(--acento);color:var(--acento)}
 [data-lab="1"] .globo{border-color:var(--borde);box-shadow:0 16px 40px -12px rgba(0,0,0,.6)}
 
-/* La tarjeta dice cuánto vale, además de dibujarlo; la variación del mes no. */
-[data-lab="1"] .lab-valor .delta{display:none}
-[data-lab="1"] .lab-valor .cifra{font-family:var(--mono);font-size:28px;font-weight:500;margin-top:8px}
-[data-lab="1"] .lab-valor svg{top:92px;height:calc(100% - 92px)}
-[data-lab="1"] .lab-valor .area{fill:var(--acento);opacity:.88}
-[data-lab="1"] .lab-valor{min-height:200px}
 [data-lab="1"] .lab-tirgrande b{font-family:var(--mono);font-size:28px;font-weight:500}
 
 /* ── Tablas ── densas, cabecera pegada, fila que se ilumina al pasar. */
