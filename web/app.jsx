@@ -3151,6 +3151,9 @@ function BarraRiesgo({ etiqueta, detalle, pct_, usd_, escala, nota }) {
    cierra en el de después, los dos con los precios de ese día. Roja si la
    decisión subió el riesgo, verde si lo bajó. El hueco entre una vela y la
    siguiente es el mercado moviendo los pesos, no una decisión. */
+// El rendimiento acompaña y el riesgo es el protagonista: azul apagado.
+const AZUL_ESPERADO = "#6f8fd8";
+
 function RiesgoDecisiones({ cartera }) {
   const [d, setD] = useState(null);
   const [sel, setSel] = useState(null);       // índice de la vela apuntada; null = la última
@@ -3166,7 +3169,7 @@ function RiesgoDecisiones({ cartera }) {
     const c = colores();
     const x = v.map((p) => p.fecha);
     const hoy = t("hoy", "today");
-    const zona = (y, color, nombre) => ({ type: "line", xref: "paper", x0: 0, x1: 1, y0: y, y1: y,
+    const zona = (y, color, nombre) => ({ type: "line", xref: "paper", yref: "y2", x0: 0, x1: 1, y0: y, y1: y,
       line: { color, width: 1.2, dash: "dash" }, label: { text: `${nombre} ${pct(y, 1)}`,
         textposition: "start", yanchor: "bottom", font: { size: 10, color } } });
     // Sin fechas en el eje: sólo el año, en la primera vela de cada uno.
@@ -3176,21 +3179,26 @@ function RiesgoDecisiones({ cartera }) {
         { type: "bar", x, base: v.map((p) => Math.min(p.var_antes, p.var_despues)),
           y: v.map((p) => Math.max(Math.abs(p.var_despues - p.var_antes), 0.02)),
           marker: { color: v.map((p) => (p.var_despues > p.var_antes ? c.negativo : c.positivo)) },
-          hoverinfo: "none" },
-        { type: "scatter", mode: "lines+markers", x: d.hoy ? [...x, hoy] : x, yaxis: "y2",
+          yaxis: "y2", hoverinfo: "none" },
+        { type: "scatter", mode: "lines+markers", x: d.hoy ? [...x, hoy] : x,
           y: [...v.map((p) => p.esperado_despues), ...(d.hoy ? [d.hoy.esperado_pct] : [])],
-          line: { color: "#1f51ff", width: 2 }, marker: { size: 5, color: "#1f51ff" }, hoverinfo: "none" },
+          line: { color: AZUL_ESPERADO, width: 1.2 }, marker: { size: 3, color: AZUL_ESPERADO },
+          opacity: 0.7, hoverinfo: "none" },
         ...(d.hoy ? [{ type: "scatter", mode: "markers", x: [hoy], y: [d.hoy.var95_pct],
-          marker: { symbol: "diamond", size: 11, color: c.texto2 }, hoverinfo: "none" }] : []),
+          marker: { symbol: "diamond", size: 11, color: c.texto2 }, yaxis: "y2", hoverinfo: "none" }] : []),
       ],
       layout: {
         barmode: "overlay", bargap: 0.35, showlegend: false, hovermode: "x",
         xaxis: { type: "category", tickvals: anios, ticktext: anios.map((f) => f.slice(0, 4)), tickangle: 0 },
-        yaxis: { title: t("Día malo (VaR 95 %)", "Bad day (VaR 95 %)"), ticksuffix: " %",
-                 range: [0, 1.1 * Math.max(ZONAS.limite, d.hoy?.var95_pct || 0,
-                                            ...v.map((p) => Math.max(p.var_antes, p.var_despues)))] },
-        yaxis2: { title: t("Rendimiento esperado anual", "Expected annual return"), ticksuffix: " %",
-                  overlaying: "y", side: "right", showgrid: false, nticks: 6, tickformat: ".1f", automargin: true },
+        // El eje que se superpone se dibuja encima: por eso el riesgo va en y2
+        // (a la izquierda) y el rendimiento, que acompaña, queda debajo.
+        yaxis2: { title: t("Día malo (VaR 95 %)", "Bad day (VaR 95 %)"), ticksuffix: " %",
+                  overlaying: "y", side: "left", showgrid: false, automargin: true,
+                  linecolor: c.borde, zerolinecolor: c.borde,
+                  range: [0, 1.1 * Math.max(ZONAS.limite, d.hoy?.var95_pct || 0,
+                                             ...v.map((p) => Math.max(p.var_antes, p.var_despues)))] },
+        yaxis: { title: t("Rendimiento esperado anual", "Expected annual return"), ticksuffix: " %",
+                 side: "right", nticks: 6, tickformat: ".1f" },
         shapes: [zona(ZONAS.prudente, c.positivo, t("prudente", "conservative")),
                  zona(ZONAS.moderado, c.alerta, t("moderado", "moderate")),
                  zona(ZONAS.limite, c.negativo, t("límite", "limit"))] },
@@ -3206,7 +3214,6 @@ function RiesgoDecisiones({ cartera }) {
   const sumaSube = v.reduce((a, p) => a + Math.max(0, p.var_despues - p.var_antes), 0);
   const sumaBaja = v.reduce((a, p) => a + Math.min(0, p.var_despues - p.var_antes), 0);
   const p = sel === -1 || !v.length ? null : v[sel ?? v.length - 1];
-  const flecha = (a, b, dec) => `${num(a, dec)} → ${num(b, dec)} %`;
   return (
     <div className="panel">
       <h3 style={{ display: "flex", alignItems: "flex-start", gap: 10, flexWrap: "wrap" }}>
@@ -3214,18 +3221,10 @@ function RiesgoDecisiones({ cartera }) {
         <span className="chip" style={{ marginLeft: "auto", fontWeight: 400, display: "inline-flex",
                                         flexWrap: "wrap", gap: "2px 10px", alignItems: "center" }}>
           {p ? <>
-            <b className="mono">{p.fecha}</b>
             {p.operaciones.map((o) => (
               <span key={o} className={o[0] === "+" ? "pos" : "neg"}>
                 {o[0] === "+" ? t("compra", "buy") : t("venta", "sell")} {o.slice(1)}<LogoTicker ticker={o.slice(1)} /></span>))}
-            <span className={p.var_despues > p.var_antes ? "neg" : "pos"}>
-              {t("día malo", "bad day")} {flecha(p.var_antes, p.var_despues, 2)}</span>
-            <span style={{ color: "#1f51ff" }}>{t("esperado", "expected")} {flecha(p.esperado_antes, p.esperado_despues, 1)}</span>
-          </> : d.hoy && <>
-            <b>{t("hoy", "today")}</b>
-            <span>{t("día malo", "bad day")} {pct(d.hoy.var95_pct)}</span>
-            <span style={{ color: "#1f51ff" }}>{t("esperado", "expected")} {pct(d.hoy.esperado_pct, 1)}</span>
-          </>}
+          </> : t("cartera de hoy", "today's portfolio")}
         </span></h3>
       {grafico && <Grafico alto={360} datos={grafico.datos} layout={grafico.layout} alPasar={alPasar} />}
       <div className="pie">
