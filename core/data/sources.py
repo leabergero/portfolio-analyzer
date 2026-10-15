@@ -114,8 +114,9 @@ def _de_cocos(ticker: str, desde: str, hasta: str) -> pd.DataFrame:
 # no pasa por acá.
 TTL_SIN_SERIE_H = 6.0
 
-# Tickers que ninguna fuente tiene y nunca va a tener: vendidos o vencidos, sólo
-# quedan en lo realizado. No se le pregunta a nadie por ellos. La caché negativa
+# Tickers que yfinance y BYMA no tienen: vendidos o vencidos, sólo quedan en lo
+# realizado. Cocos sí los tiene, así que van sólo a Cocos, que sin la cuenta
+# conectada (la web) contesta vacío al instante. La caché negativa
 # no alcanzaba: cada 6 h BYMA volvía a pedir ~85 tramos de 90 días por cada uno,
 # casi un minuto por ticker con el único hilo de la VM (2026-10-15).
 SIN_FUENTE = {
@@ -199,10 +200,8 @@ def precios(ticker: str, desde: str = None, hasta: str = None,
         elif cache.leer_respuesta(f"sin-serie:{ticker}", TTL_SIN_SERIE_H) is True:
             return pd.DataFrame()
 
-    if strip_ba(ticker) in SIN_FUENTE:
-        return cache.leer_precios(ticker, desde, hasta)
-
-    usar_cocos = source == "cocos" or (source is None and is_cocos_only(ticker))
+    usar_cocos = (source == "cocos" or strip_ba(ticker) in SIN_FUENTE
+                  or (source is None and is_cocos_only(ticker)))
     fuentes = [_de_cocos] if usar_cocos else [_de_yfinance, _de_byma]
 
     fallo_red = False
