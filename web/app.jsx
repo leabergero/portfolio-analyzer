@@ -501,7 +501,7 @@ if (window.Plotly) Plotly.register({ moduleType: "locale", name: "es", dictionar
   shortMonths: ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"],
   date: "%d/%m/%Y" } });
 
-function Grafico({ datos, layout, alto = 280, config: configExtra }) {
+function Grafico({ datos, layout, alto = 280, config: configExtra, alPasar }) {
   const nodo = useRef(null);
   const tema = document.documentElement.dataset.theme || "auto";
 
@@ -534,6 +534,13 @@ function Grafico({ datos, layout, alto = 280, config: configExtra }) {
                  { displayModeBar: false, responsive: true, topojsonURL: "/vendor/topojson/",
                    locale: IDIOMA === "en" ? "en-US" : "es", ...configExtra });
   }, [datos, layout, alto, tema, configExtra]);
+
+  useEffect(() => {
+    const n = nodo.current;
+    if (!n?.on || !alPasar) return;
+    n.on("plotly_hover", alPasar);
+    return () => n.removeListener?.("plotly_hover", alPasar);
+  }, [alPasar]);
 
   useEffect(() => () => { if (nodo.current) Plotly.purge(nodo.current); }, []);
   return <div ref={nodo} style={{ height: alto }} />;
@@ -3145,59 +3152,85 @@ function BarraRiesgo({ etiqueta, detalle, pct_, usd_, escala, nota }) {
    decisión subió el riesgo, verde si lo bajó. El hueco entre una vela y la
    siguiente es el mercado moviendo los pesos, no una decisión. */
 function RiesgoDecisiones({ cartera }) {
-  const c = colores();
   const [d, setD] = useState(null);
+  const [sel, setSel] = useState(null);       // índice de la vela apuntada; null = la última
   useEffect(() => {
-    setD(null);
+    setD(null); setSel(null);
     api(`/api/riesgo/${encodeURIComponent(cartera)}/decisiones`).then(setD);
   }, [cartera]);
+  const v = useMemo(() => (d?.velas || []).filter((x) => x.var_antes != null && x.var_despues != null), [d]);
+  // Datos y layout fijos mientras no cambie la cartera: el chip cambia con
+  // cada hover y, si se rehicieran, Plotly redibujaría el gráfico entero.
+  const grafico = useMemo(() => {
+    if (!d || d.error) return null;
+    const c = colores();
+    const x = v.map((p) => p.fecha);
+    const hoy = t("hoy", "today");
+    const zona = (y, color, nombre) => ({ type: "line", xref: "paper", x0: 0, x1: 1, y0: y, y1: y,
+      line: { color, width: 1.2, dash: "dash" }, label: { text: `${nombre} ${pct(y, 1)}`,
+        textposition: "start", yanchor: "bottom", font: { size: 10, color } } });
+    // Sin fechas en el eje: sólo el año, en la primera vela de cada uno.
+    const anios = x.filter((f, i) => i === 0 || f.slice(0, 4) !== x[i - 1].slice(0, 4));
+    return {
+      datos: [
+        { type: "bar", x, base: v.map((p) => Math.min(p.var_antes, p.var_despues)),
+          y: v.map((p) => Math.max(Math.abs(p.var_despues - p.var_antes), 0.02)),
+          marker: { color: v.map((p) => (p.var_despues > p.var_antes ? c.negativo : c.positivo)) },
+          hoverinfo: "none" },
+        { type: "scatter", mode: "lines+markers", x: d.hoy ? [...x, hoy] : x, yaxis: "y2",
+          y: [...v.map((p) => p.esperado_despues), ...(d.hoy ? [d.hoy.esperado_pct] : [])],
+          line: { color: "#1f51ff", width: 2 }, marker: { size: 5, color: "#1f51ff" }, hoverinfo: "none" },
+        ...(d.hoy ? [{ type: "scatter", mode: "markers", x: [hoy], y: [d.hoy.var95_pct],
+          marker: { symbol: "diamond", size: 11, color: c.texto2 }, hoverinfo: "none" }] : []),
+      ],
+      layout: {
+        barmode: "overlay", bargap: 0.35, showlegend: false, hovermode: "x",
+        xaxis: { type: "category", tickvals: anios, ticktext: anios.map((f) => f.slice(0, 4)), tickangle: 0 },
+        yaxis: { title: t("Día malo (VaR 95 %)", "Bad day (VaR 95 %)"), ticksuffix: " %",
+                 range: [0, 1.1 * Math.max(ZONAS.limite, d.hoy?.var95_pct || 0,
+                                            ...v.map((p) => Math.max(p.var_antes, p.var_despues)))] },
+        yaxis2: { title: t("Rendimiento esperado anual", "Expected annual return"), ticksuffix: " %",
+                  overlaying: "y", side: "right", showgrid: false, nticks: 6, tickformat: ".1f", automargin: true },
+        shapes: [zona(ZONAS.prudente, c.positivo, t("prudente", "conservative")),
+                 zona(ZONAS.moderado, c.alerta, t("moderado", "moderate")),
+                 zona(ZONAS.limite, c.negativo, t("límite", "limit"))] },
+    };
+  }, [d, v]);
+  const alPasar = useCallback((e) => {
+    const i = e.points?.[0]?.pointIndex ?? e.points?.[0]?.pointNumber;
+    setSel(i != null && i < v.length ? i : -1);         // -1 = el punto de hoy
+  }, [v]);
   if (!d) return <div className="cargando">{t("Reconstruyendo la cartera operación por operación…", "Rebuilding the portfolio trade by trade…")}</div>;
   if (d.error) return <div className="aviso mal">{d.error}</div>;
 
-  const v = d.velas.filter((x) => x.var_antes != null && x.var_despues != null);
-  const x = v.map((p) => p.fecha);
-  const sube = v.map((p) => p.var_despues > p.var_antes);
-  const ops = v.map((p) => p.operaciones.join(" "));
   const sumaSube = v.reduce((a, p) => a + Math.max(0, p.var_despues - p.var_antes), 0);
   const sumaBaja = v.reduce((a, p) => a + Math.min(0, p.var_despues - p.var_antes), 0);
-  const zona = (y, color, nombre) => ({ type: "line", xref: "paper", x0: 0, x1: 1, y0: y, y1: y,
-    line: { color, width: 1.2, dash: "dash" }, label: { text: `${nombre} ${pct(y, 1)}`,
-      textposition: "start", yanchor: "bottom", font: { size: 10, color } } });
+  const p = sel === -1 || !v.length ? null : v[sel ?? v.length - 1];
+  const flecha = (a, b, dec) => `${num(a, dec)} → ${num(b, dec)} %`;
   return (
     <div className="panel">
-      <h3>{t("¿Tus compras y ventas subieron o bajaron el riesgo?", "Did your trades raise or lower risk?")}</h3>
-      <Grafico alto={380}
-        datos={[
-          { type: "bar", name: t("VaR 95 % antes → después", "VaR 95 % before → after"), x,
-            base: v.map((p) => Math.min(p.var_antes, p.var_despues)),
-            y: v.map((p) => Math.max(Math.abs(p.var_despues - p.var_antes), 0.02)),
-            marker: { color: sube.map((s) => (s ? c.negativo : c.positivo)) },
-            customdata: v.map((p, i) => [p.var_antes, p.var_despues, ops[i]]),
-            hovertemplate: "<b>%{x}</b><br>%{customdata[2]}<br>"
-              + t("día malo", "bad day") + ": %{customdata[0]:.2f} % → %{customdata[1]:.2f} %<extra></extra>" },
-          { type: "scatter", mode: "lines+markers", name: t("rendimiento esperado anual (eje derecho)", "expected annual return (right axis)"),
-            x: d.hoy ? [...x, t("hoy", "today")] : x, yaxis: "y2",
-            y: [...v.map((p) => p.esperado_despues), ...(d.hoy ? [d.hoy.esperado_pct] : [])],
-            line: { color: c.series[0], width: 1.8 }, marker: { size: 5 },
-            hovertemplate: "%{x}<br>" + t("esperado", "expected") + ": %{y:.1f} % " + t("anual", "a year") + "<extra></extra>" },
-          ...(d.hoy ? [{ type: "scatter", mode: "markers", name: t("hoy", "today"), x: [t("hoy", "today")],
-            y: [d.hoy.var95_pct], marker: { symbol: "diamond", size: 11, color: c.texto2 },
-            hovertemplate: t("hoy", "today") + ": %{y:.2f} %<extra></extra>" }] : []),
-        ]}
-        layout={{
-          barmode: "overlay", bargap: 0.35,
-          xaxis: { type: "category", tickangle: -45 },
-          yaxis: { title: t("Día malo (VaR 95 %)", "Bad day (VaR 95 %)"), ticksuffix: " %",
-                   range: [0, 1.1 * Math.max(ZONAS.limite, d.hoy?.var95_pct || 0,
-                                              ...v.map((p) => Math.max(p.var_antes, p.var_despues)))] },
-          yaxis2: { ticksuffix: " %", overlaying: "y", side: "right", showgrid: false, nticks: 6, tickformat: ".1f", automargin: true },
-          shapes: [zona(ZONAS.prudente, c.positivo, t("prudente", "conservative")),
-                   zona(ZONAS.moderado, c.alerta, t("moderado", "moderate")),
-                   zona(ZONAS.limite, c.negativo, t("límite", "limit"))],
-          legend: { orientation: "h", y: -0.3 } }} />
+      <h3 style={{ display: "flex", alignItems: "flex-start", gap: 10, flexWrap: "wrap" }}>
+        {t("¿Tus compras y ventas subieron o bajaron el riesgo?", "Did your trades raise or lower risk?")}
+        <span className="chip" style={{ marginLeft: "auto", fontWeight: 400, display: "inline-flex",
+                                        flexWrap: "wrap", gap: "2px 10px", alignItems: "center" }}>
+          {p ? <>
+            <b className="mono">{p.fecha}</b>
+            {p.operaciones.map((o) => (
+              <span key={o} className={o[0] === "+" ? "pos" : "neg"}>
+                {o[0] === "+" ? t("compra", "buy") : t("venta", "sell")} {o.slice(1)}<LogoTicker ticker={o.slice(1)} /></span>))}
+            <span className={p.var_despues > p.var_antes ? "neg" : "pos"}>
+              {t("día malo", "bad day")} {flecha(p.var_antes, p.var_despues, 2)}</span>
+            <span style={{ color: "#1f51ff" }}>{t("esperado", "expected")} {flecha(p.esperado_antes, p.esperado_despues, 1)}</span>
+          </> : d.hoy && <>
+            <b>{t("hoy", "today")}</b>
+            <span>{t("día malo", "bad day")} {pct(d.hoy.var95_pct)}</span>
+            <span style={{ color: "#1f51ff" }}>{t("esperado", "expected")} {pct(d.hoy.esperado_pct, 1)}</span>
+          </>}
+        </span></h3>
+      {grafico && <Grafico alto={360} datos={grafico.datos} layout={grafico.layout} alPasar={alPasar} />}
       <div className="pie">
-        {t(`Cada vela es un día con compras o ventas: arranca en el VaR 95 % de la cartera justo antes de operar y termina en el de después, las dos con los precios de ese día y medidas con la misma historia, así lo que cambia es sólo la decisión. Roja: el día malo quedó peor; verde: quedó mejor. Sumadas, las decisiones subieron el riesgo ${pct(sumaSube, 2)} y lo bajaron ${pct(-sumaBaja, 2)}. El hueco entre velas es el mercado moviendo los pesos. La línea es el rendimiento esperado anual de cada composición —el mismo del Monte Carlo—, y el rombo, la cartera de hoy (el VaR de los KPI). Sin FCI: son la caja.`,
-           `Each candle is a day with trades: it opens at the portfolio's 95 % VaR right before trading and closes at the one after, both at that day's prices and measured over the same history, so only the decision changes. Red: the bad day got worse; green: it got better. Added up, decisions raised risk by ${pct(sumaSube, 2)} and lowered it by ${pct(-sumaBaja, 2)}. The gap between candles is the market moving the weights. The line is each mix's expected annual return —the same as the Monte Carlo—, and the diamond, today's portfolio (the KPI VaR). Money market funds excluded: they're cash.`)}
+        {t(`Cada vela es un día con compras o ventas: arranca en el VaR 95 % de la cartera justo antes de operar y termina en el de después, las dos con los precios de ese día y medidas con la misma historia, así lo que cambia es sólo la decisión. Roja: el día malo quedó peor; verde: quedó mejor. Sumadas, las decisiones subieron el riesgo ${pct(sumaSube, 2)} y lo bajaron ${pct(-sumaBaja, 2)}. El hueco entre velas es el mercado moviendo los pesos. La línea azul es el rendimiento esperado anual de cada composición —el mismo del Monte Carlo—, y el rombo, la cartera de hoy (el VaR de los KPI). Sin FCI: son la caja.`,
+           `Each candle is a day with trades: it opens at the portfolio's 95 % VaR right before trading and closes at the one after, both at that day's prices and measured over the same history, so only the decision changes. Red: the bad day got worse; green: it got better. Added up, decisions raised risk by ${pct(sumaSube, 2)} and lowered it by ${pct(-sumaBaja, 2)}. The gap between candles is the market moving the weights. The blue line is each mix's expected annual return —the same as the Monte Carlo—, and the diamond, today's portfolio (the KPI VaR). Money market funds excluded: they're cash.`)}
       </div>
     </div>
   );
