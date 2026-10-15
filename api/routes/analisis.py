@@ -142,7 +142,7 @@ def riesgo_rolling(nombre):
 
 @bp.get("/riesgo/<nombre>/decisiones")
 def riesgo_decisiones(nombre):
-    """VaR y rendimiento esperado antes y después de cada día operado (lab)."""
+    """VaR y rendimiento esperado antes y después de cada día operado."""
     if not store.cargar(nombre):
         return _falta(nombre)
     return jsonify(risk.decisiones(store.cargar(nombre), store.cargar_realizado(nombre)))

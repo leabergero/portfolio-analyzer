@@ -31,8 +31,6 @@ const { useState, useEffect, useRef, useCallback, useMemo } = React;
 const conCapital = (ev) => ev?.rendimiento_capital_pct != null;
 const conCartera12m = (ev) => ev?.cartera_12m?.tir_pct != null;
 const tirCartera = (ev) => (conCartera12m(ev) ? ev.cartera_12m.tir_pct : ev?.ultimos_12m?.tir_pct);
-// Lo que está en evaluación se ve sólo con ?lab=1 (riesgo de cada decisión).
-const LAB = new URLSearchParams(location.search).get("lab") === "1";
 document.documentElement.dataset.lab = "1";
 for (const n of ["1", "5"]) {
   const hoja = document.createElement("link");
@@ -3147,7 +3145,7 @@ function BarraRiesgo({ etiqueta, detalle, pct_, usd_, escala, nota }) {
   );
 }
 
-/* Lab · cada día operado como una vela: abre en el VaR de antes de operar y
+/* Cada día operado como una vela: abre en el VaR de antes de operar y
    cierra en el de después, los dos con los precios de ese día. Roja si la
    decisión subió el riesgo, verde si lo bajó. El hueco entre una vela y la
    siguiente es el mercado moviendo los pesos, no una decisión. */
@@ -4242,7 +4240,7 @@ function Riesgo({ d, cartera, extras }) {
       <KpisRiesgo d={d} capm={extras.capm} />
       {d.historia_larga && <HistoriaLarga d={d} />}
       <ZonasRiesgo d={d} />
-      {LAB && <RiesgoDecisiones cartera={cartera} />}
+      <RiesgoDecisiones cartera={cartera} />
       <Seccion titulo={t("¿Cuándo se disparó el riesgo?", "When did risk spike?")} />
       <RiesgoEvolucion cartera={cartera} />
       <Seccion titulo={t("El riesgo de cada activo por separado", "The risk of each asset, separately")} />
