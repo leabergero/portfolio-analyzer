@@ -118,7 +118,11 @@ TTL_SIN_SERIE_H = 6.0
 # quedan en lo realizado. No se le pregunta a nadie por ellos. La caché negativa
 # no alcanzaba: cada 6 h BYMA volvía a pedir ~85 tramos de 90 días por cada uno,
 # casi un minuto por ticker con el único hilo de la VM (2026-10-15).
-SIN_FUENTE = {"S15G5", "GOOGLD", "MGCGOD"}
+SIN_FUENTE = {
+    "S15G5", "S15G5D", "GOOGLD", "MGCGOD", "MGCGD", "WNCHD", "RCCPD", "DHS8D",
+    "YMCJD", "TTS26D", "TLCMD", "TLCPD", "VSCVD", "TXMJ8D", "PLC5D", "PLC7D",
+    "DNCAD", "MCC3D", "CAUCIONT", "CAUCIONC",
+}
 
 # Cuánto se espera antes de volver a salir por un ticker cuya caché no llega a
 # la última rueda. Acota el costo de los feriados, que `_ultima_rueda` no conoce.
