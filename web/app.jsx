@@ -3199,7 +3199,13 @@ function RiesgoDecisiones({ cartera }) {
                  side: "right", nticks: 6, tickformat: ".1f" },
         shapes: [zona(ZONAS.prudente, c.positivo, t("prudente", "conservative")),
                  zona(ZONAS.moderado, c.alerta, t("moderado", "moderate")),
-                 zona(ZONAS.limite, c.negativo, t("límite", "limit"))] },
+                 zona(ZONAS.limite, c.negativo, t("límite", "limit")),
+                 // Dónde está hoy, apenas marcado: referencia, no protagonista.
+                 ...(d.hoy ? [{ type: "line", xref: "paper", yref: "y2", x0: 0, x1: 1,
+                   y0: d.hoy.var95_pct, y1: d.hoy.var95_pct, opacity: 0.35,
+                   line: { color: c.texto3, width: 1 },
+                   label: { text: `${t("hoy", "today")} ${pct(d.hoy.var95_pct)}`, textposition: "end",
+                            yanchor: "bottom", font: { size: 10, color: c.texto3 } } }] : [])] },
     };
   }, [d, v]);
   const alPasar = useCallback((e) => {
