@@ -3215,17 +3215,19 @@ function RiesgoDecisiones({ cartera }) {
   const sumaBaja = v.reduce((a, p) => a + Math.min(0, p.var_despues - p.var_antes), 0);
   const p = sel === -1 || !v.length ? null : v[sel ?? v.length - 1];
   return (
-    <div className="panel">
-      <h3 style={{ display: "flex", alignItems: "flex-start", gap: 10, flexWrap: "wrap" }}>
-        {t("¿Tus compras y ventas subieron o bajaron el riesgo?", "Did your trades raise or lower risk?")}
-        <span className="chip" style={{ marginLeft: "auto", fontWeight: 400, display: "inline-flex",
-                                        flexWrap: "wrap", gap: "2px 10px", alignItems: "center" }}>
+    <div className="panel" style={{ position: "relative" }}>
+      <h3>{t("¿Tus compras y ventas subieron o bajaron el riesgo?", "Did your trades raise or lower risk?")}</h3>
+      {/* Clavado arriba a la derecha y fuera del flujo: si empujara al
+          gráfico, cada hover lo haría saltar. */}
+      <span className="chip" style={{ position: "absolute", top: 12, right: 14, maxWidth: "45%",
+                                      whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                                      display: "flex", gap: 8, alignItems: "center" }}>
           {p ? <>
             {p.operaciones.map((o) => (
               <span key={o} className={o[0] === "+" ? "pos" : "neg"}>
-                {o[0] === "+" ? t("compra", "buy") : t("venta", "sell")} {o.slice(1)}<LogoTicker ticker={o.slice(1)} /></span>))}
-          </> : t("cartera de hoy", "today's portfolio")}
-        </span></h3>
+                {o}<LogoTicker ticker={o.slice(1)} /></span>))}
+          </> : t("hoy", "today")}
+      </span>
       {grafico && <Grafico alto={360} datos={grafico.datos} layout={grafico.layout} alPasar={alPasar} />}
       <div className="pie">
         {t(`Cada vela es un día con compras o ventas: arranca en el VaR 95 % de la cartera justo antes de operar y termina en el de después, las dos con los precios de ese día y medidas con la misma historia, así lo que cambia es sólo la decisión. Roja: el día malo quedó peor; verde: quedó mejor. Sumadas, las decisiones subieron el riesgo ${pct(sumaSube, 2)} y lo bajaron ${pct(-sumaBaja, 2)}. El hueco entre velas es el mercado moviendo los pesos. La línea azul es el rendimiento esperado anual de cada composición —el mismo del Monte Carlo—, y el rombo, la cartera de hoy (el VaR de los KPI). Sin FCI: son la caja.`,
