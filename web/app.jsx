@@ -3149,8 +3149,8 @@ function BarraRiesgo({ etiqueta, detalle, pct_, usd_, escala, nota }) {
    cierra en el de después, los dos con los precios de ese día. Roja si la
    decisión subió el riesgo, verde si lo bajó. El hueco entre una vela y la
    siguiente es el mercado moviendo los pesos, no una decisión. */
-// El rendimiento acompaña y el riesgo es el protagonista: azul apagado.
-const AZUL_ESPERADO = "#6f8fd8";
+// El rendimiento acompaña y el riesgo es el protagonista: celeste apagado.
+const AZUL_ESPERADO = "#74b9e0";
 
 function RiesgoDecisiones({ cartera }) {
   const [d, setD] = useState(null);
@@ -3233,8 +3233,8 @@ function RiesgoDecisiones({ cartera }) {
       </span>
       {grafico && <Grafico alto={360} datos={grafico.datos} layout={grafico.layout} alPasar={alPasar} />}
       <div className="pie">
-        {t(`Cada vela es un día con compras o ventas: arranca en el VaR 95 % de la cartera justo antes de operar y termina en el de después, las dos con los precios de ese día y medidas con la misma historia, así lo que cambia es sólo la decisión. Roja: el día malo quedó peor; verde: quedó mejor. Sumadas, las decisiones subieron el riesgo ${pct(sumaSube, 2)} y lo bajaron ${pct(-sumaBaja, 2)}. El hueco entre velas es el mercado moviendo los pesos. La línea azul es el rendimiento esperado anual de cada composición —el mismo del Monte Carlo—. Sin FCI: son la caja.`,
-           `Each candle is a day with trades: it opens at the portfolio's 95 % VaR right before trading and closes at the one after, both at that day's prices and measured over the same history, so only the decision changes. Red: the bad day got worse; green: it got better. Added up, decisions raised risk by ${pct(sumaSube, 2)} and lowered it by ${pct(-sumaBaja, 2)}. The gap between candles is the market moving the weights. The blue line is each mix's expected annual return —the same as the Monte Carlo—. Money market funds excluded: they're cash.`)}
+        {t(`Cada vela es un día con compras o ventas: arranca en el VaR 95 % de la cartera justo antes de operar y termina en el de después, las dos con los precios de ese día y medidas con la misma historia, así lo que cambia es sólo la decisión. Roja: el día malo quedó peor; verde: quedó mejor. Sumadas, las decisiones subieron el riesgo ${pct(sumaSube, 2)} y lo bajaron ${pct(-sumaBaja, 2)}. El hueco entre velas es el mercado moviendo los pesos. La línea celeste es el rendimiento esperado anual de cada composición —el mismo del Monte Carlo—. Sin FCI: son la caja.`,
+           `Each candle is a day with trades: it opens at the portfolio's 95 % VaR right before trading and closes at the one after, both at that day's prices and measured over the same history, so only the decision changes. Red: the bad day got worse; green: it got better. Added up, decisions raised risk by ${pct(sumaSube, 2)} and lowered it by ${pct(-sumaBaja, 2)}. The gap between candles is the market moving the weights. The light-blue line is each mix's expected annual return —the same as the Monte Carlo—. Money market funds excluded: they're cash.`)}
       </div>
     </div>
   );
