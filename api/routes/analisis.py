@@ -140,6 +140,14 @@ def riesgo_rolling(nombre):
     return jsonify(d)
 
 
+@bp.get("/riesgo/<nombre>/decisiones")
+def riesgo_decisiones(nombre):
+    """VaR y rendimiento esperado antes y después de cada día operado (lab)."""
+    if not store.cargar(nombre):
+        return _falta(nombre)
+    return jsonify(risk.decisiones(store.cargar(nombre), store.cargar_realizado(nombre)))
+
+
 @bp.get("/riesgo/<nombre>/cambiario")
 def riesgo_fx(nombre):
     """Cuánto del riesgo viene del activo y cuánto del tipo de cambio."""

@@ -31,6 +31,8 @@ const { useState, useEffect, useRef, useCallback, useMemo } = React;
 const conCapital = (ev) => ev?.rendimiento_capital_pct != null;
 const conCartera12m = (ev) => ev?.cartera_12m?.tir_pct != null;
 const tirCartera = (ev) => (conCartera12m(ev) ? ev.cartera_12m.tir_pct : ev?.ultimos_12m?.tir_pct);
+// Lo que está en evaluación se ve sólo con ?lab=1 (riesgo de cada decisión).
+const LAB = new URLSearchParams(location.search).get("lab") === "1";
 document.documentElement.dataset.lab = "1";
 for (const n of ["1", "5"]) {
   const hoja = document.createElement("link");
@@ -3138,6 +3140,69 @@ function BarraRiesgo({ etiqueta, detalle, pct_, usd_, escala, nota }) {
   );
 }
 
+/* Lab · cada día operado como una vela: abre en el VaR de antes de operar y
+   cierra en el de después, los dos con los precios de ese día. Roja si la
+   decisión subió el riesgo, verde si lo bajó. El hueco entre una vela y la
+   siguiente es el mercado moviendo los pesos, no una decisión. */
+function RiesgoDecisiones({ cartera }) {
+  const c = colores();
+  const [d, setD] = useState(null);
+  useEffect(() => {
+    setD(null);
+    api(`/api/riesgo/${encodeURIComponent(cartera)}/decisiones`).then(setD);
+  }, [cartera]);
+  if (!d) return <div className="cargando">{t("Reconstruyendo la cartera operación por operación…", "Rebuilding the portfolio trade by trade…")}</div>;
+  if (d.error) return <div className="aviso mal">{d.error}</div>;
+
+  const v = d.velas.filter((x) => x.var_antes != null && x.var_despues != null);
+  const x = v.map((p) => p.fecha);
+  const sube = v.map((p) => p.var_despues > p.var_antes);
+  const ops = v.map((p) => p.operaciones.join(" "));
+  const sumaSube = v.reduce((a, p) => a + Math.max(0, p.var_despues - p.var_antes), 0);
+  const sumaBaja = v.reduce((a, p) => a + Math.min(0, p.var_despues - p.var_antes), 0);
+  const zona = (y, color, nombre) => ({ type: "line", xref: "paper", x0: 0, x1: 1, y0: y, y1: y,
+    line: { color, width: 1.2, dash: "dash" }, label: { text: `${nombre} ${pct(y, 1)}`,
+      textposition: "start", yanchor: "bottom", font: { size: 10, color } } });
+  return (
+    <div className="panel">
+      <h3>{t("¿Tus compras y ventas subieron o bajaron el riesgo?", "Did your trades raise or lower risk?")}</h3>
+      <Grafico alto={380}
+        datos={[
+          { type: "bar", name: t("VaR 95 % antes → después", "VaR 95 % before → after"), x,
+            base: v.map((p) => Math.min(p.var_antes, p.var_despues)),
+            y: v.map((p) => Math.max(Math.abs(p.var_despues - p.var_antes), 0.02)),
+            marker: { color: sube.map((s) => (s ? c.negativo : c.positivo)) },
+            customdata: v.map((p, i) => [p.var_antes, p.var_despues, ops[i]]),
+            hovertemplate: "<b>%{x}</b><br>%{customdata[2]}<br>"
+              + t("día malo", "bad day") + ": %{customdata[0]:.2f} % → %{customdata[1]:.2f} %<extra></extra>" },
+          { type: "scatter", mode: "lines+markers", name: t("rendimiento esperado anual (eje derecho)", "expected annual return (right axis)"),
+            x: d.hoy ? [...x, t("hoy", "today")] : x, yaxis: "y2",
+            y: [...v.map((p) => p.esperado_despues), ...(d.hoy ? [d.hoy.esperado_pct] : [])],
+            line: { color: c.series[0], width: 1.8 }, marker: { size: 5 },
+            hovertemplate: "%{x}<br>" + t("esperado", "expected") + ": %{y:.1f} % " + t("anual", "a year") + "<extra></extra>" },
+          ...(d.hoy ? [{ type: "scatter", mode: "markers", name: t("hoy", "today"), x: [t("hoy", "today")],
+            y: [d.hoy.var95_pct], marker: { symbol: "diamond", size: 11, color: c.texto2 },
+            hovertemplate: t("hoy", "today") + ": %{y:.2f} %<extra></extra>" }] : []),
+        ]}
+        layout={{
+          barmode: "overlay", bargap: 0.35,
+          xaxis: { type: "category", tickangle: -45 },
+          yaxis: { title: t("Día malo (VaR 95 %)", "Bad day (VaR 95 %)"), ticksuffix: " %",
+                   range: [0, 1.1 * Math.max(ZONAS.limite, d.hoy?.var95_pct || 0,
+                                              ...v.map((p) => Math.max(p.var_antes, p.var_despues)))] },
+          yaxis2: { ticksuffix: " %", overlaying: "y", side: "right", showgrid: false, nticks: 6, tickformat: ".1f", automargin: true },
+          shapes: [zona(ZONAS.prudente, c.positivo, t("prudente", "conservative")),
+                   zona(ZONAS.moderado, c.alerta, t("moderado", "moderate")),
+                   zona(ZONAS.limite, c.negativo, t("límite", "limit"))],
+          legend: { orientation: "h", y: -0.3 } }} />
+      <div className="pie">
+        {t(`Cada vela es un día con compras o ventas: arranca en el VaR 95 % de la cartera justo antes de operar y termina en el de después, las dos con los precios de ese día y medidas con la misma historia, así lo que cambia es sólo la decisión. Roja: el día malo quedó peor; verde: quedó mejor. Sumadas, las decisiones subieron el riesgo ${pct(sumaSube, 2)} y lo bajaron ${pct(-sumaBaja, 2)}. El hueco entre velas es el mercado moviendo los pesos. La línea es el rendimiento esperado anual de cada composición —el mismo del Monte Carlo—, y el rombo, la cartera de hoy (el VaR de los KPI). Sin FCI: son la caja.`,
+           `Each candle is a day with trades: it opens at the portfolio's 95 % VaR right before trading and closes at the one after, both at that day's prices and measured over the same history, so only the decision changes. Red: the bad day got worse; green: it got better. Added up, decisions raised risk by ${pct(sumaSube, 2)} and lowered it by ${pct(-sumaBaja, 2)}. The gap between candles is the market moving the weights. The line is each mix's expected annual return —the same as the Monte Carlo—, and the diamond, today's portfolio (the KPI VaR). Money market funds excluded: they're cash.`)}
+      </div>
+    </div>
+  );
+}
+
 function ZonasRiesgo({ d: todo }) {
   // Lab 11: el VaR de mañana (filtrado), el mismo de los KPI de arriba.
   const d = todo.var_fhs || todo;
@@ -4138,6 +4203,7 @@ function Riesgo({ d, cartera, extras }) {
       <KpisRiesgo d={d} capm={extras.capm} />
       {d.historia_larga && <HistoriaLarga d={d} />}
       <ZonasRiesgo d={d} />
+      {LAB && <RiesgoDecisiones cartera={cartera} />}
       <Seccion titulo={t("¿Cuándo se disparó el riesgo?", "When did risk spike?")} />
       <RiesgoEvolucion cartera={cartera} />
       <Seccion titulo={t("El riesgo de cada activo por separado", "The risk of each asset, separately")} />

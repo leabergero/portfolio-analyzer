@@ -684,6 +684,99 @@ def var_rolling(posiciones, ventana: int = 21, activo: str = None) -> dict:
     }
 
 
+# ── Riesgo de cada decisión ───────────────────────────────────────────────────
+
+def _var95_fhs_pct(r) -> float:
+    return _var_fhs(r, 0.0)["var95_pct"]
+
+
+def decisiones(abiertas, cerradas) -> dict:
+    """VaR 95 % filtrado y rendimiento esperado justo antes y justo después de
+    cada día con compras o ventas.
+
+    Las dos composiciones del día se valúan con los precios de ESE día y se
+    miden con la misma historia de hoy: la diferencia es la decisión, no el
+    mercado. Lo que cambia entre un día operado y el siguiente (los precios
+    mueven los pesos) queda como hueco entre velas, y el último punto, con los
+    pesos de hoy, es el VaR de los KPI. Lo cerrado entra: sin eso no hay ventas.
+    La caja (FCI) queda afuera, igual que en el VaR de arriba.
+    """
+    from core.models.montecarlo import _limpiar, _serie_larga, calibrar
+
+    # Los FCI son la caja: ni abiertos ni cerrados (que no traen `source`,
+    # traen `tipo`). Los dividendos tampoco son una compra ni una venta.
+    fci = {str(p["ticker"]).upper() for p in abiertas if p.get("source") == sources.SOURCE_FCI}
+    fci |= {str(p["ticker"]).upper() for p in cerradas if p.get("tipo") == "fci"}
+    lotes = [(str(p["ticker"]).upper(), str(p.get("buy_date") or ""), "9999",
+              float(p.get("qty", 0)), p.get("source") or None) for p in abiertas]
+    lotes += [(str(p["ticker"]).upper(), str(p.get("buy_date") or ""),
+               str(p.get("sell_date") or ""), float(p.get("qty", 0)), None)
+              for p in cerradas if p.get("tipo") not in ("dividendo", "fci")]
+    lotes = [l for l in lotes if l[1] and l[0] not in fci]
+
+    origen = {}
+    for t, *_, src in lotes:
+        if origen.get(t) is None:
+            origen[t] = src
+    propias, largas = {}, {}
+    for t, src in origen.items():
+        try:
+            propia, larga, _ = _serie_larga(t, src)
+        except Exception:
+            continue
+        if len(propia) and len(larga) >= 30:
+            propias[t], largas[t] = propia.dropna(), _limpiar(larga.dropna())
+    if not largas:
+        return {"error": "Sin datos para reconstruir la cartera."}
+
+    cal = calibrar([{"ticker": t, "qty": 1, "source": origen[t]} for t in largas])
+    mu = dict(zip(cal["tickers"], cal["a"] * RUEDAS)) if "error" not in cal else {}
+
+    def tenencia(dia, incluido):
+        """{ticker: qty} al cierre de `dia` (incluido) o justo antes."""
+        q = {}
+        for t, compra, venta, n, _ in lotes:
+            if t in largas and (compra <= dia < venta if incluido else compra < dia <= venta):
+                q[t] = q.get(t, 0.0) + n
+        return q
+
+    def medir(q, dia):
+        valor = {t: n * float(propias[t].asof(pd.Timestamp(dia)))
+                 for t, n in q.items() if n > 0}
+        valor = {t: v for t, v in valor.items() if v == v and v > 0}
+        if not valor:
+            return None
+        tickers = list(valor)
+        w = np.array([valor[t] for t in tickers]) / sum(valor.values())
+        px = pd.DataFrame({t: largas[t] for t in tickers}).sort_index().ffill().dropna()
+        r = px.pct_change().dropna().to_numpy() @ w
+        if len(r) < 30:
+            return None
+        esperado = sum(wi * mu[t] for wi, t in zip(w, tickers) if t in mu)
+        return {"var95_pct": round(-_var95_fhs_pct(r), 3),
+                "esperado_pct": round(float(esperado) * 100, 2)}
+
+    dias = sorted({l[1] for l in lotes} | {l[2] for l in lotes if l[2] != "9999"})
+    velas = []
+    for dia in dias:
+        antes, despues = tenencia(dia, False), tenencia(dia, True)
+        if antes == despues:
+            continue
+        a, b = medir(antes, dia), medir(despues, dia)
+        if b is None and a is None:
+            continue
+        cambios = [("+" if despues.get(t, 0) > antes.get(t, 0) else "−") + t
+                   for t in sorted(set(antes) | set(despues))
+                   if abs(despues.get(t, 0) - antes.get(t, 0)) > 1e-9]
+        velas.append({"fecha": dia, "operaciones": cambios,
+                      "var_antes": a and a["var95_pct"], "var_despues": b and b["var95_pct"],
+                      "esperado_antes": a and a["esperado_pct"],
+                      "esperado_despues": b and b["esperado_pct"]})
+    hoy_dia = str(max(s.index[-1] for s in propias.values()).date())
+    hoy = medir(tenencia("9998", True), hoy_dia)
+    return {"velas": velas, "hoy": hoy and {"fecha": hoy_dia, **hoy}}
+
+
 # ── Riesgo cambiario ──────────────────────────────────────────────────────────
 
 def riesgo_cambiario(posiciones) -> dict:
