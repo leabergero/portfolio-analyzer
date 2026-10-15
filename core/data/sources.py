@@ -114,6 +114,12 @@ def _de_cocos(ticker: str, desde: str, hasta: str) -> pd.DataFrame:
 # no pasa por acá.
 TTL_SIN_SERIE_H = 6.0
 
+# Tickers que ninguna fuente tiene y nunca va a tener: vendidos o vencidos, sólo
+# quedan en lo realizado. No se le pregunta a nadie por ellos. La caché negativa
+# no alcanzaba: cada 6 h BYMA volvía a pedir ~85 tramos de 90 días por cada uno,
+# casi un minuto por ticker con el único hilo de la VM (2026-10-15).
+SIN_FUENTE = {"S15G5", "GOOGLD", "MGCGOD"}
+
 # Cuánto se espera antes de volver a salir por un ticker cuya caché no llega a
 # la última rueda. Acota el costo de los feriados, que `_ultima_rueda` no conoce.
 TTL_FRESCO_H = 2.0
@@ -188,6 +194,9 @@ def precios(ticker: str, desde: str = None, hasta: str = None,
         # uno, en cada pedido. Es la espera más cara de la app y no aporta nada.
         elif cache.leer_respuesta(f"sin-serie:{ticker}", TTL_SIN_SERIE_H) is True:
             return pd.DataFrame()
+
+    if strip_ba(ticker) in SIN_FUENTE:
+        return cache.leer_precios(ticker, desde, hasta)
 
     usar_cocos = source == "cocos" or (source is None and is_cocos_only(ticker))
     fuentes = [_de_cocos] if usar_cocos else [_de_yfinance, _de_byma]
