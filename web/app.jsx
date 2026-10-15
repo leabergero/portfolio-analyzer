@@ -3184,8 +3184,6 @@ function RiesgoDecisiones({ cartera }) {
           y: [...v.map((p) => p.esperado_despues), ...(d.hoy ? [d.hoy.esperado_pct] : [])],
           line: { color: AZUL_ESPERADO, width: 1.2 }, marker: { size: 3, color: AZUL_ESPERADO },
           opacity: 0.7, hoverinfo: "none" },
-        ...(d.hoy ? [{ type: "scatter", mode: "markers", x: [hoy], y: [d.hoy.var95_pct],
-          marker: { symbol: "diamond", size: 11, color: c.texto2 }, yaxis: "y2", hoverinfo: "none" }] : []),
       ],
       layout: {
         barmode: "overlay", bargap: 0.35, showlegend: false, hovermode: "x",
@@ -3195,7 +3193,7 @@ function RiesgoDecisiones({ cartera }) {
         yaxis2: { title: t("Día malo (VaR 95 %)", "Bad day (VaR 95 %)"), ticksuffix: " %",
                   overlaying: "y", side: "left", showgrid: false, automargin: true,
                   linecolor: c.borde, zerolinecolor: c.borde,
-                  range: [0, 1.1 * Math.max(ZONAS.limite, d.hoy?.var95_pct || 0,
+                  range: [0, 1.1 * Math.max(ZONAS.limite,
                                              ...v.map((p) => Math.max(p.var_antes, p.var_despues)))] },
         yaxis: { title: t("Rendimiento esperado anual", "Expected annual return"), ticksuffix: " %",
                  side: "right", nticks: 6, tickformat: ".1f" },
@@ -3230,8 +3228,8 @@ function RiesgoDecisiones({ cartera }) {
       </span>
       {grafico && <Grafico alto={360} datos={grafico.datos} layout={grafico.layout} alPasar={alPasar} />}
       <div className="pie">
-        {t(`Cada vela es un día con compras o ventas: arranca en el VaR 95 % de la cartera justo antes de operar y termina en el de después, las dos con los precios de ese día y medidas con la misma historia, así lo que cambia es sólo la decisión. Roja: el día malo quedó peor; verde: quedó mejor. Sumadas, las decisiones subieron el riesgo ${pct(sumaSube, 2)} y lo bajaron ${pct(-sumaBaja, 2)}. El hueco entre velas es el mercado moviendo los pesos. La línea azul es el rendimiento esperado anual de cada composición —el mismo del Monte Carlo—, y el rombo, la cartera de hoy (el VaR de los KPI). Sin FCI: son la caja.`,
-           `Each candle is a day with trades: it opens at the portfolio's 95 % VaR right before trading and closes at the one after, both at that day's prices and measured over the same history, so only the decision changes. Red: the bad day got worse; green: it got better. Added up, decisions raised risk by ${pct(sumaSube, 2)} and lowered it by ${pct(-sumaBaja, 2)}. The gap between candles is the market moving the weights. The blue line is each mix's expected annual return —the same as the Monte Carlo—, and the diamond, today's portfolio (the KPI VaR). Money market funds excluded: they're cash.`)}
+        {t(`Cada vela es un día con compras o ventas: arranca en el VaR 95 % de la cartera justo antes de operar y termina en el de después, las dos con los precios de ese día y medidas con la misma historia, así lo que cambia es sólo la decisión. Roja: el día malo quedó peor; verde: quedó mejor. Sumadas, las decisiones subieron el riesgo ${pct(sumaSube, 2)} y lo bajaron ${pct(-sumaBaja, 2)}. El hueco entre velas es el mercado moviendo los pesos. La línea azul es el rendimiento esperado anual de cada composición —el mismo del Monte Carlo—. Sin FCI: son la caja.`,
+           `Each candle is a day with trades: it opens at the portfolio's 95 % VaR right before trading and closes at the one after, both at that day's prices and measured over the same history, so only the decision changes. Red: the bad day got worse; green: it got better. Added up, decisions raised risk by ${pct(sumaSube, 2)} and lowered it by ${pct(-sumaBaja, 2)}. The gap between candles is the market moving the weights. The blue line is each mix's expected annual return —the same as the Monte Carlo—. Money market funds excluded: they're cash.`)}
       </div>
     </div>
   );
