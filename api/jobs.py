@@ -58,6 +58,8 @@ def _bl(posiciones, manuales, benchmark, max_weight, lab):
 
 SUELTOS = {
     "benchmarks": capm.comparar_benchmarks,
+    # Necesita lo ya cerrado, que vive en el store bajo el nombre de la cartera.
+    "riesgo_decisiones": lambda p, c: risk.decisiones(p, store.cargar_realizado(c)),
     "riesgo_rolling": risk.var_rolling,
     "riesgo_activos": risk.por_activo,
     "riesgo_cambiario": risk.riesgo_cambiario,
@@ -147,6 +149,8 @@ MODELOS = {
 
     # ── Riesgo ──
     "stress":       ("Stress test",     lambda p, c: risk.stress_test(p)),
+    # En el orden de la pestaña: va debajo de los márgenes, antes de la ventana.
+    "riesgo_decisiones": ("Riesgo de cada decisión", _tibio("riesgo_decisiones", lambda p, c: (c,))),
     "riesgo_rolling": ("Riesgo en el tiempo", _tibio("riesgo_rolling", lambda p, c: (21, None))),
     "riesgo_activos": ("Riesgo por activo", _tibio("riesgo_activos", lambda p, c: (None,))),
     "riesgo_cambiario": ("Riesgo cambiario", _tibio("riesgo_cambiario")),
