@@ -177,6 +177,49 @@ def test_series_en_pesos_de_tickers_vendidos():
     assert ticker_currency("KOD.BA") == "USD"
 
 
+def test_ons_vencidas_de_karin_son_bonos_y_no_buscan_subyacente():
+    """WNCHD, RCCPD, DHS8D y MGCGD no siguen la regla de las ONs: tomadas por
+    CEDEARs, el riesgo de cada decisión le pedía a BYMA un "subyacente" WNCH,
+    ~30 s por cada uno, cada 6 h, con todo el lote esperando detrás."""
+    is_bond = require("core.data.symbols", "is_bond")
+    sin_fuente = require("core.data.sources", "SIN_FUENTE")
+    for t in ("WNCHD.BA", "RCCPD.BA", "DHS8D", "MGCGD.BA"):
+        assert is_bond(t), t
+    assert {"WNCH", "RCCP", "DHS8", "MGCG"} <= sin_fuente
+
+
+def test_una_corrida_nueva_saca_de_la_fila_lo_que_esperaba_de_la_anterior():
+    """Con un solo hilo, abrir otra cartera esperaba el lote entero de la
+    anterior. Lo que no arrancó se cancela; la corrida vieja no se reusa."""
+    import threading, time
+    jobs = require("api", "jobs")
+    previos, pool = dict(jobs.MODELOS), jobs._pool
+    suelta = threading.Event()
+    try:
+        jobs._pool = jobs.ThreadPoolExecutor(max_workers=1)
+        jobs.MODELOS.clear()
+        jobs.MODELOS.update({f"m{i}": (f"Modelo {i}", lambda p, c: suelta.wait(2) and {})
+                             for i in range(4)})
+        vieja = jobs.lanzar("test-a", [{"ticker": "X"}])
+        time.sleep(0.1)
+        nueva = jobs.lanzar("test-b", [{"ticker": "X"}])
+        suelta.set()
+        for _ in range(50):
+            if jobs.estado(nueva)["estado"] == "terminado":
+                break
+            time.sleep(0.05)
+        e = jobs.estado(vieja)
+        assert jobs.estado(nueva)["estado"] == "terminado"
+        assert [v["estado"] for v in e["modelos"].values()].count("en cola") == 3, e["modelos"]
+        assert jobs.lanzar("test-a", [{"ticker": "X"}]) != vieja
+    finally:
+        suelta.set()
+        jobs._pool.shutdown(wait=True)
+        jobs._pool = pool
+        jobs.MODELOS.clear()
+        jobs.MODELOS.update(previos)
+
+
 def test_bono_dolar_sigue_circuito_ars():
     """Los bonos y ONs, aun en su variante "D", los devuelve Cocos EN PESOS.
 

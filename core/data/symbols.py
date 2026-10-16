@@ -83,7 +83,14 @@ LETRAS = {
     "S15G5",   # vencida; sin esto su serie entraba 100 veces más grande (2026-10-16)
 }
 
-COCOS_ONLY = SOBERANOS | set(ON_D_TICKER) | LETRAS
+# ONs vencidas que sólo quedan en lo realizado de KARIN, con el nombre del
+# tramo en dólares que trajo Cocos. No siguen la regla de `_parece_on` y el
+# código en pesos no se conoce, así que no van a `ON_D_TICKER`. Sin esto se las
+# tomaba por CEDEARs: `_serie_larga` buscaba un "subyacente" WNCH, RCCP… y
+# BYMA tardaba ~30 s por cada uno, cada 6 h, frenando todo el lote (2026-10-16).
+ON_VENCIDAS_D = {"WNCHD", "RCCPD", "DHS8D", "MGCGD"}
+
+COCOS_ONLY = SOBERANOS | set(ON_D_TICKER) | LETRAS | ON_VENCIDAS_D
 
 # Símbolos reales de BYMA que terminan en "D" de casualidad y cotizan en pesos:
 # NO son la variante dólar de nada. Si aparece otro, va acá — no se toca la

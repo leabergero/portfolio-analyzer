@@ -235,6 +235,8 @@ def _reusable(huella: str):
                       if c.get("huella") == huella
                       and ahora - c["inicio"] < _TTL_CORRIDA_S]
         for _, rid, c in sorted(candidatas, reverse=True):
+            if c.get("cancelada"):
+                continue
             modelos = c["modelos"].values()
             if all(m["estado"] == "error" for m in modelos):
                 continue
@@ -283,10 +285,22 @@ def lanzar(nombre_cartera: str, posiciones: list, modelos: list = None,
         # Corrida nueva, números nuevos: lo recordado de la anterior no vale.
         quien = (store.quien(), nombre_cartera)
         _generacion[quien] = _generacion.get(quien, 0) + 1
+        # Lo que todavía espera en la fila de las corridas anteriores de este
+        # usuario ya no lo mira nadie: pasó a otra cartera o pidió recalcular.
+        # Con un solo hilo (la VM), dejarlo ahí hacía esperar a la cartera de
+        # la pantalla detrás del lote entero de la anterior: abrir LEANDRO,
+        # MAMI y KARIN seguidas encolaba 72 modelos (2026-10-16). Lo que ya
+        # arrancó termina; la corrida no se reusa porque le faltan modelos.
+        # ponytail: dos pestañas del mismo usuario en carteras distintas se
+        # cancelan entre sí y la de atrás queda quieta hasta que se la vuelva a
+        # abrir; prioridad por corrida si eso llega a pasar de verdad.
+        previas = [c for c in _corridas.values()
+                   if c.get("quien") == store.quien() and c["estado"] == "corriendo"]
         _corridas[run_id] = {
             "cartera": nombre_cartera, "estado": "corriendo",
-            "inicio": time.time(), "huella": huella,
+            "inicio": time.time(), "huella": huella, "quien": store.quien(),
             "modelos": {m: {"estado": "en cola", "resultado": None} for m in elegidos},
+            "futuros": [],
         }
         # Descarta las más viejas.
         if len(_corridas) > _MAX_CORRIDAS:
@@ -323,6 +337,11 @@ def lanzar(nombre_cartera: str, posiciones: list, modelos: list = None,
         # existe en el Future. Sin esto, un modelo que revienta ahí no da error:
         # se queda calculando para siempre, que es la peor forma de fallar.
         fut.add_done_callback(lambda f, m=m: _fallo_del_pool(run_id, m, f))
+        _corridas[run_id]["futuros"].append(fut)
+
+    for c in previas:
+        if sum(f.cancel() for f in c["futuros"]):
+            c["cancelada"] = True
 
     return run_id
 
