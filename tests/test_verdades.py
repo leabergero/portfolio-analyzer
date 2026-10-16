@@ -166,6 +166,17 @@ def test_ypfd_no_es_variante_dolar():
     assert ticker_currency("YPFD.BA") == "ARS"
 
 
+def test_series_en_pesos_de_tickers_vendidos():
+    """GOOGLD y MGCGOD quedaron con su serie de Yahoo en pesos: la curva de valor
+    de LEANDRO llegaba a 62 millones. MGCGOD es además una ON (cada 100)."""
+    ticker_currency = require("core.data.symbols", "ticker_currency")
+    is_bond = require("core.data.symbols", "is_bond")
+    assert ticker_currency("GOOGLD.BA") == "ARS"
+    assert ticker_currency("MGCGOD.BA") == "ARS" and is_bond("MGCGOD.BA")
+    assert is_bond("S15G5.BA")
+    assert ticker_currency("KOD.BA") == "USD"
+
+
 def test_bono_dolar_sigue_circuito_ars():
     """Los bonos y ONs, aun en su variante "D", los devuelve Cocos EN PESOS.
 

@@ -65,6 +65,10 @@ ON_D_TICKER = {
     "YMCXO": "YMCXD",
     "IRCPO": "IRCPD",
     "DNC7O": "DNC7D",
+    # Vencida, sólo en lo realizado de LEANDRO. Sin esta entrada su serie
+    # guardada (pesos, cada 100 nominales) se leía como dólares por nominal y la
+    # curva de valor llegaba a 62 millones (2026-10-16).
+    "MGCGO": "MGCGOD",
 }
 
 # La reversa de la de arriba: del ticker en dólares al código real que Cocos
@@ -76,6 +80,7 @@ ON_O_TICKER = {v: k for k, v in ON_D_TICKER.items()}
 LETRAS = {
     "S31E5", "S28F5", "S31M5", "S30J5", "S31J5",
     "T17O5", "T31O5", "T14N5", "T28N5", "T15D5", "T30E6",
+    "S15G5",   # vencida; sin esto su serie entraba 100 veces más grande (2026-10-16)
 }
 
 COCOS_ONLY = SOBERANOS | set(ON_D_TICKER) | LETRAS
@@ -91,6 +96,13 @@ COCOS_ONLY = SOBERANOS | set(ON_D_TICKER) | LETRAS
 # los recortaba a "AM", "GL" y "GIL", y una compra de GLD se importaba como
 # GL.BA, un papel que no existe.
 D_FALSOS_POSITIVOS = {"YPFD", "AMD", "GLD", "GILD"}
+
+# Tramos en dólares cuya serie de cierres guardada vino de Yahoo en pesos.
+# Ya no se le pregunta a nadie por ellos (`SIN_FUENTE`), así que la serie que
+# queda es ésa: GOOGLD.BA a 3.597 era GOOGL a 3,1 USD, y la curva de LEANDRO
+# subía a 2,7 millones mientras lo tuvo (2026-10-16). Los trades guardan su
+# propia moneda, que manda sobre esto.
+D_SERIE_EN_PESOS = {"GOOGLD"}
 
 
 # ── Descomposición del ticker ─────────────────────────────────────────────────
@@ -224,7 +236,8 @@ def ticker_currency(ticker: str) -> str:
         return "USD" if "." not in t else _moneda_declarada(t)
 
     # Acciones y CEDEARs: la "D" sí significa que ya viene en dólares.
-    return "USD" if is_d_variant(strip_ba(t)) else "ARS"
+    sym = strip_ba(t)
+    return "USD" if is_d_variant(sym) and sym not in D_SERIE_EN_PESOS else "ARS"
 
 
 def _moneda_declarada(ticker: str) -> str:
