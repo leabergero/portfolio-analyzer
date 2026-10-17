@@ -5140,12 +5140,16 @@ function MonteCarlo({ d, cartera, escenario }) {
   // veces, y tenerlas en pestañas separadas obligaba a arrancar cada una a mano.
   const [corriendo, setCorriendo] = useState(false);
   const f = d.final || {};
+  const ganMed = d.valor_inicial ? (f.mediana / d.valor_inicial - 1) * 100 : null;
   return (
     <>
       <div className="kpis">
         <Kpi etiqueta={t("Hoy", "Today")} valor={usd(d.valor_inicial)} />
         <Kpi etiqueta={t("Mediana a un año", "Median in a year")} valor={usd(f.mediana)}
-             tono={f.mediana > d.valor_inicial ? "pos" : "neg"} />
+             tono={f.mediana > d.valor_inicial ? "pos" : "neg"}
+             sub={ganMed == null ? null : ganMed >= 0
+               ? t(`ganás ${pct(ganMed, 1)}`, `you gain ${pct(ganMed, 1)}`)
+               : t(`perdés ${pct(-ganMed, 1)}`, `you lose ${pct(-ganMed, 1)}`)} />
         <Kpi etiqueta={t("Escenario malo (5 %)", "Bad scenario (5 %)")} valor={usd(f.var95)} tono="neg"
              sub={t(`perdés ${pct(f.perdida_var95_pct, 1)}`, `you lose ${pct(f.perdida_var95_pct, 1)}`)} />
         <Kpi etiqueta={t("Escenario muy malo (1 %)", "Very bad scenario (1 %)")} valor={usd(f.var99)} tono="neg"
