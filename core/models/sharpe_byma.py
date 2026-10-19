@@ -92,7 +92,13 @@ def _fila(sym: str, tipo: str, desde: str, mercados: dict):
     r = usd.pct_change().dropna()
     r = r[np.isfinite(r)]
     beta, alfa = _beta_alfa(r, mercados[tipo])
+    # El nombre de un CEDEAR es el de la empresa en EE.UU.: la ficha del .BA
+    # suele faltar en yfinance. La ficha queda en caché una semana.
+    ficha = sources.info(symbols.CEDEAR_EEUU.get(sym, sym) if tipo == "cedear" else t) or {}
+    if not (ficha.get("longName") or ficha.get("shortName")):
+        ficha = sources.info(t) or {}          # PETR3, BAYN: no hay símbolo igual en EE.UU.
     return {"ticker": t, "tipo": tipo, "ruedas": len(usd), "beta": beta, "alfa_pct": alfa,
+            "nombre": ficha.get("longName") or ficha.get("shortName") or "",
             "sharpe": round(risk.sharpe(r.values, RF), 2),
             "retorno_pct": round(((usd.iloc[-1] / usd.iloc[0]) ** (252 / len(usd)) - 1) * 100, 1),
             "vol_pct": round(float(r.std() * np.sqrt(252)) * 100, 1),

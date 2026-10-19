@@ -1576,7 +1576,7 @@ function SharpeByma({ elegir }) {
             <tbody>{filas.slice(0, ver).map((x) => (
               <tr key={x.ticker} style={{ cursor: "pointer" }} onClick={() => elegir(x.ticker)}
                   title={t("Pasarlo al simulador", "Send it to the simulator")}>
-                <td className="mono"><b>{x.ticker.replace(/\.BA$/, "")}</b>
+                <td className="mono" title={x.nombre || undefined}><b>{x.ticker.replace(/\.BA$/, "")}</b>
                   {x.salto && <span className="neg" title={t(
                     "Saltó más de 40 % en un día: puede ser un cambio de ratio mal ajustado. No le creas el Sharpe sin mirarlo.",
                     "Jumped over 40% in one day: may be a badly adjusted ratio change. Don't trust the Sharpe without checking.")}> ⚠</span>}</td>
