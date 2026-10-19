@@ -175,6 +175,7 @@ def test_series_en_pesos_de_tickers_vendidos():
     assert ticker_currency("MGCGOD.BA") == "ARS" and is_bond("MGCGOD.BA")
     assert is_bond("S15G5.BA")
     assert ticker_currency("KOD.BA") == "USD"
+    assert ticker_currency("VD.BA") == "USD", "Visa: una letra antes de la D"
 
 
 def test_ons_vencidas_de_karin_son_bonos_y_no_buscan_subyacente():
@@ -241,6 +242,7 @@ def test_base_del_cedear_no_come_letras_de_mas():
     base_symbol = require("core.data.symbols","base_symbol")
     assert base_symbol("GLDD.BA") == "GLD"
     assert base_symbol("KOD.BA") == "KO"
+    assert base_symbol("VD.BA") == "V"
     assert base_symbol("AL30D.BA") == "AL30"
     assert base_symbol("METR.BA") == "METR"
 

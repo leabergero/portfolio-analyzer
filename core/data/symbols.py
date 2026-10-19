@@ -123,15 +123,15 @@ def strip_ba(ticker: str) -> str:
 def is_d_variant(symbol: str) -> bool:
     """¿Es el tramo en dólares de otro instrumento?
 
-    Exige al menos 2 caracteres antes de la "D" (KOD → base "KO"). El umbral
-    importa: cuando pedía 3, los CEDEARs de tickers cortos como KO no se
-    detectaban, se los trataba como pesos y se les aplicaba el MEP sobre un
+    Alcanza con 1 carácter antes de la "D" (VD → base "V", KOD → "KO"). El
+    umbral importa: cada vez que pidió más, los CEDEARs de tickers cortos (KO,
+    después Visa) se trataban como pesos y se les aplicaba el MEP sobre un
     precio que ya estaba en dólares.
     """
     sym = symbol.upper()
     if sym in D_FALSOS_POSITIVOS:
         return False
-    return len(sym) >= 3 and sym.endswith("D") and sym[-2].isalnum()
+    return len(sym) >= 2 and sym.endswith("D") and sym[-2].isalnum()
 
 
 def base_symbol(ticker: str) -> str:
