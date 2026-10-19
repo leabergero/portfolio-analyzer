@@ -17,6 +17,10 @@
 
 const { useState, useEffect, useRef, useCallback, useMemo } = React;
 
+/* Lo que está en evaluación se ve sólo con `?lab=1`; al aprobarlo se borra el
+   condicional. Hoy: el aviso de dividendos por traer en Posiciones cerradas. */
+const LAB = new URLSearchParams(location.search).get("lab") === "1";
+
 /* La piel de la app vive en dos hojas, lab1.css y lab5.css, y sus reglas
    cuelgan de `data-lab="1"` en el <html>. Los nombres son historia: nacieron
    como rediseños en prueba detrás de `?lab=N` y quedaron cuando se aprobaron
@@ -2434,6 +2438,17 @@ function PnlRealizado({ real, cartera, recargar, fciTrades, hayFci, conFci, setC
   // Dividendo en edición: su clave y el importe neto que se está escribiendo.
   const [editando, setEditando] = useState(null);
   const [yahoo, setYahoo] = useState(null);
+  // Dividendos de Yahoo posteriores al último cargado: sólo se cuentan, traerlos
+  // sigue siendo con los botones de abajo. Se vuelve a mirar al cambiar las
+  // cerradas, para que el aviso se apague después de importar.
+  const [pendientes, setPendientes] = useState(null);
+  useEffect(() => {
+    if (!LAB) return;
+    let vivo = true;
+    api(`/api/carteras/${encodeURIComponent(cartera)}/dividendos/pendientes`)
+      .then((r) => vivo && setPendientes(r.error ? null : r));
+    return () => { vivo = false; };
+  }, [cartera, (real.trades || []).length]);
   const guardarImporte = async (tr) => {
     const r = await api(`/api/carteras/${encodeURIComponent(cartera)}/realizado`, {
       method: "PATCH", headers: { "Content-Type": "application/json" },
@@ -2492,6 +2507,12 @@ function PnlRealizado({ real, cartera, recargar, fciTrades, hayFci, conFci, setC
         <span style={{ display: "flex", alignItems: "center", gap: 9 }}>
           <span style={{ fontSize: 11, color: "var(--texto-3)" }}>{abierto ? "▾" : "▸"}</span>
           {t("Posiciones cerradas", "Closed positions")}
+          {pendientes?.n > 0 && (
+            <span style={{ color: "var(--acento)", fontSize: 13, fontWeight: 600 }}
+                  title={t(`Desde ${pendientes.desde || "el inicio"}: ${pendientes.tickers.join(", ")}`,
+                           `Since ${pendientes.desde || "the start"}: ${pendientes.tickers.join(", ")}`)}>
+              ({pendientes.n} {t(pendientes.n === 1 ? "dividendo nuevo" : "dividendos nuevos",
+                                 pendientes.n === 1 ? "new dividend" : "new dividends")})</span>)}
         </span>
         <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 14 }}>
           {hayFci && (

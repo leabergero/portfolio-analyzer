@@ -300,6 +300,23 @@ def dividendos_yahoo(nombre):
                                    for m in {t["moneda"] for t in nuevos}}})
 
 
+@bp.get("/<nombre>/dividendos/pendientes")
+def dividendos_pendientes(nombre):
+    """Los de Yahoo posteriores al último dividendo cargado: lo que falta traer.
+
+    Sólo mira; no escribe nada. Lo anterior a la última importación no cuenta
+    aunque Yahoo lo tenga: si no se trajo, fue a propósito.
+    """
+    from core.models import dividendos
+    realizadas = store.cargar_realizado(nombre)
+    ultimo = max((t["sell_date"] for t in realizadas if t.get("tipo") == "dividendo"), default="")
+    nuevos = [t for t in dividendos.proponer(store.cargar(nombre), realizadas,
+                                             store.retenciones(nombre).get("dividendos") or {})
+              if t["sell_date"] > ultimo]
+    return jsonify({"n": len(nuevos), "desde": ultimo,
+                    "tickers": sorted({t["ticker"] for t in nuevos})})
+
+
 @bp.post("/<nombre>/importar-yahoo")
 def importar_yahoo(nombre):
     if "file" not in request.files:
