@@ -273,7 +273,8 @@ def _serie_larga(ticker, source):
     base = symbols.base_symbol(ticker)
     larga, origen = None, None
     try:
-        if base != symbols.strip_ba(ticker):                    # CEDEAR → subyacente
+        if base != symbols.strip_ba(ticker) or symbols.es_cedear(ticker):  # CEDEAR → subyacente
+            base = symbols.CEDEAR_EEUU.get(base, base)
             larga, origen = sources.precios_base(base), base
         elif symbols.ticker_currency(ticker) == "ARS":          # acción local
             crudo = sources.precios(ticker, source=source)["Close"].dropna()
@@ -288,7 +289,7 @@ def _serie_larga(ticker, source):
 def _pais_y_mercado(ticker, source):
     """(país o mezcla por ingresos, índice local contra el que medir β o None
     para medirla contra SPY)."""
-    from core.data import sources
+    from core.data import sources, symbols
     from core.models import composicion
     base = sources.base_symbol(ticker)
     if base in _PAIS_POR_INGRESOS:
@@ -297,7 +298,8 @@ def _pais_y_mercado(ticker, source):
     pais = composicion._clasificar_pais(ticker, base, tipo, ficha)
     en_su_plaza = (sources.is_bond(ticker, source) or ticker.endswith(_SUFIJOS_EU)
                    or base in composicion.PAISES_ETF
-                   or (ticker.endswith(".BA") and base == sources.strip_ba(ticker)))
+                   or (ticker.endswith(".BA") and base == sources.strip_ba(ticker)
+                       and not symbols.es_cedear(ticker)))
     return pais, (_INDICE.get(pais) if en_su_plaza else None)
 
 

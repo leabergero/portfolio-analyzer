@@ -18,7 +18,9 @@
 const { useState, useEffect, useRef, useCallback, useMemo } = React;
 
 /* Lo que está en evaluación se ve sólo con `?lab=1`; al aprobarlo se borra el
-   condicional. Hoy: el buscador de papeles de BYMA por Sharpe, en el Simulador. */
+   condicional. Hoy: el buscador de papeles de BYMA por Sharpe, en el Simulador, y
+   la moneda y el tipo de cada especie según BYMA (header `X-Lab`, ver
+   `core/data/symbols.py`). */
 const LAB = new URLSearchParams(location.search).get("lab") === "1";
 
 /* La piel de la app vive en dos hojas, lab1.css y lab5.css, y sus reglas
@@ -176,6 +178,7 @@ const api = async (ruta, opciones) => {
   if (guardadoInviu) o.headers = { ...(o.headers || {}), "X-Sesion-Inviu": guardadoInviu };
   if (SIM_ACTIVA) o.headers = { ...(o.headers || {}), "X-Sim": SIM_ACTIVA };
   o.headers = { ...(o.headers || {}), "X-Mercado": MERCADO };
+  if (LAB) o.headers["X-Lab"] = "1";
 
   // Si se corta la conexión (la notebook se durmió, cambió la red) `fetch`
   // rechaza y nadie llama al setState: la pantalla quedaba en "Calculando…"
@@ -1564,6 +1567,10 @@ function SharpeByma({ elegir }) {
             <thead><tr><th>Ticker</th><th>{t("Tipo", "Type")}</th><th className="n">Sharpe</th>
               <th className="n">{t("Retorno anual", "Annual return")}</th>
               <th className="n">{t("Volatilidad", "Volatility")}</th>
+              <th className="n" title={t("Contra el Merval en dólares MEP si es acción argentina; contra el S&P 500 si es CEDEAR.",
+                                         "Against the Merval in MEP dollars for Argentine stocks; against the S&P 500 for CEDEARs.")}>Beta</th>
+              <th className="n" title={t("Lo que rindió por encima de lo que explica su beta, anual.",
+                                         "What it returned above what its beta explains, annualized.")}>{t("Alfa", "Alpha")}</th>
               <th className="n">{t("Volumen USD/día", "Volume USD/day")}</th>
               <th className="n">{t("Días sin operar", "Days untraded")}</th></tr></thead>
             <tbody>{filas.slice(0, ver).map((x) => (
@@ -1577,6 +1584,8 @@ function SharpeByma({ elegir }) {
                 <td className={"n mono " + signo(x.sharpe)}><b>{num(x.sharpe, 2)}</b></td>
                 <td className={"n mono " + signo(x.retorno_pct)}>{num(x.retorno_pct, 1)} %</td>
                 <td className="n mono">{num(x.vol_pct, 1)} %</td>
+                <td className="n mono">{num(x.beta, 2)}</td>
+                <td className={"n mono " + signo(x.alfa_pct)}>{x.alfa_pct == null ? "—" : `${num(x.alfa_pct, 1)} %`}</td>
                 <td className="n mono">{usd(x.volumen_usd, 0)}</td>
                 <td className="n mono">{num(x.sin_operar_pct, 1)} %</td>
               </tr>))}</tbody>
@@ -1586,9 +1595,11 @@ function SharpeByma({ elegir }) {
               {t("Ver más", "Show more")}</button>)}
           <div className="pie">
             {t(`Último año (desde ${d.desde}), en dólares MEP, con tasa libre de ${num(d.rf * 100, 0)} %. `
+               + "La beta de una acción argentina es contra el Merval; la de un CEDEAR, contra el S&P 500. "
                + `La especie en pesos de cada papel; ${d.filas.length} de ${d.listados} tienen historia suficiente. `
                + `Calculado el ${d.fecha.replace("T", " ")}. Tocá una fila para simular la compra.`,
                `Last year (since ${d.desde}), in MEP dollars, with a ${num(d.rf * 100, 0)}% risk-free rate. `
+               + "An Argentine stock's beta is against the Merval; a CEDEAR's, against the S&P 500. "
                + `Each stock's peso line; ${d.filas.length} of ${d.listados} have enough history. `
                + `Calculated on ${d.fecha.replace("T", " ")}. Tap a row to simulate the buy.`)}
           </div>

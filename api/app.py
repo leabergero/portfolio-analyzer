@@ -25,7 +25,7 @@ from api.routes import acceso, analisis, carteras, datos  # noqa: E402
 from core import mercado, usuarios  # noqa: E402
 from core.broker import cocos, inviu, sesion  # noqa: E402
 from core.io import store  # noqa: E402
-from core.data import mep  # noqa: E402
+from core.data import mep, symbols  # noqa: E402
 
 WEB = Path(__file__).resolve().parent.parent / "web"
 PUERTO = int(os.environ.get("PA_PUERTO", 5002))
@@ -134,6 +134,9 @@ def modo():
 @app.before_request
 def elegir_mercado():
     mercado.poner(request.headers.get("X-Mercado"))
+    # Con `?lab=1` el front manda `X-Lab`: la moneda y el tipo de cada especie
+    # de BYMA salen del diccionario y no sólo de la D (ver `symbols.LAB`).
+    symbols.LAB.set(request.headers.get("X-Lab") == "1")
 
 
 @app.before_request

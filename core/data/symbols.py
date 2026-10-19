@@ -27,6 +27,55 @@ DESDE COCOS EN PESOS. La "D" del CEDEAR dice "cotiza en dólares"; la "D" del
 bono es solo el nombre de la especie.
 """
 
+import json
+from contextvars import ContextVar
+from pathlib import Path
+
+# ── Especies de BYMA (lab) ────────────────────────────────────────────────────
+# La regla de la D adivina por el nombre, y hay papeles cuyo nombre termina en D
+# de casualidad: MCD, HD, JD son CEDEARs en pesos (McDonald's, Home Depot, JD) y
+# su tramo en dólares es MCDD, HDD, JDD. BYMA informa la moneda y el tipo de
+# cada especie, así que con `?lab=1` (header `X-Lab`) manda lo que dice BYMA y la
+# regla de la D queda para lo que no figura en el panel de hoy —lo vendido, lo
+# vencido—. Para MU / MUD las dos dicen lo mismo: pesos y dólares.
+#
+# El archivo lo deja el timer nocturno (`core.models.sharpe_byma`): no se pide
+# nada a BYMA en un request. Sin archivo, todo sigue como sin lab.
+LAB = ContextVar("lab", default=False)
+ESPECIES = Path(__file__).resolve().parents[2] / "data" / "especies_byma.json"
+_especies = {"mtime": None, "datos": {}}
+
+
+def especies() -> dict:
+    """{símbolo: {"moneda": "ARS" | "USD" | "EXT", "tipo": "CD" | "CS"}}."""
+    try:
+        mtime = ESPECIES.stat().st_mtime
+    except OSError:
+        return {}
+    if _especies["mtime"] != mtime:
+        try:
+            _especies.update(datos=json.loads(ESPECIES.read_text()), mtime=mtime)
+        except (OSError, ValueError):
+            return {}
+    return _especies["datos"]
+
+
+def _especie(symbol: str):
+    return especies().get(symbol.upper()) if LAB.get() else None
+
+
+def es_cedear(ticker: str) -> bool:
+    """Sólo con lab: un CEDEAR, sea cual sea su nombre (MU.BA lo es, sin D)."""
+    e = _especie(strip_ba(ticker))
+    return bool(e) and e["tipo"] == "CD"
+
+
+# Los CEDEARs cuyo símbolo en BYMA no es el de EE.UU. Sin entrada, el mismo.
+# ponytail: sólo los conocidos; uno que falte cae a su propia historia corta
+# (el chequeo de largo de `_serie_larga`), no a la de otro papel.
+CEDEAR_EEUU = {"BRKB": "BRK-B"}
+
+
 # ── Registro de instrumentos que solo existen en Cocos ────────────────────────
 # Bonos, ONs y letras. No están en yfinance ni en BYMA Open Data: pedirlos ahí
 # devuelve vacío o, peor, otra especie. Cotizan cada 100 nominales.
@@ -129,6 +178,11 @@ def is_d_variant(symbol: str) -> bool:
     precio que ya estaba en dólares.
     """
     sym = symbol.upper()
+    e = _especie(sym)
+    if e:
+        # Lo dice BYMA: es tramo en dólares si cotiza en USD y existe la especie
+        # sin la D. GLD (pesos) no, GLDD sí; MCD (pesos) no; YPFD (pesos) no.
+        return e["moneda"] == "USD" and sym.endswith("D") and sym[:-1] in especies()
     if sym in D_FALSOS_POSITIVOS:
         return False
     return len(sym) >= 2 and sym.endswith("D") and sym[-2].isalnum()
@@ -244,6 +298,8 @@ def ticker_currency(ticker: str) -> str:
 
     # Acciones y CEDEARs: la "D" sí significa que ya viene en dólares.
     sym = strip_ba(t)
+    if (_especie(sym) or {}).get("moneda") == "EXT":        # AAPLC: dólar cable
+        return "USD"
     return "USD" if is_d_variant(sym) and sym not in D_SERIE_EN_PESOS else "ARS"
 
 

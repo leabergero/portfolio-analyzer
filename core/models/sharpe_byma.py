@@ -9,7 +9,12 @@ web sólo lee el JSON que deja.
 Una especie por papel, la de pesos, medida en dólares MEP del último año con la
 tasa libre de 4 %. El volumen es el promedio diario en dólares —acciones ×
 cierre ÷ MEP—: las acciones operadas solas no comparan papeles de precios
-distintos.
+distintos. La beta, contra el mercado de cada papel: una acción argentina
+contra el Merval en dólares MEP, un CEDEAR contra el S&P 500 (SPY); el alfa
+es lo que rindió por encima de lo que esa beta explica, anualizado.
+
+De paso deja el diccionario de especies de BYMA (`symbols.ESPECIES`): ya
+tiene los paneles en la mano y es la misma rueda de todos los días.
 """
 
 import json
@@ -20,8 +25,7 @@ from pathlib import Path
 
 import numpy as np
 
-from core.data import sources
-from core.data.symbols import ticker_currency
+from core.data import sources, symbols
 from core.models import risk
 
 SALIDA = Path(__file__).resolve().parents[2] / "data" / "sharpe_byma.json"
@@ -33,26 +37,49 @@ SALTO = 0.40
 
 
 def universo() -> dict:
-    """{símbolo: "accion" | "cedear"}, sólo la especie en pesos."""
+    """{símbolo: "accion" | "cedear"}, sólo la especie en pesos. Guarda además
+    el diccionario de especies (todas las monedas) para `symbols`."""
+    import pandas as pd
     from pyobd import BymaData
     b = BymaData()
     # BYMA liquida a 24 h desde 2024; el default de la librería (48 h) da vacío.
-    paneles = (("accion", b.get_bluechips(settlement_t2=False, settlement_t1=True)),
-               ("accion", b.get_general_board(settlement_t2=False, settlement_t1=True)),
-               ("cedear", b.get_cedears()))
-    salida = {}
-    for tipo, df in paneles:
-        if df.empty:
-            continue
-        for s in df[df.denominationCcy == "ARS"].symbol:
-            # ponytail: los CEDEARs en pesos que terminan en D (MCD, HD, JD…) la
-            # app los toma por dólares; hasta arreglar la regla, afuera.
-            if ticker_currency(f"{s}.BA") == "ARS":
-                salida.setdefault(s, tipo)
-    return salida
+    df = pd.concat([b.get_bluechips(settlement_t2=False, settlement_t1=True),
+                    b.get_general_board(settlement_t2=False, settlement_t1=True),
+                    b.get_cedears()])
+    if df.empty:
+        return {}
+    especies = {s: {"moneda": m, "tipo": t}
+                for s, m, t in zip(df.symbol, df.denominationCcy, df.securityType)
+                if m in ("ARS", "USD", "EXT") and t in ("CD", "CS")}
+    # Un panel que vino a medias (BYMA a veces devuelve vacío fuera de hora) no
+    # pisa al de ayer: un diccionario corto haría volver a la regla de la D.
+    if len(especies) >= 0.8 * len(symbols.especies()):
+        tmp = symbols.ESPECIES.with_suffix(".tmp")
+        tmp.write_text(json.dumps(especies, sort_keys=True))
+        tmp.replace(symbols.ESPECIES)
+    return {s: "accion" if e["tipo"] == "CS" else "cedear"
+            for s, e in especies.items() if e["moneda"] == "ARS"}
 
 
-def _fila(sym: str, tipo: str, desde: str):
+def _mercados(desde: str) -> dict:
+    """{tipo: retornos diarios del mercado contra el que se mide la beta}."""
+    from core.models.montecarlo import _indice
+    return {"accion": _indice("^MERV").loc[desde:].pct_change().dropna(),
+            "cedear": sources.precios_base("SPY", desde).pct_change().dropna()}
+
+
+def _beta_alfa(r, m):
+    """(β, α anual %) sobre las ruedas en común; None sin un semestre en común."""
+    x, y = r.align(m, join="inner")
+    if len(x) < 120 or y.var() == 0:
+        return None, None
+    beta = float(np.cov(x, y)[0, 1] / y.var())
+    rf = RF / 252
+    alfa = ((x.mean() - rf) - beta * (y.mean() - rf)) * 252 * 100
+    return round(beta, 2), round(float(alfa), 1)
+
+
+def _fila(sym: str, tipo: str, desde: str, mercados: dict):
     t = f"{sym}.BA"
     try:
         crudo = sources.precios(t, desde)
@@ -64,7 +91,8 @@ def _fila(sym: str, tipo: str, desde: str):
     vol = crudo["Volume"].reindex(usd.index).fillna(0)
     r = usd.pct_change().dropna()
     r = r[np.isfinite(r)]
-    return {"ticker": t, "tipo": tipo, "ruedas": len(usd),
+    beta, alfa = _beta_alfa(r, mercados[tipo])
+    return {"ticker": t, "tipo": tipo, "ruedas": len(usd), "beta": beta, "alfa_pct": alfa,
             "sharpe": round(risk.sharpe(r.values, RF), 2),
             "retorno_pct": round(((usd.iloc[-1] / usd.iloc[0]) ** (252 / len(usd)) - 1) * 100, 1),
             "vol_pct": round(float(r.std() * np.sqrt(252)) * 100, 1),
@@ -74,10 +102,16 @@ def _fila(sym: str, tipo: str, desde: str):
 
 
 def calcular(hilos: int = 2) -> dict:
+    import contextvars
+    # El buscador es de lab: se calcula con la moneda que dice BYMA, no sólo la D.
+    symbols.LAB.set(True)
     desde = (date.today() - timedelta(days=365)).isoformat()
     papeles = universo()
+    mercados = _mercados(desde)
+    ctx = contextvars.copy_context()
     with ThreadPoolExecutor(hilos) as ex:
-        filas = [f for f in ex.map(lambda x: _fila(*x, desde), papeles.items()) if f]
+        filas = [f for f in ex.map(lambda x: ctx.copy().run(_fila, *x, desde, mercados),
+                                   papeles.items()) if f]
     filas.sort(key=lambda f: -f["sharpe"])
     datos = {"fecha": datetime.now(sources.TZ_BYMA).isoformat(timespec="minutes"),
              "rf": RF, "desde": desde, "listados": len(papeles), "filas": filas}

@@ -25,6 +25,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 
 from core import mercado
+from core.data import symbols
 from core.data.sources import TTL_SPOT_H, spot_forzable
 from core.io import store
 from core.models import (blacklitterman, capm, composicion, hrp, markowitz,
@@ -79,7 +80,7 @@ def suelto(cartera: str, clave: str, posiciones: list, *args, **kwargs):
     recalcular. Los errores no se recuerdan: son el entorno, no un resultado."""
     from core.models.portfolio import HISTORIA_LARGA
     quien = store.quien()
-    crudo = json.dumps([quien, mercado.actual(), HISTORIA_LARGA.get(), cartera,
+    crudo = json.dumps([quien, mercado.actual(), HISTORIA_LARGA.get(), symbols.LAB.get(), cartera,
                         _generacion.get((quien, cartera), 0), clave, args, kwargs, posiciones],
                        sort_keys=True, default=str)
     huella = hashlib.sha1(crudo.encode()).hexdigest()
@@ -213,7 +214,7 @@ _TTL_CORRIDA_S = TTL_SPOT_H * 3600
 
 def _huella(nombre_cartera, posiciones, elegidos) -> str:
     from core.models.portfolio import HISTORIA_LARGA
-    crudo = json.dumps([store.quien(), mercado.actual(), HISTORIA_LARGA.get(), nombre_cartera,
+    crudo = json.dumps([store.quien(), mercado.actual(), HISTORIA_LARGA.get(), symbols.LAB.get(), nombre_cartera,
                         sorted(elegidos), posiciones],
                        sort_keys=True, default=str)
     return hashlib.sha1(crudo.encode()).hexdigest()[:16]
