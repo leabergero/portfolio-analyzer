@@ -1,5 +1,5 @@
 """
-sharpe_byma.py — Sharpe y liquidez de las acciones y CEDEARs de BYMA (lab).
+sharpe_byma.py — Sharpe y liquidez de las acciones y CEDEARs de BYMA.
 
 Es un buscador de papeles, no un modelo de la cartera: recorre ~680 especies y
 baja una serie por cada una, algo que la VM no aguanta en un request. Por eso se
@@ -109,8 +109,6 @@ def _fila(sym: str, tipo: str, desde: str, mercados: dict):
 
 def calcular(hilos: int = 2) -> dict:
     import contextvars
-    # El buscador es de lab: se calcula con la moneda que dice BYMA, no sólo la D.
-    symbols.LAB.set(True)
     desde = (date.today() - timedelta(days=365)).isoformat()
     papeles = universo()
     mercados = _mercados(desde)

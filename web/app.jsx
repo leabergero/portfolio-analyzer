@@ -17,11 +17,6 @@
 
 const { useState, useEffect, useRef, useCallback, useMemo } = React;
 
-/* Lo que está en evaluación se ve sólo con `?lab=1`; al aprobarlo se borra el
-   condicional. Hoy: el buscador de papeles de BYMA por Sharpe, en el Simulador, y
-   la moneda y el tipo de cada especie según BYMA (header `X-Lab`, ver
-   `core/data/symbols.py`). */
-const LAB = new URLSearchParams(location.search).get("lab") === "1";
 
 /* La piel de la app vive en dos hojas, lab1.css y lab5.css, y sus reglas
    cuelgan de `data-lab="1"` en el <html>. Los nombres son historia: nacieron
@@ -178,7 +173,6 @@ const api = async (ruta, opciones) => {
   if (guardadoInviu) o.headers = { ...(o.headers || {}), "X-Sesion-Inviu": guardadoInviu };
   if (SIM_ACTIVA) o.headers = { ...(o.headers || {}), "X-Sim": SIM_ACTIVA };
   o.headers = { ...(o.headers || {}), "X-Mercado": MERCADO };
-  if (LAB) o.headers["X-Lab"] = "1";
 
   // Si se corta la conexión (la notebook se durmió, cambió la red) `fetch`
   // rechaza y nadie llama al setState: la pantalla quedaba en "Calculando…"
@@ -1495,7 +1489,7 @@ function Simulador({ cartera, sim, setSim, tenencias }) {
                   onClick={() => setSim([])}>{t("Volver a mi cartera", "Back to my portfolio")}</button>
         </div>)}
 
-      {LAB && <SharpeByma elegir={elegir} />}
+      <SharpeByma elegir={elegir} />
 
       <div className="pie">
         {IDIOMA === "en" ? (sim.length > 0

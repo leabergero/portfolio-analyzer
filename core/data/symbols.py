@@ -28,20 +28,18 @@ bono es solo el nombre de la especie.
 """
 
 import json
-from contextvars import ContextVar
 from pathlib import Path
 
 # ── Especies de BYMA (lab) ────────────────────────────────────────────────────
 # La regla de la D adivina por el nombre, y hay papeles cuyo nombre termina en D
 # de casualidad: MCD, HD, JD son CEDEARs en pesos (McDonald's, Home Depot, JD) y
 # su tramo en dólares es MCDD, HDD, JDD. BYMA informa la moneda y el tipo de
-# cada especie, así que con `?lab=1` (header `X-Lab`) manda lo que dice BYMA y la
+# cada especie, así que manda lo que dice BYMA y la
 # regla de la D queda para lo que no figura en el panel de hoy —lo vendido, lo
 # vencido—. Para MU / MUD las dos dicen lo mismo: pesos y dólares.
 #
 # El archivo lo deja el timer nocturno (`core.models.sharpe_byma`): no se pide
-# nada a BYMA en un request. Sin archivo, todo sigue como sin lab.
-LAB = ContextVar("lab", default=False)
+# nada a BYMA en un request. Sin archivo, queda la regla de la D.
 ESPECIES = Path(__file__).resolve().parents[2] / "data" / "especies_byma.json"
 _especies = {"mtime": None, "datos": {}}
 
@@ -61,11 +59,11 @@ def especies() -> dict:
 
 
 def _especie(symbol: str):
-    return especies().get(symbol.upper()) if LAB.get() else None
+    return especies().get(symbol.upper())
 
 
 def es_cedear(ticker: str) -> bool:
-    """Sólo con lab: un CEDEAR, sea cual sea su nombre (MU.BA lo es, sin D)."""
+    """Un CEDEAR según BYMA, sea cual sea su nombre (MU.BA lo es, sin D)."""
     e = _especie(strip_ba(ticker))
     return bool(e) and e["tipo"] == "CD"
 

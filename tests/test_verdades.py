@@ -247,11 +247,11 @@ def test_base_del_cedear_no_come_letras_de_mas():
     assert base_symbol("METR.BA") == "METR"
 
 
-def test_con_lab_manda_lo_que_dice_byma():
+def test_manda_lo_que_dice_byma():
     """MCD.BA es McDonald's en pesos aunque termine en D; MU / MUD siguen la D.
 
-    Con `?lab=1` la moneda y el tipo salen del diccionario de especies de BYMA;
-    sin lab, o con un papel que no figura, la regla de la D de siempre.
+    La moneda y el tipo salen del diccionario de especies de BYMA; con un papel
+    que no figura, la regla de la D de siempre.
     """
     from core.data import symbols
     falso = {"MCD": {"moneda": "ARS", "tipo": "CD"}, "MCDD": {"moneda": "USD", "tipo": "CD"},
@@ -260,21 +260,16 @@ def test_con_lab_manda_lo_que_dice_byma():
     antes = symbols.especies
     symbols.especies = lambda: falso
     try:
-        assert symbols.ticker_currency("MCD.BA") == "USD"          # sin lab: la D
-        token = symbols.LAB.set(True)
-        try:
-            assert symbols.ticker_currency("MCD.BA") == "ARS"
-            assert symbols.ticker_currency("MCDD.BA") == "USD"
-            assert symbols.base_symbol("MCD.BA") == "MCD"
-            assert symbols.ticker_currency("MU.BA") == "ARS"
-            assert symbols.ticker_currency("MUD.BA") == "USD"
-            assert symbols.ticker_currency("YPFD.BA") == "ARS"
-            assert symbols.ticker_currency("AAPLC.BA") == "USD"
-            assert symbols.ticker_currency("GOOGLD.BA") == "ARS"   # no figura: D_SERIE_EN_PESOS
-            assert symbols.ticker_currency("KOD.BA") == "USD"      # no figura: la D
-            assert symbols.es_cedear("MU.BA") and not symbols.es_cedear("YPFD.BA")
-        finally:
-            symbols.LAB.reset(token)
+        assert symbols.ticker_currency("MCD.BA") == "ARS"
+        assert symbols.ticker_currency("MCDD.BA") == "USD"
+        assert symbols.base_symbol("MCD.BA") == "MCD"
+        assert symbols.ticker_currency("MU.BA") == "ARS"
+        assert symbols.ticker_currency("MUD.BA") == "USD"
+        assert symbols.ticker_currency("YPFD.BA") == "ARS"
+        assert symbols.ticker_currency("AAPLC.BA") == "USD"
+        assert symbols.ticker_currency("GOOGLD.BA") == "ARS"   # no figura: D_SERIE_EN_PESOS
+        assert symbols.ticker_currency("KOD.BA") == "USD"      # no figura: la D
+        assert symbols.es_cedear("MU.BA") and not symbols.es_cedear("YPFD.BA")
     finally:
         symbols.especies = antes
 
