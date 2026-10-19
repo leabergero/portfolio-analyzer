@@ -54,8 +54,10 @@ def universo() -> dict:
     # Un panel que vino a medias (BYMA a veces devuelve vacío fuera de hora) no
     # pisa al de ayer: un diccionario corto haría volver a la regla de la D.
     if len(especies) >= 0.8 * len(symbols.especies()):
+        # Acumula: lo que BYMA deja de listar (vendido, vencido, deslistado)
+        # conserva su moneda y no vuelve a la regla de la D.
         tmp = symbols.ESPECIES.with_suffix(".tmp")
-        tmp.write_text(json.dumps(especies, sort_keys=True))
+        tmp.write_text(json.dumps({**symbols.especies(), **especies}, sort_keys=True))
         tmp.replace(symbols.ESPECIES)
     return {s: "accion" if e["tipo"] == "CS" else "cedear"
             for s, e in especies.items() if e["moneda"] == "ARS"}
