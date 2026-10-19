@@ -17,6 +17,10 @@
 
 const { useState, useEffect, useRef, useCallback, useMemo } = React;
 
+/* Lo que está en evaluación se ve sólo con `?lab=1`; al aprobarlo se borra el
+   condicional. Hoy: el buscador de papeles de BYMA por Sharpe, en el Simulador. */
+const LAB = new URLSearchParams(location.search).get("lab") === "1";
+
 /* La piel de la app vive en dos hojas, lab1.css y lab5.css, y sus reglas
    cuelgan de `data-lab="1"` en el <html>. Los nombres son historia: nacieron
    como rediseños en prueba detrás de `?lab=N` y quedaron cuando se aprobaron
@@ -1408,11 +1412,12 @@ function Simulador({ cartera, sim, setSim, tenencias }) {
   const tk = f.ticker.trim().toUpperCase();
   const tiene = tenencias[tk] || 0;
 
-  const validar = async () => {
-    if (!tk) { setCheck(null); return; }
+  const validar = async (x = tk) => {
+    if (!x) { setCheck(null); return; }
     setCheck({ cargando: true });
-    setCheck(await api(`/api/validar/${encodeURIComponent(tk)}`));
+    setCheck(await api(`/api/validar/${encodeURIComponent(x)}`));
   };
+  const elegir = (x) => { setF((v) => ({ ...v, ticker: x })); setMsg(null); validar(x); };
 
   // Un renglón por ticker: comprar y vender el mismo papel es una cantidad neta,
   // no dos órdenes contradictorias viajando juntas.
@@ -1449,7 +1454,7 @@ function Simulador({ cartera, sim, setSim, tenencias }) {
         <label style={{ fontSize: 11.5, color: "var(--texto-3)" }}>
           Ticker<br />
           <input value={f.ticker} placeholder="AAPL" style={{ width: 130, marginTop: 3 }}
-                 onChange={(e) => setF({ ...f, ticker: e.target.value })} onBlur={validar} />
+                 onChange={(e) => setF({ ...f, ticker: e.target.value })} onBlur={() => validar()} />
         </label>
         <label style={{ fontSize: 11.5, color: "var(--texto-3)" }}>
           {t("Cantidad", "Quantity")}<br />
@@ -1487,6 +1492,8 @@ function Simulador({ cartera, sim, setSim, tenencias }) {
                   onClick={() => setSim([])}>{t("Volver a mi cartera", "Back to my portfolio")}</button>
         </div>)}
 
+      {LAB && <SharpeByma elegir={elegir} />}
+
       <div className="pie">
         {IDIOMA === "en" ? (sim.length > 0
           ? <>Everything you see below is <b>{cartera} with the simulation applied</b>, not your
@@ -1511,6 +1518,82 @@ function Simulador({ cartera, sim, setSim, tenencias }) {
       </div>
     </div>
   );
+}
+
+/* Buscador de papeles: Sharpe y liquidez de las acciones y CEDEARs de BYMA. La
+   tabla la calcula el server de noche (`core/models/sharpe_byma.py`); acá sólo
+   se filtra y se ordena. Tocar una fila la pasa al simulador, que es para lo
+   que sirve: ver qué le hace ese papel a la cartera antes de comprarlo. */
+function SharpeByma({ elegir }) {
+  const [d, setD] = useState(null);
+  const [abierto, setAbierto] = useState(false);
+  const [piso, setPiso] = useState(10000);
+  const [tipo, setTipo] = useState("");
+  const [ver, setVer] = useState(25);
+  useEffect(() => { if (abierto && !d) api("/api/sharpe-byma").then(setD); }, [abierto]);
+
+  if (!abierto) return (
+    <button className="btn" style={{ marginTop: 12 }} onClick={() => setAbierto(true)}>
+      {t("Buscar papeles de BYMA por Sharpe", "Find BYMA stocks by Sharpe")}</button>);
+
+  const filas = (d?.filas || []).filter((x) => x.volumen_usd >= piso && (!tipo || x.tipo === tipo));
+  return (
+    <div style={{ marginTop: 14 }}>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", fontSize: 12,
+                    color: "var(--texto-3)" }}>
+        <b style={{ color: "var(--texto)" }}>{t("Papeles de BYMA por Sharpe", "BYMA stocks by Sharpe")}</b>
+        <select value={piso} onChange={(e) => setPiso(+e.target.value)}>
+          {[0, 10000, 50000, 100000, 1000000].map((v) => (
+            <option key={v} value={v}>{v ? t(`opera ≥ ${usd(v, 0)}/día`, `trades ≥ ${usd(v, 0)}/day`)
+                                         : t("cualquier volumen", "any volume")}</option>))}
+        </select>
+        <select value={tipo} onChange={(e) => setTipo(e.target.value)}>
+          <option value="">{t("acciones y CEDEARs", "stocks and CEDEARs")}</option>
+          <option value="accion">{t("acciones", "stocks")}</option>
+          <option value="cedear">CEDEARs</option>
+        </select>
+        <span>{filas.length} {t("papeles", "stocks")}</span>
+        <button className="btn" style={{ marginLeft: "auto", padding: "3px 10px", fontSize: 12 }}
+                onClick={() => setAbierto(false)}>{t("Cerrar", "Close")}</button>
+      </div>
+      {!d ? <div className="cargando">{t("Cargando…", "Loading…")}</div>
+        : !d.filas.length ? <div className="aviso ojo">{t("Todavía no hay tabla: se calcula de noche.",
+                                                          "No table yet: it's calculated overnight.")}</div>
+        : <>
+          <div className="tabla-wrap" style={{ marginTop: 8 }}><table>
+            <thead><tr><th>Ticker</th><th>{t("Tipo", "Type")}</th><th className="n">Sharpe</th>
+              <th className="n">{t("Retorno anual", "Annual return")}</th>
+              <th className="n">{t("Volatilidad", "Volatility")}</th>
+              <th className="n">{t("Volumen USD/día", "Volume USD/day")}</th>
+              <th className="n">{t("Días sin operar", "Days untraded")}</th></tr></thead>
+            <tbody>{filas.slice(0, ver).map((x) => (
+              <tr key={x.ticker} style={{ cursor: "pointer" }} onClick={() => elegir(x.ticker)}
+                  title={t("Pasarlo al simulador", "Send it to the simulator")}>
+                <td className="mono"><b>{x.ticker.replace(/\.BA$/, "")}</b>
+                  {x.salto && <span className="neg" title={t(
+                    "Saltó más de 40 % en un día: puede ser un cambio de ratio mal ajustado. No le creas el Sharpe sin mirarlo.",
+                    "Jumped over 40% in one day: may be a badly adjusted ratio change. Don't trust the Sharpe without checking.")}> ⚠</span>}</td>
+                <td>{x.tipo === "accion" ? t("acción", "stock") : "CEDEAR"}</td>
+                <td className={"n mono " + signo(x.sharpe)}><b>{num(x.sharpe, 2)}</b></td>
+                <td className={"n mono " + signo(x.retorno_pct)}>{num(x.retorno_pct, 1)} %</td>
+                <td className="n mono">{num(x.vol_pct, 1)} %</td>
+                <td className="n mono">{usd(x.volumen_usd, 0)}</td>
+                <td className="n mono">{num(x.sin_operar_pct, 1)} %</td>
+              </tr>))}</tbody>
+          </table></div>
+          {filas.length > ver && (
+            <button className="btn" style={{ marginTop: 8 }} onClick={() => setVer(ver + 50)}>
+              {t("Ver más", "Show more")}</button>)}
+          <div className="pie">
+            {t(`Último año (desde ${d.desde}), en dólares MEP, con tasa libre de ${num(d.rf * 100, 0)} %. `
+               + `La especie en pesos de cada papel; ${d.filas.length} de ${d.listados} tienen historia suficiente. `
+               + `Calculado el ${d.fecha.replace("T", " ")}. Tocá una fila para simular la compra.`,
+               `Last year (since ${d.desde}), in MEP dollars, with a ${num(d.rf * 100, 0)}% risk-free rate. `
+               + `Each stock's peso line; ${d.filas.length} of ${d.listados} have enough history. `
+               + `Calculated on ${d.fecha.replace("T", " ")}. Tap a row to simulate the buy.`)}
+          </div>
+        </>}
+    </div>);
 }
 
 function Analisis({ cartera, recargar, sim, setSim }) {

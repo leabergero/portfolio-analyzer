@@ -49,6 +49,13 @@ def mep_sync():
     return jsonify(mep.sincronizar(forzar=True))
 
 
+@bp.get("/sharpe-byma")
+def sharpe_byma():
+    """La tabla que dejó el cálculo nocturno; acá no se calcula nada."""
+    from core.models import sharpe_byma
+    return jsonify(sharpe_byma.leer())
+
+
 # ── Validación de tickers ─────────────────────────────────────────────────────
 
 @bp.get("/validar/<ticker>")
