@@ -17,10 +17,6 @@
 
 const { useState, useEffect, useRef, useCallback, useMemo } = React;
 
-/* Lo que está en evaluación se ve sólo con `?lab=1`; al aprobarlo se borra el
-   condicional. Hoy: el aviso de dividendos por traer en Posiciones cerradas. */
-const LAB = new URLSearchParams(location.search).get("lab") === "1";
-
 /* La piel de la app vive en dos hojas, lab1.css y lab5.css, y sus reglas
    cuelgan de `data-lab="1"` en el <html>. Los nombres son historia: nacieron
    como rediseños en prueba detrás de `?lab=N` y quedaron cuando se aprobaron
@@ -2443,7 +2439,6 @@ function PnlRealizado({ real, cartera, recargar, fciTrades, hayFci, conFci, setC
   // cerradas, para que el aviso se apague después de importar.
   const [pendientes, setPendientes] = useState(null);
   useEffect(() => {
-    if (!LAB) return;
     let vivo = true;
     api(`/api/carteras/${encodeURIComponent(cartera)}/dividendos/pendientes`)
       .then((r) => vivo && setPendientes(r.error ? null : r));
