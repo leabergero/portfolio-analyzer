@@ -145,7 +145,9 @@ MODELOS = {
     "riesgo":       ("Riesgo",          lambda p, c: risk.analizar(p)),
     "momentum":     ("Momentum",        lambda p, c: momentum.analizar(p)),
     "correlaciones": ("Correlaciones",  lambda p, c: portfolio.correlaciones(p)),
-    "capm":         ("CAPM",            lambda p, c: capm.analizar(p)),
+    # Contra el índice que mejor explica la cartera, no el de la plaza: la vista
+    # simple lee este resultado tal cual (MAMI, toda S&P, daba "pierde contra el Merval").
+    "capm":         ("CAPM",            lambda p, c: capm.analizar(p, _indice(p, c))),
     "benchmarks":   ("Índices",         lambda p, c: suelto(c, "benchmarks", p)),
 
     # ── Riesgo ──
