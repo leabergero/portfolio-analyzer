@@ -2,7 +2,7 @@
 
 from flask import Blueprint, Response, jsonify, request, send_file
 
-from api import sim
+from api import jobs, sim
 from core.broker import cocos, inviu, sesion, vault
 from core.data import cache, connectors, fmp, mep, noticias, sources
 from core.io import csv_native, store
@@ -145,7 +145,8 @@ def reporte(cartera):
     if not pos:
         return jsonify({"error": f'La cartera "{cartera}" no existe.'}), 404
     try:
-        pdf = rep.generar(cartera, pos)
+        pdf = rep.generar(cartera, pos, jobs.para_reporte(cartera, pos)
+                          if request.args.get("lab") == "1" else None)
     except Exception as e:
         return jsonify({"error": f"No se pudo generar el reporte: {e}"}), 500
     from datetime import date as _d

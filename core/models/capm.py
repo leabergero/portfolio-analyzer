@@ -158,6 +158,11 @@ def analizar(posiciones, benchmark: str = None) -> dict:
         "nube": nube, "recta": recta,
         "historia_benchmark": [{"fecha": str(d.date()), "valor": round(float(v), 4)}
                                for d, v in serie.items()],
+        # Las dos curvas en base 100, una rueda de cada cinco: es la del PDF.
+        "acumulado": [{"fecha": str(d.date()), "cartera": round(float(c) * 100, 2),
+                       "indice": round(float(i) * 100, 2)}
+                      for d, c, i in zip(par.index[::5], np.cumprod(1 + p)[::5],
+                                         np.cumprod(1 + b)[::5])],
         "rf": round(rf, 4), "rf_label": rf_label,
     }
 

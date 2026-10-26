@@ -29,6 +29,8 @@ const { useState, useEffect, useRef, useCallback, useMemo } = React;
 // de HOY tenida doce meses (la que se compara contra un plazo fijo), no la de
 // la historia real del último año. Lo anterior queda sólo de respaldo, para
 // cuando el dato nuevo no se puede calcular.
+// Lo que está a prueba (hoy: el PDF para leer sin saber finanzas) sólo con ?lab=1.
+const LAB = new URLSearchParams(location.search).get("lab") === "1";
 const conCapital = (ev) => ev?.rendimiento_capital_pct != null;
 const conCartera12m = (ev) => ev?.cartera_12m?.tir_pct != null;
 const tirCartera = (ev) => (conCartera12m(ev) ? ev.cartera_12m.tir_pct : ev?.ultimos_12m?.tir_pct);
@@ -2093,7 +2095,7 @@ function Posicion({ d, cartera, recargar, lanzar, extras, bench, sim, setSim }) 
 
       <Plegable id={`tenencias-${cartera}`} titulo={t("Tenencias", "Holdings")} extra={
         <a className="btn" style={{ textDecoration: "none", fontSize: 12.5 }}
-           href={`/api/reporte/${encodeURIComponent(d.cartera_nombre || "")}`}>{t("Descargar PDF", "Download PDF")}</a>
+           href={`/api/reporte/${encodeURIComponent(d.cartera_nombre || "")}${LAB ? "?lab=1" : ""}`}>{t("Descargar PDF", "Download PDF")}</a>
       }>
         <div className="tabla-wrap"><table className="tenencias">
           <thead><tr>

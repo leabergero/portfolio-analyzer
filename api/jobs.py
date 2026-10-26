@@ -101,6 +101,31 @@ def suelto(cartera: str, clave: str, posiciones: list, *args, **kwargs):
         return r
 
 
+
+def ya_calculado(cartera: str, posiciones: list, modelo: str):
+    """Lo que la pantalla ya calculó de `modelo` sobre estas mismas posiciones,
+    o el cálculo en el momento si todavía no lo hizo nadie."""
+    ahora = time.time()
+    with _lock:
+        corridas = sorted(_corridas.values(), key=lambda c: -c["inicio"])
+    for c in corridas:
+        m = c["modelos"].get(modelo)
+        if (m and m["estado"] == "listo" and c.get("quien") == store.quien()
+                and ahora - c["inicio"] < _TTL_CORRIDA_S
+                and c["huella"] == _huella(cartera, posiciones, list(c["modelos"]))):
+            return m["resultado"]
+    return MODELOS[modelo][1](posiciones, cartera)
+
+
+def para_reporte(cartera: str, posiciones: list) -> dict:
+    """Todo lo que lleva el PDF del lab, con los mismos argumentos que la
+    pantalla: si ya abriste esas pestañas, el PDF no recalcula nada."""
+    return {**{m: ya_calculado(cartera, posiciones, m)
+               for m in ("evolucion", "riesgo", "composicion", "capm", "markowitz", "montecarlo")},
+            "realizado": store.cargar_realizado(cartera),
+            "decisiones": suelto(cartera, "riesgo_decisiones", posiciones, cartera),
+            "mc_analistas": suelto(cartera, "mc_analistas", posiciones, store.opiniones(cartera), 252)}
+
 def _indice(p, c):
     """El índice que la pantalla elige sola: el que mejor explica la cartera."""
     return (suelto(c, "benchmarks", p) or {}).get("recomendado")
