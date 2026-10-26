@@ -130,6 +130,62 @@ def altas() -> list:
                   key=lambda p: (p.get("alta", ""), p.get("sub", "")))
 
 
+# ── Carteras compartidas ──────────────────────────────────────────────────────
+# El dueño anota en SU carpeta a quién le muestra cada cartera y con qué permiso:
+# {cartera: {email: "lectura" | "edicion"}}. No se copia nada: el invitado lee
+# la carpeta del dueño en vivo (ver `compartida` en api/app.py), así que lo que
+# el dueño cambia lo ve al instante y sacarle el permiso lo corta en el acto.
+# Por email y no por `sub`: al invitar, del otro todavía no sabemos nada.
+
+PERMISOS = ("lectura", "edicion")
+
+
+def _compartidas(carpeta=None) -> Path:
+    return (_DATA / "usuarios" / str(carpeta) if carpeta else _dir()) / "compartidas.json"
+
+
+def compartida_con(nombre: str) -> dict:
+    return _leer(_compartidas()).get(nombre) or {}
+
+
+def compartir(nombre: str, email: str, permiso) -> dict:
+    """Da, cambia o (con permiso None) quita el acceso de un email a una cartera."""
+    email = email.strip().lower()
+    todas = _leer(_compartidas())
+    de_esta = todas.get(nombre) or {}
+    if permiso in PERMISOS:
+        de_esta[email] = permiso
+    else:
+        de_esta.pop(email, None)
+    if de_esta:
+        todas[nombre] = de_esta
+    else:
+        todas.pop(nombre, None)
+    _escribir(_compartidas(), todas)
+    return de_esta
+
+
+def permiso(dueño: str, nombre: str, email: str):
+    """Qué puede hacer `email` con la cartera `nombre` de `dueño`. None = nada."""
+    return (_leer(_compartidas(dueño)).get(nombre) or {}).get(email.strip().lower())
+
+
+def recibidas(email: str) -> list:
+    """Las carteras que otros le compartieron a este email.
+
+    Recorre las carpetas de todos, como `altas`.
+    """
+    # ponytail: un glob por request de la lista; con cientos de usuarios, un índice por email.
+    email = email.strip().lower()
+    hay = []
+    for d in (_DATA / "usuarios").glob("*"):
+        for nombre, emails in _leer(d / "compartidas.json").items():
+            if email in emails:
+                hay.append({"dueño": d.name, "cartera": nombre, "permiso": emails[email],
+                            "de": _leer(d / "perfil.json").get("nombre", "")})
+    return hay
+
+
 def _plazas() -> Path:
     return _dir() / "plazas.json"
 
@@ -316,6 +372,10 @@ def borrar(nombre: str) -> bool:
     _escribir(_carteras(), datos)
     fijar_plaza(nombre, None)
     fijar_retenciones(nombre, None)
+    # Una cartera nueva con el mismo nombre no hereda a quién se le mostraba esta.
+    compartidas = _leer(_compartidas())
+    if compartidas.pop(nombre, None) is not None:
+        _escribir(_compartidas(), compartidas)
     return True
 
 

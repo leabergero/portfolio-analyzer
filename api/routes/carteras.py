@@ -2,7 +2,7 @@
 
 import io
 
-from flask import Blueprint, Response, jsonify, request
+from flask import Blueprint, Response, g, jsonify, request
 
 from core import mercado
 from core.io import csv_native, csv_yahoo, store
@@ -21,10 +21,50 @@ def listar():
     """
     todas = store.cargar_todas()
     fijadas = store.plazas()
-    return jsonify([{"nombre": n, "posiciones": len(p),
-                     "mercado": fijadas.get(n) or mercado.de_posiciones(p),
-                     "mercado_fijado": bool(fijadas.get(n))}
-                    for n, p in todas.items()])
+    lista = [{"nombre": n, "posiciones": len(p),
+              "mercado": fijadas.get(n) or mercado.de_posiciones(p),
+              "mercado_fijado": bool(fijadas.get(n))}
+             for n, p in todas.items()]
+
+    # Las que otros le compartieron, con el nombre `CARTERA@dueño`: es lo que
+    # `compartida` (api/app.py) reconoce para leer de la carpeta del dueño.
+    yo = store.quien()
+    if yo is None:
+        return jsonify(lista)
+    for r in store.recibidas(g.usuario.get("email", "")):
+        if r["dueño"] == yo:
+            continue
+        store.como(r["dueño"])
+        p = store.cargar(r["cartera"])
+        fijada = store.plaza(r["cartera"])
+        store.como(yo)
+        lista.append({"nombre": f'{r["cartera"]}@{r["dueño"]}', "posiciones": len(p),
+                      "mercado": fijada or mercado.de_posiciones(p),
+                      "mercado_fijado": bool(fijada),
+                      "compartida": {"de": r["de"], "permiso": r["permiso"]}})
+    return jsonify(lista)
+
+
+@bp.route("/<nombre>/compartir", methods=["GET", "POST"])
+def compartir(nombre):
+    """A quién le muestra el dueño esta cartera: {email: "lectura"|"edicion"}.
+
+    POST {email, permiso}; permiso null le saca el acceso. Sólo en la web: en
+    la app local no hay otros usuarios.
+    """
+    if store.quien() is None:
+        return jsonify({"error": "Compartir existe sólo en la versión web."}), 400
+    if request.method == "GET":
+        return jsonify(store.compartida_con(nombre))
+    c = request.json or {}
+    email = (c.get("email") or "").strip().lower()
+    if "@" not in email or " " in email:
+        return jsonify({"error": "Ese email no parece válido."}), 400
+    if c.get("permiso") not in (*store.PERMISOS, None):
+        return jsonify({"error": "El permiso es lectura o edicion."}), 400
+    if c.get("permiso") and nombre not in store.nombres():
+        return jsonify({"error": f'La cartera "{nombre}" no existe.'}), 404
+    return jsonify(store.compartir(nombre, email, c.get("permiso")))
 
 
 @bp.get("/<nombre>")

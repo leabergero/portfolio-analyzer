@@ -2267,6 +2267,58 @@ def test_la_suite_no_escribe_en_los_datos_de_verdad():
         f"la suite tocó data/: apareció o desapareció {set(antes) ^ set(despues)}"
 
 
+def test_una_cartera_compartida_se_ve_solo_con_permiso_y_como_se_dio():
+    """Compartir KARIN con alguien no le abre KARIN a nadie más, ni le deja al
+    invitado más de lo que el dueño eligió.
+
+    La cartera ajena viaja como `KARIN@<dueño>` y la puerta es una sola
+    (`compartida` en api/app.py). Si deja pasar algo, alguien ve o cambia la
+    cartera de otro.
+    """
+    flask_app = require("api", "app").app
+    store = require("core.io", "store")
+    usuarios = require("core", "usuarios")
+
+    def cliente(sub, email):
+        c = flask_app.test_client()
+        c.set_cookie(usuarios.COOKIE, usuarios.emitir(
+            {"sub": sub, "email": email, "nombre": sub, "foto": ""}))
+        return c
+
+    pos = [{"ticker": "AAPL", "qty": 1, "buy_price": 1,
+            "buy_date": "2026-01-02", "currency": "USD"}]
+    with datos_aparte() as tmp, modo_web():
+        store.como("111"); store.guardar("KARIN", pos); store.como(None)
+        dueño, invitado, extraño = (cliente("111", "d@x.com"), cliente("222", "i@x.com"),
+                                    cliente("333", "e@x.com"))
+        ajena, propia = "/api/carteras/KARIN@111", "/api/carteras/KARIN"
+        dar = lambda permiso: dueño.post(propia + "/compartir",
+                                         json={"email": "I@x.com", "permiso": permiso})
+
+        assert invitado.get(ajena).status_code == 404, "sin compartir no se ve"
+        assert dar("lectura").status_code == 200
+        assert invitado.get(ajena).json[0]["ticker"] == "AAPL"
+        assert "KARIN@111" in [c["nombre"] for c in invitado.get("/api/carteras").json]
+        assert extraño.get(ajena).status_code == 404, "compartirla con uno no la abre a otro"
+        assert invitado.post(ajena, json={"posiciones": pos * 2}).status_code == 403, \
+            "con lectura no se escribe"
+        assert invitado.post("/api/cocos/fci/importar", json={"cartera": "KARIN@111"}) \
+            .status_code == 403, "del broker no se importa a una cartera ajena"
+
+        assert dar("edicion").status_code == 200
+        assert invitado.post(ajena, json={"posiciones": pos * 2}).status_code == 200
+        store.como("111"); escritas = len(store.cargar("KARIN")); store.como(None)
+        assert escritas == 2, "con edición se escribe en la carpeta del dueño"
+        assert not (tmp / "usuarios" / "222" / "portfolios.json").exists(), \
+            "el invitado no se queda con una copia"
+        assert invitado.delete(ajena).status_code == 403, "borrarla es sólo del dueño"
+        assert invitado.post(ajena + "/compartir", json={"email": "e@x.com",
+                                                         "permiso": "lectura"}).status_code == 403
+
+        assert dar(None).status_code == 200
+        assert invitado.get(ajena).status_code == 404, "sacar el permiso lo corta en el acto"
+
+
 def test_cada_usuario_ve_solo_sus_carteras():
     """Dos usuarios distintos, dos carpetas distintas. Nunca la misma.
 

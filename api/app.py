@@ -136,6 +136,54 @@ def elegir_mercado():
     mercado.poner(request.headers.get("X-Mercado"))
 
 
+# ── Carteras compartidas ──────────────────────────────────────────────────────
+# Una cartera ajena viaja como `CARTERA@dueño`. Acá, y sólo acá, se decide si
+# quien pregunta puede verla: si puede, el request sigue leyendo la carpeta del
+# dueño con el nombre de verdad, y ninguna ruta se entera. Es la puerta entre
+# usuarios: si esto deja pasar algo, alguien ve la cartera de otro.
+
+# Lo que el invitado no hace nunca, aunque pueda editar: borrarla, copiarla (la
+# copia caería en la carpeta del dueño) ni compartirla a su vez.
+NUNCA_AJENA = ("carteras.borrar", "carteras.duplicar", "carteras.compartir")
+# POST que sólo calculan: con permiso de lectura se pueden.
+SOLO_CALCULAN = ("analisis.lanzar", "analisis.bl")
+
+
+def _ajena(nombre) -> tuple:
+    cartera, _, dueño = str(nombre or "").rpartition("@")
+    if cartera and dueño.isdigit() and dueño != store.quien():
+        return cartera, dueño
+    return None, None
+
+
+def compartida():
+    # Importar del broker a una cartera ajena: no. Sincronizar de más en una
+    # cartera real es el peor error de esta app, y la de otro lo es doble.
+    cuerpo = request.get_json(silent=True)
+    pedida = (cuerpo.get("cartera") if isinstance(cuerpo, dict) else None) \
+        or request.args.get("cartera")
+    if _ajena(pedida)[0]:
+        return jsonify({"error": "A una cartera compartida no se importa: "
+                                 "importá en una tuya."}), 403
+
+    args = request.view_args or {}
+    clave = next((k for k in ("nombre", "cartera") if k in args), None)
+    cartera, dueño = _ajena(args.get(clave))
+    if not cartera:
+        return None
+    permiso = store.permiso(dueño, cartera, g.usuario.get("email", ""))
+    if permiso is None:
+        return jsonify({"error": "Esa cartera no existe o ya no está compartida con vos."}), 404
+    if request.endpoint in NUNCA_AJENA:
+        return jsonify({"error": "Eso lo hace sólo el dueño de la cartera."}), 403
+    if permiso == "lectura" and request.method != "GET" \
+            and request.endpoint not in SOLO_CALCULAN:
+        return jsonify({"error": "Esta cartera te la compartieron para mirar, no para cambiar."}), 403
+    store.como(dueño)
+    args[clave] = cartera
+    return None
+
+
 @app.before_request
 def abrir_sesion():
     if not sesion.modo_web():
@@ -152,6 +200,8 @@ def abrir_sesion():
         app.logger.warning("401 ingreso · %s · %s", request.path, e)
         return jsonify({"error": str(e), "ingresar": True}), 401
     store.como(usuarios.carpeta(g.usuario))
+    if (corte := compartida()) is not None:
+        return corte
 
     # 2 · Cocos, opcional. Quien no conectó el broker usa la app igual: carga su
     #     cartera a mano o por CSV y los precios salen de yfinance. Por eso la

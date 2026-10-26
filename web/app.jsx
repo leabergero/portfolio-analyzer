@@ -64,6 +64,12 @@ const carteraDefecto = {
                   catch { /* sin memoria */ } },
 };
 
+// Lab: carteras compartidas entre usuarios. Hasta aprobarlo, sólo con ?lab=1.
+const LAB = new URLSearchParams(location.search).get("lab") === "1";
+// Una cartera ajena llega como `KARIN@<dueño>`: en pantalla, "KARIN · Leandro".
+const etiqueta = (c) => (c.compartida
+  ? `${c.nombre.replace(/@\d+$/, "")} · ${c.compartida.de || t("compartida", "shared")}` : c.nombre);
+
 const elegirCartera = (carteras) => {
   const nombres = (carteras || []).map((c) => c.nombre);
   if (!nombres.length) return null;
@@ -879,7 +885,7 @@ function BarraMovil({ modo, setModo, tema, setTema, carteras, cartera, setCarter
         <div className="barra-m-cartera">
           <select value={cartera || ""} onChange={(e) => setCartera(e.target.value)}>
             <option value="">{t("— elegí una cartera —", "— choose a portfolio —")}</option>
-            {carteras.map((c) => <option key={c.nombre} value={c.nombre}>{c.nombre}</option>)}
+            {carteras.map((c) => <option key={c.nombre} value={c.nombre}>{etiqueta(c)}</option>)}
           </select>
         </div>
       )}
@@ -1007,7 +1013,7 @@ function BarraLab({ modo, setModo, tema, setTema, esOscuro, carteras, cartera, s
                   aria-pressed={cartera === c.nombre} onClick={() => setCartera(c.nombre)}
                   title={t(`Se mide desde ${m.nombre}`, `Measured from ${m.nombre_en}`)}>
             <span className="bl-plaza" aria-hidden="true">{MERCADOS[c.mercado] ? c.mercado : "AR"}</span>
-            <span>{c.nombre}</span></button>); })}
+            <span>{etiqueta(c)}</span></button>); })}
       </div>
       <div className="bl-pie">
         {yo?.email && <Usuario yo={yo} idioma={idioma} cambiarIdioma={cambiarIdioma}
@@ -7079,7 +7085,7 @@ function Carteras({ carteras, recargar, cartera, setCartera }) {
             <button key={x.nombre} className={"btn" + (sel === x.nombre ? " primario" : "")}
                     title={x.mercado ? t(`Se abre en ${MERCADOS[x.mercado].nombre}`, `Opens in ${MERCADOS[x.mercado].nombre_en}`) : undefined}
                     onClick={() => abrir(x.nombre)}>
-              {x.mercado && MERCADOS[x.mercado].bandera + " "}{x.nombre}{" "}
+              {x.mercado && MERCADOS[x.mercado].bandera + " "}{etiqueta(x)}{" "}
               <span style={{opacity:.6}}>({x.posiciones})</span></button>
           ))}
           <button className="btn" onClick={() => {
@@ -7098,7 +7104,7 @@ function Carteras({ carteras, recargar, cartera, setCartera }) {
             <select value={defecto} onChange={(e) => fijarDefecto(e.target.value)}>
               <option value="">{t("— la primera —", "— the first one —")}</option>
               {carteras.map((x) => (
-                <option key={x.nombre} value={x.nombre}>{x.nombre}</option>))}
+                <option key={x.nombre} value={x.nombre}>{etiqueta(x)}</option>))}
             </select>
             <span className="pie" style={{ margin: 0 }}>
               {t("Es la que se abre sola al entrar. Con una sola cartera no hace falta: "
@@ -7136,7 +7142,16 @@ function Carteras({ carteras, recargar, cartera, setCartera }) {
 
       {sel && (
         <div className="panel">
-          <h3>{sel}</h3>
+          <h3>{meta ? etiqueta(meta) : sel}</h3>
+          {meta?.compartida && (
+            <div className="pie" style={{ marginTop: 0 }}>
+              {meta.compartida.permiso === "lectura"
+                ? t("Te la compartieron para mirar: la ves en vivo, pero no la podés cambiar.",
+                    "Shared with you to view: you see it live, but you can't change it.")
+                : t("Te la compartieron para editar: lo que guardes lo ve su dueño.",
+                    "Shared with you to edit: what you save, its owner sees.")}
+            </div>)}
+          {LAB && !meta?.compartida && carteras.some((x) => x.nombre === sel) && <Compartir cartera={sel} />}
           {/* Desde dónde se mira esta cartera. Normalmente lo dicen los activos
               —.BA es Argentina, ASML.AS es Europa— y no hay nada que elegir; el
               chip está para lo que ninguna posición puede decir: un europeo con
@@ -7225,17 +7240,19 @@ function Carteras({ carteras, recargar, cartera, setCartera }) {
             </details>
           </>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "8px 0 12px" }}>
+            {meta?.compartida?.permiso !== "lectura" && <>
             <button className="btn primario" onClick={guardar}>{t("Guardar", "Save")}</button>
             <button className="btn" onClick={() => setFilas((f) => [...f, {
               ticker: "", buy_date: "", buy_price: 0, qty: 0, commissions: 0,
               source: "", currency: "", asset_type: "", notes: "" }])}>+ {t("Activo", "Asset")}</button>
+            </>}
             <a className="lab-barrido"
                href={`/api/carteras/${encodeURIComponent(sel)}/exportar`}>{t("Exportar CSV", "Export CSV")}</a>
-            <button className="btn peligro" style={{ marginLeft: "auto" }} onClick={async () => {
+            {!meta?.compartida && <button className="btn peligro" style={{ marginLeft: "auto" }} onClick={async () => {
               if (!confirm(t(`¿Eliminar la cartera "${sel}"?`, `Delete the portfolio "${sel}"?`))) return;
               await api(`/api/carteras/${encodeURIComponent(sel)}`, { method: "DELETE" });
               setSel(null); setFilas([]); recargar();
-            }}>{t("Eliminar", "Delete")}</button>
+            }}>{t("Eliminar", "Delete")}</button>}
           </div>
           <div className="tabla-wrap"><table>
             <thead><tr><th>Ticker</th><th>{t("Fecha", "Date")}</th><th className="n">{t("Precio", "Price")}</th>
@@ -7270,6 +7287,57 @@ function Carteras({ carteras, recargar, cartera, setCartera }) {
         </div>
       )}
     </>
+  );
+}
+
+/* Lab: a quién se le muestra esta cartera y si la puede cambiar. El otro la ve
+   en su lista cuando entra con ese email de Google; si no tiene usuario, entrar
+   con Google se lo crea. Sin mail: avisarle es cosa del dueño. */
+function Compartir({ cartera }) {
+  const [con, setCon] = useState(null);
+  const [email, setEmail] = useState("");
+  const [permiso, setPermiso] = useState("lectura");
+  const [error, setError] = useState(null);
+  const ruta = `/api/carteras/${encodeURIComponent(cartera)}/compartir`;
+  useEffect(() => { setCon(null); api(ruta).then((r) => setCon(r.error ? null : r)); }, [ruta]);
+  const dar = async (e, p) => {
+    const r = await post(ruta, { email: e, permiso: p });
+    if (r.error) { setError(r.error); return; }
+    setError(null); setCon(r); setEmail("");
+  };
+  if (!con) return null;              // app local: no hay con quién compartir
+  const permisos = [["lectura", t("Solo lectura", "Read only")], ["edicion", t("Puede editar", "Can edit")]];
+  return (
+    <div style={{ margin: "10px 0 12px" }}>
+      <div className="pie" style={{ margin: "0 0 6px" }}><b>{t("Compartida con", "Shared with")}</b></div>
+      {Object.entries(con).map(([e, p]) => (
+        <div key={e} style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 6 }}>
+          <span style={{ minWidth: 200 }}>{e}</span>
+          <select value={p} onChange={(ev) => dar(e, ev.target.value)} aria-label={t("Permiso", "Permission")}>
+            {permisos.map(([k, n]) => <option key={k} value={k}>{n}</option>)}
+          </select>
+          <button className="btn peligro" style={{ padding: "3px 8px" }} onClick={() => dar(e, null)}
+                  aria-label={t(`Dejar de compartir con ${e}`, `Stop sharing with ${e}`)}>✕</button>
+        </div>))}
+      <form style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}
+            onSubmit={(ev) => { ev.preventDefault(); if (email.trim()) dar(email, permiso); }}>
+        <input type="email" placeholder={t("email de Google", "Google email")} value={email}
+               onChange={(ev) => setEmail(ev.target.value)} style={{ minWidth: 200 }} />
+        <select value={permiso} onChange={(ev) => setPermiso(ev.target.value)} aria-label={t("Permiso", "Permission")}>
+          {permisos.map(([k, n]) => <option key={k} value={k}>{n}</option>)}
+        </select>
+        <button className="btn" type="submit">{t("Compartir", "Share")}</button>
+      </form>
+      {error && <div className="aviso mal" style={{ marginTop: 6 }}>{error}</div>}
+      <div className="pie">
+        {t("La ve en su lista la próxima vez que entra con ese email de Google; si no tiene "
+          + "usuario, entrar con Google se lo crea. Ve la cartera en vivo, no una copia, y "
+          + "nunca la puede borrar ni compartir.",
+          "They see it in their list the next time they sign in with that Google email; if they "
+          + "don't have a user, signing in with Google creates one. They see the portfolio live, "
+          + "not a copy, and can never delete or share it.")}
+      </div>
+    </div>
   );
 }
 
@@ -9208,8 +9276,9 @@ function App() {
   }, [cartera]);
 
   const recargar = useCallback(async () => {
-    const c = await api("/api/carteras");
-    if (!Array.isArray(c)) return;
+    const todas = await api("/api/carteras");
+    if (!Array.isArray(todas)) return;
+    const c = todas.filter((x) => LAB || !x.compartida);
     setCarteras(c);
     // Si la que está abierta ya no existe (o no hay ninguna abierta), se elige
     // sola: nadie tiene que ir a buscarla en el desplegable para empezar.
