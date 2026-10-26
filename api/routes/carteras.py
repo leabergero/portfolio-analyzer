@@ -21,9 +21,11 @@ def listar():
     """
     todas = store.cargar_todas()
     fijadas = store.plazas()
+    dadas = store.compartidas()
     lista = [{"nombre": n, "posiciones": len(p),
               "mercado": fijadas.get(n) or mercado.de_posiciones(p),
-              "mercado_fijado": bool(fijadas.get(n))}
+              "mercado_fijado": bool(fijadas.get(n)),
+              "compartiendo": bool(dadas.get(n))}
              for n, p in todas.items()]
 
     # Las que otros le compartieron, con el nombre `CARTERA@dueño`: es lo que

@@ -35,7 +35,7 @@
   --destaque:#F2B544; --destaque-suave:#FBEFD2;
   --serie-1:#0A7C6E; --serie-2:#B26B00; --serie-3:#1F63D6; --serie-4:#C2255C;
   --serie-5:#7048E8; --serie-6:#0B7C94; --serie-7:#6F7A12; --serie-8:#5B6B80;
-  --marca-actual:#B26B00; --marca-optima:#0B7F55;
+  --marca-actual:#B26B00; --marca-optima:#0B7F55; --cadena:#0E9F3E; --cadena-brillo:transparent;
   color-scheme:light;
 }
 @media (prefers-color-scheme: light) {
@@ -47,7 +47,7 @@
     --destaque:#F2B544; --destaque-suave:#FBEFD2;
     --serie-1:#0A7C6E; --serie-2:#B26B00; --serie-3:#1F63D6; --serie-4:#C2255C;
     --serie-5:#7048E8; --serie-6:#0B7C94; --serie-7:#6F7A12; --serie-8:#5B6B80;
-    --marca-actual:#B26B00; --marca-optima:#0B7F55;
+    --marca-actual:#B26B00; --marca-optima:#0B7F55; --cadena:#0E9F3E; --cadena-brillo:transparent;
     color-scheme:light;
   }
 }
@@ -334,3 +334,11 @@
 [data-lab="1"] .lab-front .cal{stroke:var(--serie-5)}
 [data-lab="1"] .lab-flg u.ueff{background:var(--serie-6)}
 [data-lab="1"] .lab-flg u.ucal{background:repeating-linear-gradient(90deg,var(--serie-5) 0 4px,transparent 4px 7px)}
+
+/* La cadenita de cartera compartida: verde de consola, en el rincón de arriba
+   del nombre. Cuelga del botón o título, que se vuelve su referencia. */
+.bl-cartera:has(.cadena),.btn:has(.cadena){position:relative}
+.cadena{position:absolute;top:2px;right:2px;width:11px;height:11px;fill:none;stroke:var(--cadena,#39FF14);
+  stroke-width:2.6;stroke-linecap:round;stroke-linejoin:round;
+  filter:drop-shadow(0 0 2px var(--cadena-brillo,#39FF1499))}
+.btn .cadena{top:-5px;right:-5px}

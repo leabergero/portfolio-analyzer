@@ -144,8 +144,12 @@ def _compartidas(carpeta=None) -> Path:
     return (_DATA / "usuarios" / str(carpeta) if carpeta else _dir()) / "compartidas.json"
 
 
+def compartidas() -> dict:
+    return _leer(_compartidas())
+
+
 def compartida_con(nombre: str) -> dict:
-    return _leer(_compartidas()).get(nombre) or {}
+    return compartidas().get(nombre) or {}
 
 
 def compartir(nombre: str, email: str, permiso) -> dict:

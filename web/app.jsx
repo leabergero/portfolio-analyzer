@@ -64,8 +64,6 @@ const carteraDefecto = {
                   catch { /* sin memoria */ } },
 };
 
-// Lab: carteras compartidas entre usuarios. Hasta aprobarlo, sólo con ?lab=1.
-const LAB = new URLSearchParams(location.search).get("lab") === "1";
 // Una cartera ajena llega como `KARIN@<dueño>`: en pantalla, "KARIN · Leandro".
 const etiqueta = (c) => (c.compartida
   ? `${c.nombre.replace(/@\d+$/, "")} · ${c.compartida.de || t("compartida", "shared")}` : c.nombre);
@@ -953,12 +951,18 @@ const ICONOS = {
         "m17.7 17.7 1.4 1.4", "M2 12h2", "M20 12h2", "m6.3 17.7-1.4 1.4", "m19.1 4.9-1.4 1.4"],
   luna: ["M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"],
   menu: ["M4 6h16", "M4 12h16", "M4 18h16"],
+  cadena: ["M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71",
+           "M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"],
   alfiler: ["M12 17v5", "M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"],
 };
-const Icono = ({ k }) => (
-  <svg className="ico" viewBox="0 0 24 24" aria-hidden="true">
+const Icono = ({ k, className = "ico" }) => (
+  <svg className={className} viewBox="0 0 24 24" aria-hidden="true">
     {ICONOS[k].map((d) => <path key={d} d={d} />)}
   </svg>);
+// En el rincón del nombre: la cartera es compartida, la diste o te la dieron.
+const Cadena = ({ c }) => ((c.compartida || c.compartiendo) &&
+  <span title={c.compartida ? t("Te la compartieron", "Shared with you") : t("La compartís", "You share it")}>
+    <Icono k="cadena" className="cadena" /></span>);
 
 /* La barra de los labs. Un solo marcado para los dos: en el 1 es una columna
    fija a la izquierda, en el 2 una cabecera de diario centrada. Lo que cambia
@@ -1013,7 +1017,7 @@ function BarraLab({ modo, setModo, tema, setTema, esOscuro, carteras, cartera, s
                   aria-pressed={cartera === c.nombre} onClick={() => setCartera(c.nombre)}
                   title={t(`Se mide desde ${m.nombre}`, `Measured from ${m.nombre_en}`)}>
             <span className="bl-plaza" aria-hidden="true">{MERCADOS[c.mercado] ? c.mercado : "AR"}</span>
-            <span>{etiqueta(c)}</span></button>); })}
+            <span>{etiqueta(c)}</span><Cadena c={c} /></button>); })}
       </div>
       <div className="bl-pie">
         {yo?.email && <Usuario yo={yo} idioma={idioma} cambiarIdioma={cambiarIdioma}
@@ -7086,7 +7090,7 @@ function Carteras({ carteras, recargar, cartera, setCartera }) {
                     title={x.mercado ? t(`Se abre en ${MERCADOS[x.mercado].nombre}`, `Opens in ${MERCADOS[x.mercado].nombre_en}`) : undefined}
                     onClick={() => abrir(x.nombre)}>
               {x.mercado && MERCADOS[x.mercado].bandera + " "}{etiqueta(x)}{" "}
-              <span style={{opacity:.6}}>({x.posiciones})</span></button>
+              <span style={{opacity:.6}}>({x.posiciones})</span><Cadena c={x} /></button>
           ))}
           <button className="btn" onClick={() => {
             const n = prompt(t("Nombre de la cartera nueva:", "Name of the new portfolio:"));
@@ -7142,7 +7146,8 @@ function Carteras({ carteras, recargar, cartera, setCartera }) {
 
       {sel && (
         <div className="panel">
-          <h3>{meta ? etiqueta(meta) : sel}</h3>
+          <h3 style={{ position: "relative", display: "inline-block", paddingRight: 14 }}>
+            {meta ? etiqueta(meta) : sel}{meta && <Cadena c={meta} />}</h3>
           {meta?.compartida && (
             <div className="pie" style={{ marginTop: 0 }}>
               {meta.compartida.permiso === "lectura"
@@ -7151,7 +7156,7 @@ function Carteras({ carteras, recargar, cartera, setCartera }) {
                 : t("Te la compartieron para editar: lo que guardes lo ve su dueño.",
                     "Shared with you to edit: what you save, its owner sees.")}
             </div>)}
-          {LAB && !meta?.compartida && carteras.some((x) => x.nombre === sel) && <Compartir cartera={sel} />}
+          {!meta?.compartida && carteras.some((x) => x.nombre === sel) && <Compartir cartera={sel} recargar={recargar} />}
           {/* Desde dónde se mira esta cartera. Normalmente lo dicen los activos
               —.BA es Argentina, ASML.AS es Europa— y no hay nada que elegir; el
               chip está para lo que ninguna posición puede decir: un europeo con
@@ -7290,10 +7295,10 @@ function Carteras({ carteras, recargar, cartera, setCartera }) {
   );
 }
 
-/* Lab: a quién se le muestra esta cartera y si la puede cambiar. El otro la ve
+/* A quién se le muestra esta cartera y si la puede cambiar. El otro la ve
    en su lista cuando entra con ese email de Google; si no tiene usuario, entrar
    con Google se lo crea. Sin mail: avisarle es cosa del dueño. */
-function Compartir({ cartera }) {
+function Compartir({ cartera, recargar }) {
   const [con, setCon] = useState(null);
   const [email, setEmail] = useState("");
   const [permiso, setPermiso] = useState("lectura");
@@ -7304,6 +7309,7 @@ function Compartir({ cartera }) {
     const r = await post(ruta, { email: e, permiso: p });
     if (r.error) { setError(r.error); return; }
     setError(null); setCon(r); setEmail("");
+    recargar();                       // prende o apaga la cadenita
   };
   if (!con) return null;              // app local: no hay con quién compartir
   const permisos = [["lectura", t("Solo lectura", "Read only")], ["edicion", t("Puede editar", "Can edit")]];
@@ -9276,9 +9282,8 @@ function App() {
   }, [cartera]);
 
   const recargar = useCallback(async () => {
-    const todas = await api("/api/carteras");
-    if (!Array.isArray(todas)) return;
-    const c = todas.filter((x) => LAB || !x.compartida);
+    const c = await api("/api/carteras");
+    if (!Array.isArray(c)) return;
     setCarteras(c);
     // Si la que está abierta ya no existe (o no hay ninguna abierta), se elige
     // sola: nadie tiene que ir a buscarla en el desplegable para empezar.
