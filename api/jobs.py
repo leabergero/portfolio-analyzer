@@ -118,7 +118,7 @@ def ya_calculado(cartera: str, posiciones: list, modelo: str):
 
 
 def para_reporte(cartera: str, posiciones: list) -> dict:
-    """Todo lo que lleva el PDF del lab, con los mismos argumentos que la
+    """Todo lo que lleva el PDF, con los mismos argumentos que la
     pantalla: si ya abriste esas pestañas, el PDF no recalcula nada."""
     return {**{m: ya_calculado(cartera, posiciones, m)
                for m in ("evolucion", "riesgo", "composicion", "capm", "markowitz", "montecarlo")},

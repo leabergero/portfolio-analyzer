@@ -145,8 +145,7 @@ def reporte(cartera):
     if not pos:
         return jsonify({"error": f'La cartera "{cartera}" no existe.'}), 404
     try:
-        pdf = rep.generar(cartera, pos, jobs.para_reporte(cartera, pos)
-                          if request.args.get("lab") == "1" else None)
+        pdf = rep.generar(cartera, pos, jobs.para_reporte(cartera, pos))
     except Exception as e:
         return jsonify({"error": f"No se pudo generar el reporte: {e}"}), 500
     from datetime import date as _d
