@@ -193,6 +193,7 @@
 [data-lab="1"] tbody tr{transition:background .12s}
 [data-lab="1"] tbody tr:hover{background:var(--panel-2)}
 [data-lab="1"] td.mono{font-family:var(--mono);font-weight:500}
+[data-lab="1"] .tenencias th{text-align:center}
 /* Tenencias en pantalla angosta (su monitor vertical, Brave al 125 %: ~850 px):
    letra y márgenes más chicos para que entren todas las columnas, un lote por renglón. */
 @media (max-width:1000px){
