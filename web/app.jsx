@@ -8437,7 +8437,7 @@ function MiInviu() {
   const efectivoArs = port?.available?.["24HS"]?.ARS?.amount ?? null;
   const efectivoUsd = port?.available?.["24HS"]?.USD?.amount ?? null;
   const rentasImportables = (rentas?.movimientos || [])
-    .filter((m) => (m.tipo === "Renta" || m.tipo === "Amortización") && !m.ya);
+    .filter((m) => ["Renta", "Amortización", "Dividendo", "Ajuste"].includes(m.tipo) && !m.ya);
   const rentasElegidas = rentasImportables.filter((m) => !rentasFuera.has(m.movementId));
   const alternarRenta = (id) => {
     const s = new Set(rentasFuera);
@@ -8628,12 +8628,21 @@ function MiInviu() {
               {ops.cartera}. Vienen destildadas en la tabla para no contar el mismo resultado
               dos veces.
             </div>)}
+          {ops.control && (ops.control.length
+            ? <div className="aviso mal">
+                <b>El historial no cierra con lo que InvIU dice que tenés hoy.</b> Falta un
+                movimiento o hay un evento (split, canje) que el apareo no supo leer:{" "}
+                {ops.control.map((c) => c.detalle || `${c.ticker}: InvIU ${num(c.inviu, 2)}, historial ${num(c.historial, 2)}`).join(" · ")}.
+              </div>
+            : <div className="aviso ok">
+                Las cantidades abiertas coinciden con InvIU, papel por papel.
+              </div>)}
 
           <div className="tabla-wrap"><table>
             <thead><tr>
               <th>Ticker</th><th>Compra</th><th>Venta</th><th className="n">Cantidad</th>
               <th className="n">Precio compra</th><th className="n">Precio venta</th>
-              <th className="n">Resultado</th>
+              <th className="n">Comisión</th><th className="n">Resultado</th>
             </tr></thead>
             <tbody>
               {(ops.abiertos || []).map((a, i) => (
@@ -8644,7 +8653,7 @@ function MiInviu() {
                   <td style={{ color: "var(--texto-3)" }}>—</td>
                   <td className="n">{num(a.qty, 2)}</td>
                   <td className="n">{usd(a.buy_price, 4)}</td>
-                  <td className="n">—</td><td className="n">—</td>
+                  <td className="n">—</td><td className="n">{usd(a.commissions)}</td><td className="n">—</td>
                 </tr>))}
               {(ops.cerrados || []).map((c, i) => (
                 <tr key={"c" + i} style={fuera.has(c.clave) ? { opacity: .45 } : undefined}>
@@ -8661,6 +8670,7 @@ function MiInviu() {
                   <td className="n">{num(c.qty, 2)}</td>
                   <td className="n">{usd(c.buy_price, 4)}</td>
                   <td className="n">{usd(c.sell_price, 4)}</td>
+                  <td className="n">{usd((c.buy_comm || 0) + (c.sell_comm || 0))}</td>
                   <td className={"n " + signo(c.pnl)}>{usd(c.pnl)}</td>
                 </tr>))}
               {(ops.cerrados || []).length > 0 && (
@@ -8722,7 +8732,7 @@ function MiInviu() {
           ? <div className="vacio">Sin movimientos de este tipo en el historial.</div>
           : <>
               <div className="tabla-wrap"><table>
-                <thead><tr><th>Fecha</th><th>Tipo</th><th>Ticker</th><th className="n">Monto</th></tr></thead>
+                <thead><tr><th>Fecha</th><th>Tipo</th><th>Ticker</th><th className="n">Arancel</th><th className="n">Monto neto</th></tr></thead>
                 <tbody>{rentas.movimientos.map((m, i) => (
                   <tr key={i} style={m.ya || rentasFuera.has(m.movementId) ? { opacity: .5 } : undefined}>
                     <td className="mono">
@@ -8734,15 +8744,17 @@ function MiInviu() {
                       {m.fecha}</td>
                     <td>{m.tipo}{m.ya && <span className="chip" style={{ marginLeft: 6, minWidth: 0 }}>ya en cartera</span>}</td>
                     <td className="mono">{m.ticker}</td>
+                    <td className="n">{m.arancel ? num(m.arancel, 2) : "—"}</td>
                     <td className="n">{m.moneda === "ARS" ? ars(m.monto, 2)
                       : num(m.monto, 2) + " " + m.moneda}</td>
                   </tr>))}</tbody>
               </table></div>
               <div className="pie">
                 Depósitos y retiros son informativos —aportes de capital, no resultado— y no se
-                importan. Solo Renta y Amortización van al P&L realizado. La pata en pesos de la
-                renta de un bono dual no aparece acá: sale negativa y es un ajuste técnico de
-                Caja de Valores, no plata real (verificado contra el extracto real de la cuenta).
+                importan. Rentas, amortizaciones, dividendos y ajustes de InvIU van al P&L
+                realizado, cada uno neto del arancel que InvIU debita en pesos el mismo día
+                (pasado a dólares al MEP de esa fecha). Importar reemplaza lo traído antes: la
+                cartera queda igual a lo que InvIU informa hoy.
               </div>
 
               {rentasImportables.length > 0 && (
@@ -8757,10 +8769,11 @@ function MiInviu() {
                                                     || impRentas?.estado === "yendo"}
                           onClick={importarRentas}>
                     {impRentas?.estado === "yendo" ? "Importando…"
-                      : `Importar ${rentasElegidas.length} rentas/amortizaciones`}
+                      : `Importar ${rentasElegidas.length} cobros y ajustes`}
                   </button>
                   {impRentas?.ok && <span className="ok" style={{ fontSize: 12 }}>
-                    Listo: {impRentas.agregados} en {impRentas.cartera}.
+                    Listo: {impRentas.agregados} en {impRentas.cartera}
+                    {impRentas.reemplazados ? ` (pisó ${impRentas.reemplazados})` : ""}.
                   </span>}
                   {impRentas?.error && <span className="mal" style={{ fontSize: 12 }}>{impRentas.error}</span>}
                 </div>

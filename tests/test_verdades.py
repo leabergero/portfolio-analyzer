@@ -3522,6 +3522,27 @@ def test_cedear_de_micron_no_es_el_etf_bajista_mud():
         composicion.sources.info = original
 
 
+def test_un_split_de_cedear_en_inviu_no_tira_la_venta():
+    """InvIU no informa el cambio de ratio: lo delata la venta.
+
+    NOW en INVIU: 130 compradas por 661,54 USD, 5:1 en diciembre de 2025, 650
+    vendidas por 586,98. Sin deducir el split, el FIFO apareaba 130 contra el
+    precio post-split y tiraba las otras 520: −544 en vez de −74,56.
+    """
+    _inviu_splits = require("api.routes.datos", "_inviu_splits")
+    _netear_fifo = require("core.io.csv_yahoo", "_netear_fifo")
+    compras = [{"fecha": "2025-12-05", "orden": 1, "precio": 661.54 / 130, "qty": 130, "comision": 0.0}]
+    ventas = [{"fecha": "2025-12-23", "orden": 2, "precio": 586.98 / 650, "qty": 650, "comision": 0.0}]
+    entregas = _inviu_splits(compras, ventas)
+    assert len(entregas) == 1 and casi(entregas[0]["qty"], 520), entregas
+    abiertos, cerrados = _netear_fifo(compras, ventas, entregas)
+    assert not abiertos, abiertos
+    pnl = sum(c["qty"] * (c["sell_price"] - c["buy_price"]) for c in cerrados)
+    assert casi(pnl, 586.98 - 661.54, 1e-6), pnl
+    # Una venta que no es múltiplo entero no se toma por split: se ve en el control.
+    assert not _inviu_splits(compras, [dict(ventas[0], qty=200)])
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

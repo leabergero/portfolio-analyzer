@@ -800,39 +800,106 @@ def _inviu_operaciones_procesadas():
         moneda = ((m.get("amount") or {}).get("currency") or "ARS").upper()
         if not instrumento or not cantidad or not importe or not fecha:
             continue
-        usd = importe if moneda != "ARS" else mep.a_usd(importe, fecha)
+        # La boleta trae el importe neto y el precio: la diferencia es comisión,
+        # derechos e IVA juntos (0,26–0,51 % en bonos, ~0,68 % en CEDEARs). Antes
+        # se guardaba el neto como precio y la comisión en 0: el resultado daba
+        # igual, pero los 1.541 USD de comisiones de INVIU no se veían en ningún lado.
+        compra = m["type"] == "BUY_OPERATION"
+        bruto = (m.get("price") or 0) * cantidad
+        comision = (importe - bruto) if compra else (bruto - importe)
+        if not bruto or comision < 0:
+            bruto, comision = importe, 0.0
+        a_usd = (lambda x: x) if moneda != "ARS" else (lambda x: mep.a_usd(x, fecha))
+        usd = a_usd(bruto)
         if not usd:
             continue
         clave = d_ticker(instrumento)
         es_bono[clave] = asset.get("assetType") == "bond"
         compras, ventas = ops.setdefault(clave, ([], []))
-        (compras if m["type"] == "BUY_OPERATION" else ventas).append(
+        (compras if compra else ventas).append(
             {"fecha": fecha, "orden": orden, "precio": usd / cantidad,
-             "qty": cantidad, "comision": 0.0})
+             "qty": cantidad, "comision": (a_usd(comision) or 0.0) if comision else 0.0})
 
     abiertos, cerrados = [], []
     for clave, (compras, ventas) in ops.items():
         bono = es_bono.get(clave, False)
         ticker = clave if bono else f"{clave}.BA"
         fuente = "cocos" if bono else ""
-        quedan, cierres = _netear_fifo(compras, ventas)
+        entregas = [] if bono else _inviu_splits(compras, ventas)
+        quedan, cierres = _netear_fifo(compras, ventas, entregas)
         for c in quedan:
             abiertos.append({
                 "ticker": ticker, "buy_date": c["fecha"], "buy_price": round(c["precio"], 6),
-                "qty": round(c["qty"], 6), "commissions": 0.0, "currency": "USD",
+                "qty": round(c["qty"], 6), "commissions": round(c["comision"], 4), "currency": "USD",
                 "source": fuente, "notes": f"InvIU · {clave}",
             })
         for c in cierres:
             cerrados.append({
                 "ticker": ticker, "buy_date": c["buy_date"], "sell_date": c["sell_date"],
                 "buy_price": round(c["buy_price"], 6), "sell_price": round(c["sell_price"], 6),
-                "qty": c["qty"], "buy_comm": 0.0, "sell_comm": 0.0, "moneda": "USD",
-                "pnl": round(c["qty"] * (c["sell_price"] - c["buy_price"]), 4),
+                "qty": c["qty"], "buy_comm": c["buy_comm"], "sell_comm": c["sell_comm"], "moneda": "USD",
+                "pnl": round(c["qty"] * (c["sell_price"] - c["buy_price"])
+                             - c["buy_comm"] - c["sell_comm"], 4),
             })
     abiertos.sort(key=lambda x: (x["ticker"], x["buy_date"]))
     cerrados.sort(key=lambda x: x["sell_date"], reverse=True)
     c = inviu._c()
-    return {"abiertos": abiertos, "cerrados": cerrados, "cuenta": c.account_id if c else None}
+    return {"abiertos": abiertos, "cerrados": cerrados, "cuenta": c.account_id if c else None,
+            "control": _inviu_control(abiertos)}
+
+
+def _inviu_splits(compras: list, ventas: list) -> list:
+    """Los desdoblamientos de un CEDEAR, deducidos de las ventas.
+
+    InvIU no informa el cambio de ratio como movimiento —de NOW (5:1, diciembre
+    de 2025) sólo deja un débito en pesos etiquetado DIVIDEND, sin cantidad—, así
+    que el FIFO apareaba las 130 compradas contra la venta de 650 y tiraba las
+    otras 520: −544 USD en vez de −74. Si una venta supera lo que había y la
+    proporción es entera, la diferencia entró por un split antes de esa venta.
+    Una proporción no entera no se adivina: queda a la vista en `_inviu_control`.
+
+    ponytail: el split se fecha el día de la venta, no el real; una compra entre
+    el split y esa venta quedaría multiplicada también. Afinar si aparece el caso.
+    """
+    eventos = sorted([(c["fecha"], c["orden"], c["qty"]) for c in compras]
+                     + [(v["fecha"], v["orden"], -v["qty"]) for v in ventas])
+    tenencia, entregas = 0.0, []
+    for fecha, orden, qty in eventos:
+        if qty < 0 and tenencia > 1e-9 and -qty > tenencia + 1e-9:
+            factor = -qty / tenencia
+            if abs(factor - round(factor)) < 1e-9:
+                entregas.append({"fecha": fecha, "orden": orden, "qty": -qty - tenencia})
+                tenencia = -qty
+        tenencia = max(tenencia + qty, 0.0)
+    return entregas
+
+
+def _inviu_control(abiertos: list) -> list:
+    """Lo que el historial deja abierto contra lo que InvIU dice que tenés hoy.
+
+    Es el control de que la importación refleja la cuenta: si una cantidad no
+    coincide, falta un movimiento o hay un evento (split, canje) que el apareo
+    no supo leer. Vacío es que coincide todo.
+    """
+    from core.data.symbols import d_ticker, strip_ba
+
+    r = inviu.cartera()
+    if not isinstance(r, dict) or r.get("error") or not r.get("results"):
+        return [{"ticker": "—", "detalle": "No se pudo leer la cartera de InvIU para controlar."}]
+    hoy = {}
+    for cat in r["results"][0].get("portfolio", {}).get("holdingsByCategory", []):
+        if cat.get("assetType") == "CURRENCY":
+            continue
+        for h in cat.get("holdings") or []:
+            t = d_ticker((h.get("ticker") or "").upper())
+            hoy[t] = hoy.get(t, 0) + (h.get("quantity") or 0)
+    nuestro = {}
+    for a in abiertos:
+        t = strip_ba(a["ticker"])
+        nuestro[t] = nuestro.get(t, 0) + a["qty"]
+    return [{"ticker": t, "inviu": hoy.get(t, 0), "historial": round(nuestro.get(t, 0), 6)}
+            for t in sorted(set(hoy) | set(nuestro))
+            if abs(hoy.get(t, 0) - nuestro.get(t, 0)) > 1e-6]
 
 
 def _inviu_ya_cargados(cartera: str, abiertos: list) -> list:
@@ -919,56 +986,97 @@ def inviu_importar_cerradas():
 
 
 def _inviu_rentas() -> dict:
-    """Depósitos, retiros, amortizaciones y rentas (solo la pata en USD) del
-    historial. La pata en ARS de una renta no es plata real —viene negativa,
-    es un ajuste técnico de Caja de Valores sobre la clase peso del mismo
-    bono dual, no un movimiento de caja— y no entra acá. Ver
-    inviu-integration/MAPEO_A_PORTFOLIO.md."""
+    """Depósitos, retiros, rentas, amortizaciones, dividendos y ajustes del
+    historial, cada cobro neto de su arancel.
+
+    Cada cobro en dólares viene acompañado, el mismo día, por un débito en pesos
+    sobre el mismo papel. Se lo tomaba por un ajuste técnico de Caja de Valores y
+    se descartaba, pero es plata que sale de la cuenta y es proporcional al cobro:
+    0,35 % en ONs, 0,05 % en soberanos, ~4,9 % en CEDEARs. No es Ganancias. Va
+    como `arancel` (en USD, al MEP del día) junto a su cobro. Un débito sin cobro
+    al lado —NOW, el día de su split— queda como un movimiento propio.
+
+    Los ajustes manuales de InvIU (rendimiento sobre saldo líquido, cobro de
+    descubierto) también son resultado y entran, con el ticker AJUSTEINVIU.
+    """
+    from core.data import mep
+    from core.data.symbols import d_ticker
+
     r = inviu.movimientos()
     if isinstance(r, dict) and r.get("error"):
         return r
-    salida = []
-    for m in (r or {}).get("results", []):
-        tipo = m.get("type")
+    movs = (r or {}).get("results", [])
+    categorias = {"AMORTIZATION": "Amortización", "INCOME": "Renta", "DIVIDEND": "Dividendo",
+                  "CASH_IN": "Depósito", "CASH_OUT": "Retiro", "ADJUSTMENT": "Ajuste"}
+    # Los CEDEARs van con el ticker de la posición (QQQD.BA), como en las
+    # operaciones; los bonos, sin sufijo. Lo dice el propio movimiento.
+    cedears = {d_ticker((m.get("asset") or {}).get("ticker") or "") for m in movs
+               if (m.get("asset") or {}).get("assetType") == "cedear"}
+
+    # Los cobros antes que los débitos: el arancel de un día tiene que encontrar
+    # su cobro, y InvIU no los da siempre en el mismo orden.
+    salida, cobros = [], {}
+    for m in sorted(reversed(movs), key=lambda m: ((m.get("amount") or {}).get("amount") or 0) < 0):
+        categoria = categorias.get(m.get("type"))
+        if not categoria:
+            continue
+        fecha = m.get("concertationDate")
         moneda = (m.get("amount") or {}).get("currency")
         monto = (m.get("amount") or {}).get("amount") or 0
-        if tipo == "AMORTIZATION":
-            categoria = "Amortización"
-        elif tipo in ("INCOME", "DIVIDEND") and moneda == "USD":
-            categoria = "Renta"
-        elif tipo == "CASH_IN":
-            categoria = "Depósito"
-        elif tipo == "CASH_OUT":
-            categoria = "Retiro"
+        if moneda == "ARS" and categoria not in ("Depósito", "Retiro"):
+            monto, moneda = mep.a_usd(monto, fecha) or 0.0, "USD"
+        instrumento = (m.get("asset") or {}).get("ticker")
+        if categoria == "Ajuste":
+            ticker = "AJUSTEINVIU"
+        elif instrumento:
+            ticker = d_ticker(instrumento.upper())
+            ticker = f"{ticker}.BA" if ticker in cedears else ticker
         else:
+            ticker = "CASH"
+        clave = (fecha, ticker, categoria)
+        if categoria in ("Renta", "Dividendo") and monto < 0 and cobros.get(clave):
+            # Dos cupones el mismo día (AO27D, 2026-09-30): uno por cobro.
+            cobro = next((c for c in cobros[clave] if not c["arancel"]), cobros[clave][-1])
+            cobro["arancel"] = round(cobro["arancel"] + monto, 4)
+            cobro["monto"] = round(cobro["bruto"] + cobro["arancel"], 4)
             continue
-        salida.append({
-            "fecha": m.get("concertationDate"), "tipo": categoria,
-            "ticker": (m.get("asset") or {}).get("ticker") or "CASH",
-            "moneda": moneda, "monto": monto,
-            "descripcion": m.get("description"), "movementId": m.get("movementId"),
-        })
+        x = {"fecha": fecha, "tipo": categoria, "ticker": ticker, "moneda": moneda,
+             "bruto": round(max(monto, 0), 4), "arancel": round(min(monto, 0), 4),
+             "monto": round(monto, 4),
+             "descripcion": m.get("description"), "movementId": m.get("movementId")}
+        if categoria in ("Depósito", "Retiro", "Ajuste"):
+            x["bruto"], x["arancel"] = round(monto, 4), 0.0
+        if categoria in ("Renta", "Dividendo") and monto > 0:
+            cobros.setdefault(clave, []).append(x)
+        salida.append(x)
     salida.sort(key=lambda x: x["fecha"], reverse=True)
     return {"movimientos": salida}
 
 
-def _inviu_rentas_en(cartera: str, movimientos: list) -> list:
-    """Marca `ya` en las rentas y amortizaciones que la cartera ya tiene.
+# Lo que va al P&L realizado. Depósitos y retiros son aportes, no resultado.
+INVIU_IMPORTABLES = ("Renta", "Amortización", "Dividendo", "Ajuste")
 
-    Cuenta lo traído antes y lo cargado a mano como dividendo: mismo papel y
-    hasta 5 días de diferencia, uno a uno, para que dos cupones del mismo bono
-    no se tapen con un solo registro.
+
+def _inviu_rentas_en(cartera: str, movimientos: list) -> list:
+    """Marca `ya` en los cobros que la cartera ya tiene **cargados a mano**.
+
+    Mismo papel y hasta 5 días de diferencia, uno a uno, para que dos cupones
+    del mismo bono no se tapen con un solo registro. Lo traído antes de InvIU no
+    cuenta: cada importación reemplaza su lote entero, así que la cartera queda
+    siempre igual a lo que InvIU informa hoy (montos corregidos incluidos).
     """
     from datetime import date
     from core.data.symbols import base_symbol, strip_ba
     base = lambda t: base_symbol(strip_ba(t or "")).upper()             # noqa: E731
-    previos = [t for t in store.cargar_realizado(cartera) if t.get("tipo") in ("renta", "dividendo")] \
-        if cartera in store.nombres() else []
+    previos = [t for t in store.cargar_realizado(cartera) if t.get("tipo") in ("renta", "dividendo")
+               and t.get("lote") != inviu.LOTE_RENTAS] if cartera in store.nombres() else []
     usados = set()
     for m in movimientos:
-        if m["tipo"] not in ("Renta", "Amortización"):
+        if m["tipo"] not in INVIU_IMPORTABLES:
             continue
         m["ya"] = False
+        if m["tipo"] == "Ajuste":
+            continue
         for i, t in enumerate(previos):
             if i not in usados and base(t["ticker"]) == base(m["ticker"]) and \
                     abs((date.fromisoformat(t["sell_date"]) - date.fromisoformat(m["fecha"][:10])).days) <= 5:
@@ -986,6 +1094,13 @@ def inviu_rentas():
     if not r.get("error"):
         _inviu_rentas_en(request.args.get("cartera", ""), r["movimientos"])
     return jsonify(r)
+
+
+@bp.get("/inviu/movimientos")
+def inviu_movimientos():
+    """El historial tal cual lo da InvIU, sin filtrar ni convertir: la fuente
+    para auditar lo importado contra cada boleta."""
+    return jsonify(inviu.movimientos())
 
 
 @bp.get("/inviu/evolucion")
@@ -1195,18 +1310,21 @@ def inviu_importar_rentas():
         return error
 
     # Sólo las elegidas en `solo` (movementId; sin `solo`, todas) y nunca las
-    # que la cartera ya tiene.
+    # que la cartera ya tiene cargadas a mano. Reemplaza el lote entero: volver
+    # a importar deja exactamente lo que InvIU informa, no suma encima.
+    # El cobro bruto es el precio y el arancel la comisión, como un dividendo
+    # cargado a mano: el resultado es el neto y el arancel queda a la vista.
     solo = (request.json or {}).get("solo")
     trades = [{
         "ticker": m["ticker"], "buy_date": m["fecha"], "sell_date": m["fecha"],
-        "buy_price": 0.0, "sell_price": round(m["monto"], 6), "qty": 1,
-        "buy_comm": 0.0, "sell_comm": 0.0, "moneda": m["moneda"],
-        "pnl": round(m["monto"], 4), "tipo": "renta", "lote": inviu.LOTE_RENTAS,
+        "buy_price": 0.0, "sell_price": round(m["bruto"], 6), "qty": 1,
+        "buy_comm": 0.0, "sell_comm": round(-m["arancel"], 4), "moneda": m["moneda"],
+        "pnl": round(m["monto"], 4), "tipo": "dividendo" if m["tipo"] == "Dividendo" else "renta",
     } for m in _inviu_rentas_en(cartera, r["movimientos"])
-        if m["tipo"] in ("Renta", "Amortización") and not m["ya"]
+        if m["tipo"] in INVIU_IMPORTABLES and not m["ya"]
         and (solo is None or m["movementId"] in solo)]
 
-    res = store.agregar_realizado(cartera, trades)
+    res = store.agregar_realizado(cartera, trades, lote=inviu.LOTE_RENTAS)
     if cuenta:
         store.asociar_cuenta(cuenta, cartera)
     return jsonify({"ok": True, "cartera": cartera, **res,

@@ -122,7 +122,7 @@ TTL_SIN_SERIE_H = 6.0
 SIN_FUENTE = {
     "S15G5", "S15G5D", "GOOGLD", "MGCGOD", "MGCGD", "WNCHD", "RCCPD", "DHS8D",
     "YMCJD", "TTS26D", "TLCMD", "TLCPD", "VSCVD", "TXMJ8D", "PLC5D", "PLC7D",
-    "DNCAD", "MCC3D", "CAUCIONT", "CAUCIONC",
+    "DNCAD", "MCC3D", "CAUCIONT", "CAUCIONC", "AJUSTEINVIU",
     # Lo que quedaba de las ONs de KARIN al sacarles la "D": no existen en
     # ninguna fuente (ver `symbols.ON_VENCIDAS_D`).
     "WNCH", "RCCP", "DHS8", "MGCG",

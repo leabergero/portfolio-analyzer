@@ -51,7 +51,7 @@ def _es_bono_ar(ticker: str) -> bool:
 def fuentes(ticker: str) -> list:
     """Las URLs a probar para ese ticker, de la más fiel a la más genérica."""
     t = ticker.upper()
-    if t.startswith("CAUCION"):
+    if t.startswith(("CAUCION", "AJUSTEINVIU")):
         return []
     if t.startswith("COCO"):                        # FCI de Cocos
         return [BANDERA.format("us" if "USD" in t else "ar")]
