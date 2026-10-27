@@ -1979,7 +1979,7 @@ function FlujoBonos({ cartera }) {
     <Plegable id={`flujo-bonos-${cartera}`}
               titulo={t("Flujo de fondos de los bonos", "Bond cash flow")}
               extra={<span style={{ fontSize: 12, color: "var(--texto-3)" }}>
-                {t("próximos", "next")} {f.anios.length} {t("años", "years")} · {usd(f.total)}
+                {t("próximos", "next")} {f.anios.length} {t("años", "years")} · <span className="pos">{usd(f.total)}</span>
               </span>}>
       <div className="tabla-wrap"><table>
         <thead><tr>
@@ -1991,15 +1991,15 @@ function FlujoBonos({ cartera }) {
           {f.anios.map((a, i) => (
             <tr key={a.desde}>
               <td className="mono">{t("Año", "Year")} {i + 1} · {dma(a.desde)} → {dma(a.hasta)}</td>
-              <td className="n">{usd(a.renta)}</td>
-              <td className="n">{a.amortizacion ? usd(a.amortizacion) : "—"}</td>
-              <td className="n"><b>{usd(a.total)}</b></td>
+              <td className="n pos">{usd(a.renta)}</td>
+              <td className="n pos">{a.amortizacion ? usd(a.amortizacion) : "—"}</td>
+              <td className="n pos"><b>{usd(a.total)}</b></td>
               <td className="mono" style={{ fontSize: 12 }}>
                 {[...new Set(a.pagos.map((p) => p.ticker))].join(" · ")}</td>
             </tr>))}
           <tr>
-            <th>{t("Total", "Total")}</th><th className="n">{usd(f.renta)}</th>
-            <th className="n">{usd(f.amortizacion)}</th><th className="n">{usd(f.total)}</th><th />
+            <th>{t("Total", "Total")}</th><th className="n pos">{usd(f.renta)}</th>
+            <th className="n pos">{usd(f.amortizacion)}</th><th className="n pos">{usd(f.total)}</th><th />
           </tr>
         </tbody>
       </table></div>
