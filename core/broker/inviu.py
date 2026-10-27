@@ -392,7 +392,37 @@ def cartera(plazo: str = "24HS") -> dict:
     c = _c()
     if c is None or not c.account_id:
         return {"error": "sin conectar"}
-    return _get(f"/managed-portfolio/v4/account/{c.account_id}", term=plazo)
+    r = _get(f"/managed-portfolio/v4/account/{c.account_id}", term=plazo)
+    _guardar_precios(r)
+    return r
+
+
+def _guardar_precios(r) -> None:
+    """Deja el precio de hoy de cada bono para cuando Cocos no está conectado.
+
+    Los bonos sólo tienen serie en Cocos, y en la web la sesión de Cocos viaja
+    con el navegador: sin ella, INVIU quedaba valuada al último cierre guardado
+    (tres semanas viejo el 2026-10-27). InvIU no tiene histórico, pero su
+    cartera trae la valuación de hoy de cada tenencia: `sources.precios` la usa
+    como último punto si es más nueva que lo que hay. Se guarda en la escala
+    de la serie de Cocos —pesos cada 100 nominales— para empalmar sin cambiar
+    ninguna regla de conversión.
+    """
+    from datetime import date
+    from core.data import cache
+    from core.data.symbols import d_ticker
+
+    if not isinstance(r, dict) or not r.get("results"):
+        return
+    hoy = date.today().isoformat()
+    for cat in r["results"][0].get("portfolio", {}).get("holdingsByCategory", []):
+        if cat.get("assetType") != "BOND":
+            continue
+        for h in cat.get("holdings") or []:
+            u = h.get("unitValuation") or {}
+            if u.get("currency") == "ARS" and u.get("amount") and h.get("ticker"):
+                cache.guardar_respuesta(f"inviu:precio:{d_ticker(h['ticker'].upper())}",
+                                        {"fecha": hoy, "close": u["amount"] * 100})
 
 
 def operaciones() -> list:

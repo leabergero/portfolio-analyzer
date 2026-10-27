@@ -3543,6 +3543,35 @@ def test_un_split_de_cedear_en_inviu_no_tira_la_venta():
     assert not _inviu_splits(compras, [dict(ventas[0], qty=200)])
 
 
+def test_un_bono_sin_cocos_toma_el_precio_de_hoy_de_inviu():
+    """INVIU en la web: Cocos sin sesión, la serie de MGCTD se quedaba en el
+    2026-10-06 y YM37D/YM42D no tenían ningún precio. InvIU trae la valuación de
+    hoy; tiene que entrar como último punto, sin pisar lo que diga Cocos."""
+    import pandas as pd
+    sources, symbols = require("core.data", "sources", "symbols")
+    inviu = require("core.broker", "inviu")
+    assert symbols.base_symbol("YM37D") == "YM37O", "Cocos no conoce YM37: la especie es YM37O."
+    with cache_aparte() as cache:
+        cartera = {"results": [{"portfolio": {"holdingsByCategory": [{"assetType": "BOND", "holdings": [
+            {"ticker": "YM37O", "unitValuation": {"amount": 1600.1, "currency": "ARS"}}]}]}}]}
+        inviu._guardar_precios(cartera)
+        orig = sources._precios
+        hoy = pd.Timestamp.today().normalize()
+        try:
+            sources._precios = lambda *a, **k: pd.DataFrame()
+            df = sources.precios("YM37D", source="cocos")
+            assert len(df) == 1 and casi(df["Close"].iloc[-1], 160010), df
+            # Si Cocos ya trae la rueda de hoy, manda Cocos.
+            sources._precios = lambda *a, **k: pd.DataFrame({"Close": [161000.0]}, index=[hoy])
+            assert casi(sources.precios("YM37D", source="cocos")["Close"].iloc[-1], 161000)
+            # Un CEDEAR no pasa por acá aunque haya un precio guardado con su nombre.
+            cache.guardar_respuesta("inviu:precio:QQQD.BA", {"fecha": hoy.date().isoformat(), "close": 1})
+            sources._precios = lambda *a, **k: pd.DataFrame()
+            assert sources.precios("QQQD.BA").empty
+        finally:
+            sources._precios = orig
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

@@ -172,6 +172,10 @@ def _horas_desde_cierre() -> float:
     return (ahora - cierre).total_seconds() / 3600
 
 
+# Cuánto vale el precio de hoy que dejó InvIU (ver `inviu._guardar_precios`).
+TTL_INVIU_H = 24.0
+
+
 def precios(ticker: str, desde: str = None, hasta: str = None,
             source: str = None, refrescar: bool = False) -> pd.DataFrame:
     """Serie histórica del ticker, en su moneda de cotización.
@@ -179,7 +183,31 @@ def precios(ticker: str, desde: str = None, hasta: str = None,
     NO convierte a dólares: eso lo hace quien la consume, con el MEP de cada
     fecha (ver `core.data.mep`). Devolver el precio crudo mantiene una sola
     responsabilidad por función y hace la caché reutilizable.
+
+    Lo que sólo tiene Cocos, sin Cocos conectado, termina en el último cierre
+    guardado. Si InvIU dejó un precio más nuevo de ese bono, va como último
+    punto: Cocos primero, InvIU de respaldo. No entra a la caché de cierres
+    (puede ser intradiario, como el spot de yfinance).
+
+    ponytail: entre el último cierre y el punto de InvIU no hay ruedas, así que
+    la variación "del día" mide todo el hueco. Rellenar si molesta.
     """
+    df = _precios(ticker, desde, hasta, source, refrescar)
+    t = ticker.upper().strip()
+    if not (source == "cocos" or strip_ba(t) in SIN_FUENTE
+            or (source is None and is_cocos_only(t))):
+        return df
+    p = cache.leer_respuesta(f"inviu:precio:{strip_ba(t)}", TTL_INVIU_H)
+    if not p or p["fecha"] > (hasta or date.today().isoformat()):
+        return df
+    fecha = pd.Timestamp(p["fecha"])
+    if not df.empty and df.index[-1] >= fecha:
+        return df
+    return pd.concat([df, pd.DataFrame({"Close": [float(p["close"])]}, index=[fecha])])
+
+
+def _precios(ticker: str, desde: str = None, hasta: str = None,
+             source: str = None, refrescar: bool = False) -> pd.DataFrame:
     ticker = ticker.upper().strip()
     desde = desde or INICIO_HISTORIA
     hasta = hasta or date.today().isoformat()

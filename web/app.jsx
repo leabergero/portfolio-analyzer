@@ -226,6 +226,13 @@ const api = async (ruta, opciones) => {
   return d;
 };
 
+// Leer la cartera de InvIU deja en el server el precio de hoy de sus bonos: es
+// el respaldo cuando Cocos no está conectado (ver `inviu._guardar_precios`).
+// Una vez por carga de página, antes del primer análisis. Sin InvIU contesta
+// "sin conectar" al instante.
+let preciosInviu = null;
+const precalentarInviu = () => (preciosInviu ??= api("/api/inviu/cartera"));
+
 const usd = (n, dec = 2) =>
   n == null ? "—" : MERCADOS[MERCADO].simbolo + Number(n).toLocaleString(
     IDIOMA === "en" ? "en-US" : "es-AR",
@@ -1645,9 +1652,9 @@ function Analisis({ cartera, recargar, sim, setSim }) {
     // mientras se rehacen, y el botón es el que cuenta que está trabajando.
     setEstado((e) => (forzar && e ? { ...e, estado: "corriendo" } : null));
     setRun(null);
-    api(`/api/analisis/${encodeURIComponent(cartera)}`,
+    precalentarInviu().then(() => api(`/api/analisis/${encodeURIComponent(cartera)}`,
         { method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ forzar }) })
+          body: JSON.stringify({ forzar }) }))
       .then((d) => d.run_id && setRun(d.run_id))
       .catch(() => setTimeout(lanzar, 2000));
   }, [cartera]);

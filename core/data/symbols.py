@@ -112,6 +112,21 @@ ON_D_TICKER = {
     "YMCXO": "YMCXD",
     "IRCPO": "IRCPD",
     "DNC7O": "DNC7D",
+    # Las de INVIU (pares sacados de sus movimientos). Sin la entrada,
+    # `base_symbol("YM37D")` daba "YM37" —forma de soberano— y Cocos rechazaba
+    # el código: YM37D e YM42D nunca tuvieron precio (2026-10-27).
+    "YM37O": "YM37D",
+    "YM42O": "YM42D",
+    "YM34O": "YM34D",
+    "YM39O": "YM39D",
+    "YMCJO": "YMCJD",
+    "TLCMO": "TLCMD",
+    "TLCPO": "TLCPD",
+    "PLC5O": "PLC5D",
+    "PLC7O": "PLC7D",
+    "DNCAO": "DNCAD",
+    "MCC3O": "MCC3D",
+    "VSCVO": "VSCVD",
     # Vencida, sólo en lo realizado de LEANDRO. Sin esta entrada su serie
     # guardada (pesos, cada 100 nominales) se leía como dólares por nominal y la
     # curva de valor llegaba a 62 millones (2026-10-16).
