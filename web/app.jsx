@@ -2168,8 +2168,8 @@ function Posicion({ d, cartera, recargar, lanzar, extras, bench, sim, setSim }) 
             <th onClick={() => ordenarPor("ticker")} style={{ cursor: "pointer" }}>Ticker</th>
             <th onClick={() => ordenarPor("buy_date")} style={{ cursor: "pointer" }}>{t("Compra", "Purchase")}</th>
             <th className="n" title={t("Cantidad", "Quantity")} onClick={() => ordenarPor("qty")} style={{ cursor: "pointer" }}>{t("Cant.", "Qty.")}</th>
-            <th className="n" onClick={() => ordenarPor("buy_price_usd")} style={{ cursor: "pointer" }}>{t("Precio compra", "Buy price")}</th>
-            <th className="n" onClick={() => ordenarPor("precio_usd")} style={{ cursor: "pointer", color: "var(--alerta)" }}>{t("Precio hoy", "Price today")}</th>
+            <th className="n" onClick={() => ordenarPor("buy_price_usd")} title={t("Precio de compra", "Buy price")} style={{ cursor: "pointer" }}>{t("P. compra", "Buy")}</th>
+            <th className="n" onClick={() => ordenarPor("precio_usd")} title={t("Precio de hoy", "Price today")} style={{ cursor: "pointer", color: "var(--alerta)" }}>{t("P. hoy", "Now")}</th>
             <th className="n" onClick={() => ordenarPor("valor_usd")} style={{ cursor: "pointer" }}>{t("Valor", "Value")}</th>
             <th className="n" title={dia} onClick={() => ordenarPor("pnl_dia_usd")} style={{ cursor: "pointer" }}>{hoy}</th>
             <th className="n" title={dia} onClick={() => ordenarPor("pnl_dia_pct")} style={{ cursor: "pointer" }}>{hoy} %</th>
@@ -2181,16 +2181,16 @@ function Posicion({ d, cartera, recargar, lanzar, extras, bench, sim, setSim }) 
           </tr></thead>
           <tbody>{filasOrdenadas.map((f, i) => (
             <tr key={i}>
-              <td className="mono textochip">{f.ticker}<LogoTicker ticker={f.ticker} />
+              <td className="mono textochip" style={{ whiteSpace: "nowrap" }}>{f.ticker.replace(/\.BA$/, "")}<LogoTicker ticker={f.ticker} />
                 {f.es_bono && <span className="chip" style={{marginLeft:6}}>{t("bono", "bond")}</span>}
                 {f.sim && <span className="chip ojo" style={{marginLeft:6}}
                                 title={t("Simulada: no está en tu cartera", "Simulated: not in your portfolio")}>
                                 {t("sim", "sim")}</span>}</td>
-              <td className="mono">{f.buy_date}</td>
+              <td className="mono" style={{ whiteSpace: "nowrap" }}>{f.buy_date.slice(2).split("-").reverse().join("/")}</td>
               <td className="n">{num(f.qty, 0)}</td>
-              <td className="n">{usd(f.buy_price_usd, 4)}</td>
+              <td className="n">{usd(f.buy_price_usd)}</td>
               <td className="n" style={{ color: "var(--alerta)" }}>{f.precio_usd == null ? "—" : (
-                <>{usd(f.precio_usd, 4)}{f.precio_estimado && (
+                <>{usd(f.precio_usd)}{f.precio_estimado && (
                   // Cocos no publica la cuotaparte de un fondo que no tenés hoy
                   // en la cuenta conectada. Se muestra el PPC para que la
                   // tenencia no valga cero, con el asterisco que lo aclara.
@@ -2199,9 +2199,9 @@ function Posicion({ d, cartera, recargar, lanzar, extras, bench, sim, setSim }) 
               )}</td>
               <td className="n">{usd(f.valor_usd)}</td>
               <td className={"n " + signo(f.pnl_dia_usd)}>{usd(f.pnl_dia_usd)}</td>
-              <td className={"n " + signo(f.pnl_dia_pct)}>{pct(f.pnl_dia_pct, 1)}</td>
+              <td className={"n " + signo(f.pnl_dia_pct)}>{pct(f.pnl_dia_pct)}</td>
               <td className={"n " + signo(f.pnl_usd)}>{usd(f.pnl_usd)}</td>
-              <td className={"n " + signo(f.pnl_pct)}>{pct(f.pnl_pct, 1)}</td>
+              <td className={"n " + signo(f.pnl_pct)}>{pct(f.pnl_pct)}</td>
               <td className="n">{(() => {
                 const tw = twu[claveLote(f)];
                 if (!tw) return "—";

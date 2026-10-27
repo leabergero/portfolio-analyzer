@@ -193,6 +193,13 @@
 [data-lab="1"] tbody tr{transition:background .12s}
 [data-lab="1"] tbody tr:hover{background:var(--panel-2)}
 [data-lab="1"] td.mono{font-family:var(--mono);font-weight:500}
+/* Tenencias en pantalla angosta (su monitor vertical, Brave al 125 %: ~850 px):
+   letra y márgenes más chicos para que entren todas las columnas, un lote por renglón. */
+@media (max-width:1000px){
+  [data-lab="1"] table.tenencias{font-size:11px}
+  [data-lab="1"] .tenencias th{font-size:9px;letter-spacing:.04em}
+  [data-lab="1"] .tenencias th,[data-lab="1"] .tenencias td{padding-left:4px;padding-right:4px}
+}
 
 /* ── Controles ── */
 [data-lab="1"] select,[data-lab="1"] input[type=text],[data-lab="1"] input[type=number],
