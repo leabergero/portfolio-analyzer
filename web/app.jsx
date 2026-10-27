@@ -1961,6 +1961,67 @@ function AltaRapida({ cartera, recargar, lanzar }) {
 
 const claveLote = (x) => `${x.ticker}|${x.buy_date}|${x.qty}`;
 
+/* Qué plata van a ir dejando los bonos: renta y amortización por año desde hoy,
+   según el cronograma que proyecta InvIU. Orientativo: es la tenencia de hoy, y
+   un cupón variable o una venta lo cambian. Sin InvIU conectado no aparece. */
+function FlujoBonos({ cartera }) {
+  const [f, setF] = useState(null);
+  useEffect(() => {
+    let vivo = true;
+    setF(null);
+    api(`/api/inviu/flujo-anual?cartera=${encodeURIComponent(cartera)}`)
+      .then((r) => vivo && setF(r));
+    return () => { vivo = false; };
+  }, [cartera]);
+  if (!f || f.error || !(f.anios || []).length) return null;
+  const dma = (x) => x.split("-").reverse().join("/");
+  return (
+    <Plegable id={`flujo-bonos-${cartera}`}
+              titulo={t("Flujo de fondos de los bonos", "Bond cash flow")}
+              extra={<span style={{ fontSize: 12, color: "var(--texto-3)" }}>
+                {t("próximos", "next")} {f.anios.length} {t("años", "years")} · {usd(f.total)}
+              </span>}>
+      <div className="tabla-wrap"><table>
+        <thead><tr>
+          <th>{t("Período", "Period")}</th><th className="n">{t("Rentas", "Coupons")}</th>
+          <th className="n">{t("Amortizaciones", "Amortizations")}</th>
+          <th className="n">{t("Total", "Total")}</th><th>{t("Pagan", "Paying")}</th>
+        </tr></thead>
+        <tbody>
+          {f.anios.map((a, i) => (
+            <tr key={a.desde}>
+              <td className="mono">{t("Año", "Year")} {i + 1} · {dma(a.desde)} → {dma(a.hasta)}</td>
+              <td className="n">{usd(a.renta)}</td>
+              <td className="n">{a.amortizacion ? usd(a.amortizacion) : "—"}</td>
+              <td className="n"><b>{usd(a.total)}</b></td>
+              <td className="mono" style={{ fontSize: 12 }}>
+                {[...new Set(a.pagos.map((p) => p.ticker))].join(" · ")}</td>
+            </tr>))}
+          <tr>
+            <th>{t("Total", "Total")}</th><th className="n">{usd(f.renta)}</th>
+            <th className="n">{usd(f.amortizacion)}</th><th className="n">{usd(f.total)}</th><th />
+          </tr>
+        </tbody>
+      </table></div>
+      {(f.sin_vencimiento || []).length > 0 && (
+        <div className="aviso ojo">
+          {t("InvIU no informa la amortización de", "InvIU doesn't report the amortization of")}{" "}
+          <b className="mono">{f.sin_vencimiento.join(", ")}</b>
+          {t(": el flujo de ese bono está incompleto y el total queda corto.",
+             ": that bond's flow is incomplete and the total falls short.")}
+        </div>)}
+      <div className="pie">
+        {t(`Orientativo. Es el cronograma que proyecta InvIU para lo que tenés hoy, en dólares
+            y antes de aranceles: año 1 va de hoy a dentro de doce meses. Un cupón de tasa
+            variable, una compra o una venta lo cambian.`,
+           `A guide, not a promise. It's InvIU's projected schedule for what you hold today,
+            in dollars and before fees: year 1 runs from today to twelve months out. A
+            floating coupon, a purchase or a sale changes it.`)}
+      </div>
+    </Plegable>
+  );
+}
+
 function Posicion({ d, cartera, recargar, lanzar, extras, bench, sim, setSim }) {
   const filas = d.posiciones || [];
   const [crudo, setCrudo] = useState(null);
@@ -2178,6 +2239,8 @@ function Posicion({ d, cartera, recargar, lanzar, extras, bench, sim, setSim }) 
           </>)}
         </div>
       </Plegable>
+
+      {esDeInviu && <FlujoBonos cartera={cartera} />}
 
       {/* Cargar y simular van juntos y acá: debajo de lo que tenés —que es
           contra lo que se agrega o se simula— y antes de lo que ya cerraste. */}

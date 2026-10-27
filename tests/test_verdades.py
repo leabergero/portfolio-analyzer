@@ -3572,6 +3572,26 @@ def test_un_bono_sin_cocos_toma_el_precio_de_hoy_de_inviu():
             sources._precios = orig
 
 
+def test_el_flujo_de_bonos_se_suma_por_anio_desde_hoy():
+    """Año 1 es de hoy a hoy + 1 año, no el calendario; lo que la cartera no
+    tiene no cuenta, y un bono sin amortización informada queda señalado."""
+    from datetime import date
+    _flujo_anual = require("api.routes.datos", "_flujo_anual")
+    pagos = [
+        {"date": "2026-11-03", "ticker": "TTCDO", "type": "INCOME", "amount": 152.4},
+        {"date": "2026-11-11", "ticker": "YM37O", "type": "INCOME", "amount": 118.335},
+        {"date": "2027-10-27", "ticker": "TTCDO", "type": "INCOME", "amount": 152.4},
+        {"date": "2030-11-03", "ticker": "TTCDO", "type": "AMORTIZATION", "amount": 4000},
+        {"date": "2026-10-01", "ticker": "TTCDO", "type": "INCOME", "amount": 999},   # ya pasó
+        {"date": "2027-01-01", "ticker": "QQQO", "type": "INCOME", "amount": 999},    # no está
+    ]
+    r = _flujo_anual(pagos, date(2026, 10, 27), {"TTCDD", "YM37D"})
+    assert [a["desde"] for a in r["anios"]] == ["2026-10-27", "2027-10-27", "2030-10-27"], r
+    assert casi(r["anios"][0]["renta"], 270.74, 1e-6), r["anios"][0]
+    assert casi(r["anios"][2]["amortizacion"], 4000) and casi(r["total"], 4423.14, 1e-6), r
+    assert r["sin_vencimiento"] == ["YM37D"], r["sin_vencimiento"]
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

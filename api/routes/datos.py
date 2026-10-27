@@ -1125,6 +1125,75 @@ def inviu_flujo_proyectado():
     return jsonify(inviu.flujo_proyectado())
 
 
+def _flujo_anual(pagos: list, hoy, tickers=None) -> dict:
+    """Los pagos futuros que informa InvIU, sumados por año desde hoy.
+
+    Año 1 es de hoy a hoy + 1 año, no el año calendario: "qué plata entra en
+    los próximos doce meses" es la pregunta. `tickers` (los de la cartera, en
+    su tramo dólar) deja afuera lo que la cartera no tiene.
+
+    ponytail: InvIU proyecta con la tenencia de la cuenta; si la cartera tiene
+    otra cantidad del mismo bono, no se escala. Las carteras atadas a InvIU la
+    reflejan tal cual.
+    """
+    from datetime import date
+    from core.data.symbols import d_ticker
+
+    def mas_anios(d, n):
+        try:
+            return d.replace(year=d.year + n)
+        except ValueError:                      # 29 de febrero
+            return d.replace(year=d.year + n, day=28)
+
+    anios = {}
+    for p in pagos:
+        fecha = date.fromisoformat(p["date"][:10])
+        ticker = d_ticker((p.get("ticker") or "").upper())
+        if fecha < hoy or (tickers is not None and ticker not in tickers):
+            continue
+        n = 0
+        while mas_anios(hoy, n + 1) <= fecha:
+            n += 1
+        a = anios.setdefault(n, {"desde": mas_anios(hoy, n).isoformat(),
+                                 "hasta": mas_anios(hoy, n + 1).isoformat(),
+                                 "renta": 0.0, "amortizacion": 0.0, "pagos": []})
+        clave = "amortizacion" if p.get("type") == "AMORTIZATION" else "renta"
+        a[clave] += p["amount"]
+        a["pagos"].append({"fecha": fecha.isoformat(), "ticker": ticker,
+                           "tipo": clave, "monto": round(p["amount"], 2)})
+    salida = []
+    for n in sorted(anios):
+        a = anios[n]
+        a.update(renta=round(a["renta"], 2), amortizacion=round(a["amortizacion"], 2),
+                 total=round(a["renta"] + a["amortizacion"], 2))
+        salida.append(a)
+    # Un bono sin amortización informada tiene el flujo incompleto: YM37O, que
+    # vence el 2027-05-07, sólo trae el cupón del 2026-11-11 (2026-10-27).
+    todos = [x for a in salida for x in a["pagos"]]
+    sin_vto = sorted({x["ticker"] for x in todos}
+                     - {x["ticker"] for x in todos if x["tipo"] == "amortizacion"})
+    return {"anios": salida, "sin_vencimiento": sin_vto,
+            "renta": round(sum(a["renta"] for a in salida), 2),
+            "amortizacion": round(sum(a["amortizacion"] for a in salida), 2),
+            "total": round(sum(a["total"] for a in salida), 2)}
+
+
+@bp.get("/inviu/flujo-anual")
+def inviu_flujo_anual():
+    """Cuánta renta y amortización va a cobrar la cartera, año por año desde hoy."""
+    from datetime import date
+    from core.data.symbols import strip_ba
+
+    r = inviu.flujo_proyectado()
+    if not isinstance(r, dict) or r.get("error"):
+        return jsonify(r if isinstance(r, dict) else {"error": "InvIU no contestó."})
+    cartera = request.args.get("cartera", "")
+    tickers = ({strip_ba(p["ticker"]).upper() for p in store.cargar(cartera)}
+               if cartera in store.nombres() else None)
+    pagos = [p for p in r.get("data") or [] if (p.get("currency") or "USD") == "USD"]
+    return jsonify(_flujo_anual(pagos, date.today(), tickers))
+
+
 def _tasas_caucion() -> dict:
     """La TNA de la caución más reciente de cada lado, si `operaciones()` la
     trae. Confirmado contra el boleto real (descargado desde Movimientos):
