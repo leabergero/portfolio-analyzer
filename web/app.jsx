@@ -2022,6 +2022,63 @@ function FlujoBonos({ cartera }) {
   );
 }
 
+// El PDF tarda 6-30 s en armarse en el servidor, y un enlace directo dejaba la
+// pestaña en blanco todo ese tiempo: parecía un error. Ahora la pestaña se abre
+// en el acto con una animación —la ventana se pide dentro del clic, si no el
+// navegador la bloquea— y el PDF aparece ahí cuando llega. Además se baja con
+// su nombre, porque el visor de un blob: lo guardaría con un nombre al azar.
+// La pestaña no corre scripts (la CSP no deja): se dibuja desde acá.
+function abrirReporte(nombre) {
+  const url = `/api/reporte/${encodeURIComponent(nombre)}`;
+  const w = window.open("", "_blank");
+  if (!w) { location.href = url; return; }
+  const c = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+  const pasos = IDIOMA === "en"
+    ? ["Reading your positions…", "Pricing every holding…", "Running the risk models…", "Drawing the charts…", "Putting the PDF together…"]
+    : ["Leyendo tus tenencias…", "Valuando cada posición…", "Corriendo los modelos de riesgo…", "Dibujando los gráficos…", "Armando el PDF…"];
+  w.document.title = t("Generando informe…", "Building report…");
+  w.document.body.innerHTML = `<style>
+    body{margin:0;height:100vh;display:grid;place-items:center;background:${c("--fondo")};color:${c("--texto")};
+      font-family:${c("--mono") || "monospace"}}
+    .hoja{width:150px;height:200px;border:1px solid ${c("--borde")};border-radius:6px;background:${c("--panel")};
+      padding:18px 16px;box-sizing:border-box;margin:0 auto 28px;position:relative;overflow:hidden;
+      animation:flota 2.4s ease-in-out infinite}
+    .l{height:7px;border-radius:4px;background:${c("--texto-3")};opacity:.35;margin-bottom:11px;transform-origin:left;
+      transform:scaleX(0);animation:escribe 5s ease-out infinite}
+    .l.a{background:${c("--acento")};opacity:.9;width:60%}
+    .barras{display:flex;align-items:flex-end;gap:6px;height:44px;margin:14px 0}
+    .barras i{flex:1;background:${c("--positivo")};border-radius:2px 2px 0 0;transform-origin:bottom;transform:scaleY(0);
+      animation:crece 5s ease-out infinite}
+    @keyframes escribe{0%{transform:scaleX(0)}15%,85%{transform:scaleX(1)}100%{transform:scaleX(1);opacity:0}}
+    @keyframes crece{0%,30%{transform:scaleY(0)}50%,85%{transform:scaleY(1)}100%{transform:scaleY(1);opacity:0}}
+    @keyframes flota{50%{transform:translateY(-6px)}}
+    .pasos{position:relative;height:20px;text-align:center;font-size:14px;color:${c("--texto-2")};width:320px}
+    .pasos span{position:absolute;inset:0;opacity:0;animation:paso 3s both}
+    .pasos span:last-child{animation-name:queda}
+    @keyframes paso{0%{opacity:0;transform:translateY(6px)}15%,85%{opacity:1;transform:none}100%{opacity:0}}
+    @keyframes queda{0%{opacity:0;transform:translateY(6px)}15%,100%{opacity:1;transform:none}}
+    h1{font-size:16px;font-weight:600;text-align:center;margin:0 0 10px}
+    .err{color:${c("--negativo")};max-width:420px;text-align:center}
+  </style><div id="caja"><div class="hoja">
+    <div class="l a"></div>${[90, 75, 85].map((x, i) => `<div class="l" style="width:${x}%;animation-delay:${.3 + i * .25}s"></div>`).join("")}
+    <div class="barras">${[40, 70, 55, 90, 65].map((h, i) => `<i style="height:${h}%;animation-delay:${i * .12}s"></i>`).join("")}</div>
+    ${[80, 95].map((x, i) => `<div class="l" style="width:${x}%;animation-delay:${1.6 + i * .25}s"></div>`).join("")}
+  </div><h1>${t("Generando el informe de", "Building the report for")} ${nombre.replace(/[<&]/g, "")}</h1>
+  <div class="pasos">${pasos.map((p, i) => `<span style="animation-delay:${i * 3}s">${p}</span>`).join("")}</div></div>`;
+  fetch(url).then(async (r) => {
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `HTTP ${r.status}`);
+    const b = URL.createObjectURL(await r.blob());
+    const a = document.createElement("a");
+    a.href = b; a.download = `${nombre}_${new Date().toISOString().slice(0, 10)}.pdf`; a.click();
+    w.location.replace(b);
+  }).catch((e) => {
+    if (w.closed) return;
+    const caja = w.document.getElementById("caja");
+    caja.innerHTML = `<h1>${t("No se pudo generar el informe", "The report couldn't be built")}</h1><p class="err"></p>`;
+    caja.querySelector(".err").textContent = e.message;
+  });
+}
+
 function Posicion({ d, cartera, recargar, lanzar, extras, bench, sim, setSim }) {
   const filas = d.posiciones || [];
   const [crudo, setCrudo] = useState(null);
@@ -2182,8 +2239,8 @@ function Posicion({ d, cartera, recargar, lanzar, extras, bench, sim, setSim }) 
       {real?.n > 0 && <CalendarioRealizado real={real} />}
 
       <Plegable id={`tenencias-${cartera}`} titulo={t("Tenencias", "Holdings")} extra={
-        <a className="btn" style={{ textDecoration: "none", fontSize: 12.5 }}
-           href={`/api/reporte/${encodeURIComponent(d.cartera_nombre || "")}`}>{t("Descargar PDF", "Download PDF")}</a>
+        <button className="btn" style={{ fontSize: 12.5 }}
+                onClick={() => abrirReporte(d.cartera_nombre || "")}>{t("Descargar PDF", "Download PDF")}</button>
       }>
         <div className="tabla-wrap"><table className="tenencias">
           <thead><tr>
