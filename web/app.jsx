@@ -5913,6 +5913,12 @@ function Capm({ d, cartera, todos }) {
       <div className={"aviso " + (nivel === "alto" ? "ok" : nivel === "bajo" ? "mal" : "ojo")}>
         <b>R² = {d.r2}.</b> {d.diagnostico_r2?.texto}
       </div>
+      {d.indice_sin_dividendos && (
+        <div className="aviso ojo">
+          {t(`El ${d.benchmark_nombre} es un índice de precios: no incluye dividendos, y tu cartera sí. La comparación te favorece un poco.`,
+             `The ${d.benchmark_nombre} is a price index: it leaves out dividends, and your portfolio doesn't. The comparison flatters you a little.`)}
+        </div>
+      )}
 
       <div className="panel" style={{ marginBottom: 14 }}>
         <h3>{t("Qué dice todo esto, en una lectura", "What all this says, in one read")}</h3>

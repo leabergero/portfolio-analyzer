@@ -454,7 +454,9 @@ def _pagina_mercado(pdf, nombre, cp):
               f"En los últimos {_num(anios, 0 if anios >= 1.95 else 1)} años, lo que tenés hoy rindió "
               f"{_pct(rc)} al año, contra {_pct(rb)} del {cp['benchmark_nombre']}:\n"
               f"{'le ganó' if gana else 'perdió'} por {_num(abs(rc - rb), 1)} puntos por año. "
-              f"Cuando el índice sube 10 %, tu cartera tiende a subir {_pct(beta * 10)}.")
+              f"Cuando el índice sube 10 %, tu cartera tiende a subir {_pct(beta * 10)}."
+              + (f"\nOjo: el {cp['benchmark_nombre']} no incluye dividendos y tu cartera sí; "
+                 f"la comparación te favorece un poco." if cp.get("indice_sin_dividendos") else ""))
 
     serie = cp.get("acumulado") or []
     if serie:

@@ -27,8 +27,12 @@ from core.models.risk import anual
 
 RUEDAS = 252
 
+# `dividendos`: si la serie trae los dividendos reinvertidos. SPY sí (Adj
+# Close); el Merval y el STOXX de Yahoo son índices de precios y no hay versión
+# con dividendos gratis. En lab la cartera es de retorno total (H3), así que
+# contra esos dos queda un poco a favor de la cartera, y se dice (H4).
 BENCHMARKS = {
-    "SP500":    {"ticker": "SPY",    "moneda": "USD", "nombre": "S&P 500"},
+    "SP500":    {"ticker": "SPY",    "moneda": "USD", "nombre": "S&P 500", "dividendos": True},
     "STOXX600": {"ticker": "^STOXX", "moneda": "EUR", "nombre": "STOXX 600"},
     "MERVAL":   {"ticker": "^MERV",  "moneda": "ARS", "nombre": "Merval"},
 }
@@ -37,7 +41,10 @@ BENCHMARKS = {
 def _cierres(ticker: str, desde: str = None) -> pd.Series:
     try:
         from core.data import yahoo
-        s = yahoo.ticker(ticker).history(start=desde or "2005-01-01")["Close"].dropna()
+        # Explícito: el default de yfinance ajusta por dividendos, y SPY tiene
+        # que llegar así; a un índice o un tipo de cambio no le cambia nada.
+        s = yahoo.ticker(ticker).history(start=desde or "2005-01-01",
+                                         auto_adjust=True)["Close"].dropna()
     except Exception:
         return pd.Series(dtype=float)
     if getattr(s.index, "tz", None) is not None:
@@ -165,6 +172,8 @@ def analizar(posiciones, benchmark: str = None) -> dict:
                       for d, c, i in zip(par.index[::5], np.cumprod(1 + p)[::5],
                                          np.cumprod(1 + b)[::5])],
         "rf": round(rf, 4), "rf_label": rf_label,
+        "indice_sin_dividendos": bool(mercado.LAB.get() and not BENCHMARKS.get(
+            benchmark, BENCHMARKS["SP500"]).get("dividendos")),
     }
 
 
