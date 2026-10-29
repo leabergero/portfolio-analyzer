@@ -435,6 +435,10 @@ ESCENARIOS = [
      "descripcion": "Sube la tasa y se desarma el carry trade del yen: Nikkei −12 % en un día"},
     {"nombre": "Suba de la Fed 2026", "desde": "2026-09-15", "hasta": "2026-09-30",
      "descripcion": "Primera suba desde 2023, a 3,75–4 %; Japón sube a 1,25 % dos días después"},
+    {"nombre": "Primera vuelta en Brasil 2026", "desde": "2026-10-02", "hasta": "2026-10-05",
+     "descripcion": "Gana Flávio Bolsonaro: Ibovespa +7,7 %, EWZ +12,5 % en una rueda"},
+    {"nombre": "Balotaje en Brasil 2026", "desde": "2026-10-23", "hasta": "2026-10-28",
+     "descripcion": "Gana Lula: Ibovespa −14 % el lunes y −17 % en tres ruedas, EWZ −21 %"},
 ]
 
 

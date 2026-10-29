@@ -317,7 +317,7 @@ const LIBRES_EN = {
 const libre = (s) => (s == null ? s : t(s, LIBRES_EN[s] || s));
 
 // EVENTOS (regimenes.py) y ESCENARIOS de stress-test (risk.py): catálogos
-// fijos y acotados —32 eventos macro, 10 crisis reales—, no texto generado por
+// fijos y acotados —34 eventos macro, 12 crisis reales—, no texto generado por
 // usuario. Mismo criterio que LIBRES_EN: diccionario exacto, cae a español
 // si el backend agrega uno nuevo que todavía no está acá.
 const EVENTOS_EN = {
@@ -378,6 +378,11 @@ const ESCENARIOS_EN = {
     "Rates go up and the yen carry trade unwinds: Nikkei −12 % in one day",
   "Primera suba desde 2023, a 3,75–4 %; Japón sube a 1,25 % dos días después":
     "First hike since 2023, to 3.75–4 %; Japan hikes to 1.25 % two days later",
+  "Primera vuelta en Brasil 2026": "Brazil first round 2026", "Balotaje en Brasil 2026": "Brazil runoff 2026",
+  "Gana Flávio Bolsonaro: Ibovespa +7,7 %, EWZ +12,5 % en una rueda":
+    "Flávio Bolsonaro wins: Ibovespa +7.7 %, EWZ +12.5 % in one session",
+  "Gana Lula: Ibovespa −14 % el lunes y −17 % en tres ruedas, EWZ −21 %":
+    "Lula wins: Ibovespa −14 % on Monday and −17 % in three sessions, EWZ −21 %",
 };
 const escenarioLabel = (s) => (s == null ? s : t(s, ESCENARIOS_EN[s] || s));
 
