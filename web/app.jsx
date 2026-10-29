@@ -5742,16 +5742,28 @@ function DistribucionFinal({ d, corriendo }) {
   const [paso, setPaso] = useState(0);
   const dist = d.distribucion || {};
   const a = d.abanico || {};
+  const muestra = d.trayectorias_muestra || [];
+  const LINEAS = muestra.length > 0;
+  // Lab: en vez de avanzar rueda a rueda, las trayectorias aparecen enteras de
+  // a una, todas en ~4 s. Una vez dibujadas quedan; no vuelve a empezar.
+  const DE_A_UNA = LAB && LINEAS;
+  const [k, setK] = useState(0);
 
-  useEffect(() => { if (corriendo) setPaso(0); }, [corriendo]);
+  useEffect(() => { if (corriendo) { setPaso(0); setK(0); } }, [corriendo]);
 
   useEffect(() => {
-    if (!corriendo) return;
+    if (!DE_A_UNA || !corriendo || k >= muestra.length) return;
+    const id = setTimeout(() => setK((x) => Math.min(muestra.length, x + Math.ceil(muestra.length * 50 / 4000))), 50);
+    return () => clearTimeout(id);
+  }, [DE_A_UNA, corriendo, k, muestra.length]);
+
+  useEffect(() => {
+    if (!corriendo || DE_A_UNA) return;
     const id = setTimeout(() => setPaso((x) => (x + 1) % (a.dias?.length || 1)), 90);
     return () => clearTimeout(id);
   }, [corriendo, paso, a.dias]);
 
-  const hasta = corriendo ? paso + 1 : (a.dias?.length || 0);
+  const hasta = corriendo && !DE_A_UNA ? paso + 1 : (a.dias?.length || 0);
   const corte = (arr) => (arr || []).slice(0, hasta);
 
   // El abanico se parte en la línea de hoy: abajo es plata perdida, arriba es
@@ -5779,11 +5791,9 @@ function DistribucionFinal({ d, corriendo }) {
   // las que terminan arriba de hoy en un trazo y todas las de abajo en otro
   // (separadas por null): dos trazos en vez de doscientos, para que el SVG no
   // se arrastre al animar.
-  const muestra = d.trayectorias_muestra || [];
-  const LINEAS = muestra.length > 0;
   const lineas = (gana) => {
     const xs = [], ys = [];
-    for (const tr of muestra) {
+    for (const tr of (DE_A_UNA && corriendo ? muestra.slice(0, k) : muestra)) {
       if ((tr[tr.length - 1] >= V) !== gana) continue;
       xs.push(...corte(a.dias), null); ys.push(...corte(tr), null);
     }
@@ -5835,7 +5845,7 @@ function DistribucionFinal({ d, corriendo }) {
             "Uncertainty doesn't grow all at once: it opens up with the square root of time. The "
             + "dashed line is what it's worth today, and everything painted red below is the part "
             + "of the scenarios where you end up with less than you have.")}{" "}
-          {corriendo && <b>{t(`Rueda ${a.dias?.[paso]} de ${a.dias?.[a.dias.length - 1]}.`,
+          {corriendo && !DE_A_UNA && <b>{t(`Rueda ${a.dias?.[paso]} de ${a.dias?.[a.dias.length - 1]}.`,
                               `Session ${a.dias?.[paso]} of ${a.dias?.[a.dias.length - 1]}.`)}</b>}
         </div>
       </div>
