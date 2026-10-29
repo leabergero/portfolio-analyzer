@@ -193,9 +193,12 @@ def is_d_variant(symbol: str) -> bool:
     sym = symbol.upper()
     e = _especie(sym)
     if e:
-        # Lo dice BYMA: es tramo en dólares si cotiza en USD y existe la especie
-        # sin la D. GLD (pesos) no, GLDD sí; MCD (pesos) no; YPFD (pesos) no.
-        return e["moneda"] == "USD" and sym.endswith("D") and sym[:-1] in especies()
+        # Lo dice BYMA: es tramo en dólares si cotiza en USD y termina en D.
+        # GLD (pesos) no, GLDD sí; MCD (pesos) no; YPFD (pesos) no. No se pide
+        # que exista la especie sin la D: GOGLD es Google en dólares y en pesos
+        # es GOOGL, no GOGL; con ese requisito se valuaba como pesos ÷ MEP
+        # (KARIN, 480 GOGLD en 1,6 USD, 2026-10-29).
+        return e["moneda"] == "USD" and sym.endswith("D")
     if sym in D_FALSOS_POSITIVOS:
         return False
     return len(sym) >= 2 and sym.endswith("D") and sym[-2].isalnum()

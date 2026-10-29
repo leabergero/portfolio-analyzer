@@ -256,7 +256,8 @@ def test_manda_lo_que_dice_byma():
     from core.data import symbols
     falso = {"MCD": {"moneda": "ARS", "tipo": "CD"}, "MCDD": {"moneda": "USD", "tipo": "CD"},
              "MU": {"moneda": "ARS", "tipo": "CD"}, "MUD": {"moneda": "USD", "tipo": "CD"},
-             "YPFD": {"moneda": "ARS", "tipo": "CS"}, "AAPLC": {"moneda": "EXT", "tipo": "CD"}}
+             "YPFD": {"moneda": "ARS", "tipo": "CS"}, "AAPLC": {"moneda": "EXT", "tipo": "CD"},
+             "GOOGL": {"moneda": "ARS", "tipo": "CD"}, "GOGLD": {"moneda": "USD", "tipo": "CD"}}
     antes = symbols.especies
     symbols.especies = lambda: falso
     try:
@@ -267,6 +268,7 @@ def test_manda_lo_que_dice_byma():
         assert symbols.ticker_currency("MUD.BA") == "USD"
         assert symbols.ticker_currency("YPFD.BA") == "ARS"
         assert symbols.ticker_currency("AAPLC.BA") == "USD"
+        assert symbols.ticker_currency("GOGLD.BA") == "USD"    # en pesos es GOOGL, no GOGL
         assert symbols.ticker_currency("GOOGLD.BA") == "ARS"   # no figura: D_SERIE_EN_PESOS
         assert symbols.ticker_currency("KOD.BA") == "USD"      # no figura: la D
         assert symbols.es_cedear("MU.BA") and not symbols.es_cedear("YPFD.BA")
