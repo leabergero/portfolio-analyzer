@@ -353,9 +353,11 @@ const EVENTOS_EN = {
   "El Banco de Japón sube la tasa; se desarma el carry trade": "The Bank of Japan raises rates; the carry trade unwinds",
   "La Fed vuelve a subir tasas, a 3,75–4 %": "The Fed raises rates again, to 3.75–4 %",
   "El Banco de Japón sube la tasa a 1,25 %, máximo desde 1995": "The Bank of Japan raises rates to 1.25 %, highest since 1995",
+  "Brasil, primera vuelta: Flávio Bolsonaro le gana a Lula": "Brazil, first round: Flávio Bolsonaro beats Lula",
+  "Brasil, balotaje: gana Lula y caen las bolsas de la región": "Brazil, runoff: Lula wins and regional stock markets fall",
 };
 const eventoDescripcion = (s) => (s == null ? s : t(s, EVENTOS_EN[s] || s));
-const ALCANCE_EN = { AR: "AR", MUNDO: "WORLD" };
+const ALCANCE_EN = { AR: "AR", MUNDO: "WORLD", BR: "BR" };
 const alcanceLabel = (a) => t(a, ALCANCE_EN[a] || a);
 
 const ESCENARIOS_EN = {

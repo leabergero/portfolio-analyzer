@@ -68,6 +68,8 @@ EVENTOS = [
     ("2026-06-13", "MUNDO", "Escalada Irán–Israel; salta el petróleo"),
     ("2026-09-16", "MUNDO", "La Fed vuelve a subir tasas, a 3,75–4 %"),
     ("2026-09-18", "MUNDO", "El Banco de Japón sube la tasa a 1,25 %, máximo desde 1995"),
+    ("2026-10-04", "BR", "Brasil, primera vuelta: Flávio Bolsonaro le gana a Lula"),
+    ("2026-10-26", "BR", "Brasil, balotaje: gana Lula y caen las bolsas de la región"),
 ]
 
 
