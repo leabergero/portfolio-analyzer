@@ -17,6 +17,9 @@
 
 const { useState, useEffect, useRef, useCallback, useMemo } = React;
 
+// En evaluación detrás de ?lab=N (ver Posicion). Hoy: 1 = Tenencias por ticker.
+const LAB = new URLSearchParams(location.search).get("lab");
+
 
 /* La piel de la app vive en dos hojas, lab1.css y lab5.css, y sus reglas
    cuelgan de `data-lab="1"` en el <html>. Los nombres son historia: nacieron
@@ -2049,12 +2052,34 @@ function Posicion({ d, cartera, recargar, lanzar, extras, bench, sim, setSim }) 
     buy_price_usd: (f) => f.buy_price_usd, precio_usd: (f) => f.precio_usd ?? -Infinity,
     valor_usd: (f) => f.valor_usd, pnl_dia_usd: (f) => f.pnl_dia_usd,
     pnl_dia_pct: (f) => f.pnl_dia_pct, pnl_usd: (f) => f.pnl_usd, pnl_pct: (f) => f.pnl_pct,
-    twu: (f) => twu[claveLote(f)]?.dias ?? -1,
+    twu: (f) => (f.lotes ? f._tw : twu[claveLote(f)])?.dias ?? -1,
   };
-  const filasOrdenadas = sortCol ? [...filas].sort((a, b) => {
+  // Lab 1 (?lab=1): una fila por ticker con el precio promedio ponderado; al
+  // tocar el precio se despliegan las compras. El TWU de la fila es el del lote
+  // que más lleva bajo el agua.
+  const [abiertos, setAbiertos] = useState({});
+  const porTicker = LAB === "1" ? Object.values(filas.reduce((a, f) => {
+    (a[f.ticker] = a[f.ticker] || []).push(f); return a;
+  }, {})).map((ls) => {
+    if (ls.length === 1) return ls[0];
+    const suma = (k) => ls.some((l) => l[k] != null) ? ls.reduce((s, l) => s + (l[k] || 0), 0) : null;
+    const qty = suma("qty"), valor = suma("valor_usd"), costo = suma("costo_usd");
+    const pnl = suma("pnl_usd"), dia = suma("pnl_dia_usd");
+    const baseDia = ls.reduce((s, l) => s + (l.pnl_dia_usd != null ? l.valor_usd - l.pnl_dia_usd : 0), 0);
+    const tws = ls.map((l) => twu[claveLote(l)]).filter(Boolean);
+    return { ...ls[0], lotes: ls, qty, valor_usd: valor, costo_usd: costo, pnl_usd: pnl,
+      buy_date: ls.map((l) => l.buy_date).sort()[0],
+      buy_price_usd: ls.every((l) => l.buy_price_usd != null)
+        ? ls.reduce((s, l) => s + l.qty * l.buy_price_usd, 0) / qty : null,
+      pnl_pct: pnl != null && costo ? (pnl / costo) * 100 : null,
+      pnl_dia_usd: dia, pnl_dia_pct: dia != null && baseDia ? (dia / baseDia) * 100 : null,
+      precio_estimado: ls.some((l) => l.precio_estimado), sim: ls.some((l) => l.sim),
+      _tw: tws.length ? tws.reduce((m, x) => ((x.dias || 0) > (m.dias || 0) || (!m.desde && x.desde) ? x : m)) : null };
+  }) : filas;
+  const filasOrdenadas = sortCol ? [...porTicker].sort((a, b) => {
     const va = VALOR_COL[sortCol](a), vb = VALOR_COL[sortCol](b);
     return typeof va === "string" ? sortDir * va.localeCompare(vb) : sortDir * ((va ?? 0) - (vb ?? 0));
-  }) : filas;
+  }) : porTicker;
   // Lo cerrado se venía guardando y neteando sin que se viera en ningún lado.
   const [n, setN] = useState(0);
   const [conFci, setConFci] = useState(leerPref);
@@ -2179,16 +2204,21 @@ function Posicion({ d, cartera, recargar, lanzar, extras, bench, sim, setSim }) 
                                        "Time under water: running days the lot has gone without recovering its cost.")}
                 onClick={() => ordenarPor("twu")} style={{ cursor: "pointer" }}>TWU</th>
           </tr></thead>
-          <tbody>{filasOrdenadas.map((f, i) => (
-            <tr key={i}>
-              <td className="mono textochip" style={{ whiteSpace: "nowrap" }}>{f.ticker.replace(/\.BA$/, "")}<LogoTicker ticker={f.ticker} />
+          <tbody>{filasOrdenadas.flatMap((g, i) => [g, ...(g.lotes && abiertos[g.ticker] ? g.lotes : [])].map((f, j) => (
+            <tr key={`${i}-${j}`} className={j ? "lote-hijo" : undefined}>
+              <td className="mono textochip" style={{ whiteSpace: "nowrap" }}>{j ? "└ " : f.ticker.replace(/\.BA$/, "")}<LogoTicker ticker={f.ticker} />
                 {f.es_bono && <span className="chip" style={{marginLeft:6}}>{t("bono", "bond")}</span>}
                 {f.sim && <span className="chip ojo" style={{marginLeft:6}}
                                 title={t("Simulada: no está en tu cartera", "Simulated: not in your portfolio")}>
                                 {t("sim", "sim")}</span>}</td>
-              <td className="mono" style={{ whiteSpace: "nowrap" }}>{f.buy_date.slice(2).split("-").reverse().join("/")}</td>
+              <td className="mono" style={{ whiteSpace: "nowrap" }}>{f.lotes
+                ? t(`${f.lotes.length} compras`, `${f.lotes.length} buys`)
+                : f.buy_date.slice(2).split("-").reverse().join("/")}</td>
               <td className="n">{num(f.qty, 0)}</td>
-              <td className="n">{usd(f.buy_price_usd)}</td>
+              <td className="n">{f.lotes ? (
+                <a href="#" title={t("Ver las compras", "Show the purchases")}
+                   onClick={(e) => { e.preventDefault(); setAbiertos((x) => ({ ...x, [f.ticker]: !x[f.ticker] })); }}>
+                  {abiertos[f.ticker] ? "▾ " : "▸ "}{usd(f.buy_price_usd)}</a>) : usd(f.buy_price_usd)}</td>
               <td className="n" style={{ color: "var(--alerta)" }}>{f.precio_usd == null ? "—" : (
                 <>{usd(f.precio_usd)}{f.precio_estimado && (
                   // Cocos no publica la cuotaparte de un fondo que no tenés hoy
@@ -2203,7 +2233,7 @@ function Posicion({ d, cartera, recargar, lanzar, extras, bench, sim, setSim }) 
               <td className={"n " + signo(f.pnl_usd)}>{usd(f.pnl_usd)}</td>
               <td className={"n " + signo(f.pnl_pct)}>{pct(f.pnl_pct)}</td>
               <td className="n">{(() => {
-                const tw = twu[claveLote(f)];
+                const tw = f.lotes ? f._tw : twu[claveLote(f)];
                 if (!tw) return "—";
                 if (!tw.dias && !tw.desde) return <span style={{ color: "var(--texto-3)" }}>—</span>;
                 // Un lote que cayó hoy lleva cero días corridos, y eso no es
@@ -2212,7 +2242,7 @@ function Posicion({ d, cartera, recargar, lanzar, extras, bench, sim, setSim }) 
                                                        `Underwater since ${tw.desde}`)}>
                   {tw.dias ? `${tw.dias} d` : t("hoy", "today")}</span>;
               })()}</td>
-            </tr>))}
+            </tr>)))}
           </tbody>
         </table></div>
         <div className="pie">

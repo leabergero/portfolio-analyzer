@@ -350,3 +350,4 @@
   stroke-width:2.6;stroke-linecap:round;stroke-linejoin:round;
   filter:drop-shadow(0 0 2px var(--cadena-brillo,#39FF1499))}
 .btn .cadena{top:-5px;right:-5px}
+[data-lab="1"] .tenencias tr.lote-hijo td{background:var(--fondo-2,rgba(127,127,127,.06));font-size:.92em;color:var(--texto-2)}
