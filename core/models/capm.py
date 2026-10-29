@@ -90,7 +90,13 @@ def diagnostico_r2(r2: float) -> dict:
                                       "alpha no son concluyentes: probá otro benchmark."}
 
 
-def analizar(posiciones, benchmark: str = None) -> dict:
+def analizar(posiciones, benchmark: str = None, serie: pd.Series = None) -> dict:
+    """La cartera contra un índice: beta, alfa, R², Treynor e Information Ratio.
+
+    Sin `serie`, la composición de hoy llevada al pasado (una simulación). Con
+    `serie` —retornos diarios, el TWR de `portfolio.evolucion`—, la cartera
+    real con sus compras y ventas en sus fechas (H5 de la auditoría 2026-10).
+    """
     from core.models.portfolio import matriz_retornos, value_weights
     from core.models.rates import risk_free_para
 
@@ -99,17 +105,27 @@ def analizar(posiciones, benchmark: str = None) -> dict:
     # mide los tres, gana el de mayor R².
     benchmark = benchmark or mercado.cfg()["benchmark"]
 
-    ret_df, precios = matriz_retornos(posiciones)
-    if ret_df.empty:
-        return {"error": "Sin datos de la cartera."}
+    real = serie is not None
+    if not real:
+        ret_df, precios = matriz_retornos(posiciones)
+        if ret_df.empty:
+            return {"error": "Sin datos de la cartera."}
+        tickers = list(ret_df.columns)
+        w = value_weights(posiciones, precios, tickers)
+        cartera = pd.Series(ret_df[tickers].to_numpy() @ w, index=ret_df.index)
+    else:
+        cartera = serie.dropna()
+        if cartera.empty:
+            return {"error": "Sin serie real de la cartera."}
 
-    tickers = list(ret_df.columns)
-    w = value_weights(posiciones, precios, tickers)
-    cartera = pd.Series(ret_df[tickers].to_numpy() @ w, index=ret_df.index)
-
-    serie, nombre = serie_benchmark(benchmark, desde=str(ret_df.index[0].date()))
+    serie, nombre = serie_benchmark(benchmark, desde=str(cartera.index[0].date()))
     if serie.empty:
         return {"error": f"Sin datos de {nombre}."}
+    if real:
+        # Al calendario de la cartera: con `dropna` se perdían las ruedas de
+        # BYMA en que Wall Street cerró, y con ellas parte del TWR (MAMI −5,5 %
+        # contra −2,1 %). El índice quieto ese día es lo cierto.
+        serie = serie.reindex(serie.index.union(cartera.index)).ffill().reindex(cartera.index)
     bench = serie.pct_change().dropna()
 
     par = pd.concat([cartera, bench], axis=1, keys=["p", "b"]).dropna()

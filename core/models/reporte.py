@@ -455,6 +455,9 @@ def _pagina_mercado(pdf, nombre, cp):
               f"{_pct(rc)} al año, contra {_pct(rb)} del {cp['benchmark_nombre']}:\n"
               f"{'le ganó' if gana else 'perdió'} por {_num(abs(rc - rb), 1)} puntos por año. "
               f"Cuando el índice sube 10 %, tu cartera tiende a subir {_pct(beta * 10)}."
+              + (f"\nCon tu cartera real (TWR, desde el {cp['real']['desde']}): {_pct(cp['real']['retorno_cartera_pct'])} "
+                 f"al año contra {_pct(cp['real']['retorno_benchmark_pct'])}, alfa {_pct(cp['real']['alpha_anual_pct'], signo=True)}."
+                 if cp.get("real") else "")
               + (f"\nOjo: el {cp['benchmark_nombre']} no incluye dividendos y tu cartera sí; "
                  f"la comparación te favorece un poco." if cp.get("indice_sin_dividendos") else ""))
 
@@ -463,7 +466,10 @@ def _pagina_mercado(pdf, nombre, cp):
         from matplotlib.dates import DateFormatter
         import pandas as pd
         fechas = pd.to_datetime([p["fecha"] for p in serie])
-        ax = fig.add_axes([0.10, 0.53, 0.84, 0.29])
+        # Cada aviso del lab (cartera real, índice sin dividendos) es una línea
+        # más de texto arriba: el gráfico se achica para no pisarla.
+        extra = bool(cp.get("real")) + bool(cp.get("indice_sin_dividendos"))
+        ax = fig.add_axes([0.10, 0.53, 0.84, 0.29 - 0.02 * extra])
         ax.plot(fechas, [p["indice"] for p in serie], color=SUAVE, lw=1.4, label=cp["benchmark_nombre"])
         ax.plot(fechas, [p["cartera"] for p in serie], color=ACENTO, lw=2, label="tu cartera")
         ax.axhline(100, color=LINEA, lw=0.8)

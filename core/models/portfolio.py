@@ -715,6 +715,17 @@ def evolucion(posiciones, trades=None, n_ruedas: int = 30, flujos_fci: dict = No
     puesto = flujo.cumsum()
     resultado = tenencias + caja - puesto
 
+    # ── TWR (H6 de la auditoría 2026-10): cómo le fue al manejo ──────────────
+    # La TIR pondera por plata: el año en que pusiste más pesa más. El TWR
+    # encadena el retorno de cada rueda y neutraliza aportes y retiros: es lo
+    # único comparable con un índice, que no recibe aportes. Las compras entran
+    # al principio de la rueda (al denominador: la plata ya estaba en riesgo) y
+    # las ventas al final (no: si vendés todo, el denominador no se hace cero).
+    valor = tenencias + caja
+    base = valor.shift(1) + flujo.clip(lower=0)
+    r_twr = ((valor - flujo - valor.shift(1)) / base).where(base > 1.0, 0.0).iloc[1:]
+    twr = (1 + r_twr).cumprod()
+
     # Referencia para el "vs. mes anterior": el resultado al último cierre del
     # mes pasado. En dólares y no en porcentaje: el porcentaje se mueve solo
     # cuando entra plata, y ese salto no es rendimiento de nada.
@@ -919,6 +930,12 @@ def evolucion(posiciones, trades=None, n_ruedas: int = 30, flujos_fci: dict = No
     return {
         # Anualizar menos de un trimestre da un número que no significa nada.
         "tir_anual_pct": tir(movimientos) if anos >= 0.25 else None,
+        "twr_pct": round((float(twr.iloc[-1]) - 1) * 100, 2) if len(twr) else None,
+        "twr_anual_pct": (round((float(twr.iloc[-1]) ** (1 / anos) - 1) * 100, 2)
+                          if len(twr) and anos >= 0.25 else None),
+        # Base 1 desde la primera rueda: alfa y beta reales salen de acá (H5).
+        "twr_serie": {"fechas": [str(f.date()) for f in twr.index],
+                      "valor": [round(float(v), 6) for v in twr]},
         "anos": round(anos, 2),
         "ultimos_12m": ventana(12),
         # Ver los dos bloques de arriba.

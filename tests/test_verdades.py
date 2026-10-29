@@ -3685,3 +3685,24 @@ def test_retorno_total_de_un_cedear_usa_el_subyacente(monkeypatch):
     finally:
         mercado.LAB.reset(token)
     assert abs(a.pct_change()["2026-03-09"] - 0.01) < 1e-12
+
+
+def test_twr_neutraliza_los_aportes():
+    """H6: 1 papel a 100 sube a 150 (+50 %); se compran 10 más a 150 y baja a
+    120 (−20 %). El TWR es 1,5 × 0,8 − 1 = +20 %, aunque en plata se pierda:
+    la TIR mira la plata, el TWR el manejo."""
+    import pandas as pd
+    from core.data import sources
+    evolucion = require("core.models.portfolio", "evolucion")
+    fechas = pd.date_range("2026-01-01", periods=5, freq="B")
+    aaa = pd.Series([100.0, 100.0, 150.0, 150.0, 120.0], index=fechas)
+    lotes = [{"ticker": "AAA", "buy_date": str(fechas[1].date()), "buy_price": 100.0, "qty": 1, "currency": "USD"},
+             {"ticker": "AAA", "buy_date": str(fechas[3].date()), "buy_price": 150.0, "qty": 10, "currency": "USD"}]
+    antes = sources.precios_base
+    try:
+        sources.precios_base = lambda t, *a, **k: aaa if t.upper() == "AAA" else pd.Series(dtype=float)
+        ev = evolucion(lotes, [])
+    finally:
+        sources.precios_base = antes
+    assert casi(ev["twr_pct"], 20.0, 1e-6)
+    assert ev["resultado_usd"] < 0                  # en plata, perdió

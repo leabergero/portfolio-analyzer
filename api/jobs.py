@@ -131,6 +131,25 @@ def _indice(p, c):
     return (suelto(c, "benchmarks", p) or {}).get("recomendado")
 
 
+def _capm(p, c, indice=None):
+    """En lab, además, la cartera real: el TWR de la evolución (H5 y H6)."""
+    indice = indice or _indice(p, c)
+    r = capm.analizar(p, indice)
+    if mercado.LAB.get() and isinstance(r, dict) and "error" not in r:
+        import pandas as pd
+        ev = ya_calculado(c, p, "evolucion")
+        s = (ev or {}).get("twr_serie") or {}
+        if s.get("fechas"):
+            twr = pd.Series(s["valor"], index=pd.to_datetime(s["fechas"])).pct_change().dropna()
+            real = capm.analizar(p, indice, serie=twr)
+            if "error" not in real:
+                r["real"] = {k: real[k] for k in (
+                    "beta", "alpha_anual_pct", "r2", "retorno_cartera_pct",
+                    "retorno_benchmark_pct", "n_ruedas", "information_ratio")}
+                r["real"]["desde"] = str(twr.index[0].date())
+    return r
+
+
 def _tibio(clave, args=lambda p, c: ()):
     """Deja calculado lo que una pestaña va a pedir. No devuelve el resultado:
     viaja por su endpoint, no en cada consulta del estado de la corrida."""
@@ -171,7 +190,7 @@ MODELOS = {
     "correlaciones": ("Correlaciones",  lambda p, c: portfolio.correlaciones(p)),
     # Contra el índice que mejor explica la cartera, no el de la plaza: la vista
     # simple lee este resultado tal cual (MAMI, toda S&P, daba "pierde contra el Merval").
-    "capm":         ("CAPM",            lambda p, c: capm.analizar(p, _indice(p, c))),
+    "capm":         ("CAPM",            lambda p, c: _capm(p, c)),
     "benchmarks":   ("Índices",         lambda p, c: suelto(c, "benchmarks", p)),
 
     # ── Riesgo ──

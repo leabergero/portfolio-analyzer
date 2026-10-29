@@ -3692,6 +3692,16 @@ function RendimientoTotal({ ev }) {
       <div style={{ fontSize: 15, marginTop: 2 }} className={signo(ev.resultado_usd)}>
         {t(`${usd(ev.resultado_usd)} sobre ${usd(ev.puesto_neto_usd)} puestos de tu bolsillo`,
            `${usd(ev.resultado_usd)} on ${usd(ev.puesto_neto_usd)} out of your own pocket`)}</div></>)}
+      {LAB && ev.twr_pct != null && (
+        <div className="pie" style={{ marginTop: 6 }}>
+          {t("Cómo le fue a tu manejo (TWR): ", "How your management did (TWR): ")}
+          <b className={signo(ev.twr_pct)}>{pct(ev.twr_anual_pct ?? ev.twr_pct)}</b>
+          {ev.twr_anual_pct != null
+            ? t(` por año, ${pct(ev.twr_pct)} acumulado`, ` a year, ${pct(ev.twr_pct)} cumulative`)
+            : t(" acumulado", " cumulative")}
+          {t(" · encadena el retorno de cada rueda sin el peso de cuándo pusiste o sacaste plata: es el único comparable con un índice.",
+             " · it chains each session's return without the weight of when you put money in or took it out: it's the only one comparable with an index.")}
+        </div>)}
       {conCapital(ev) && ev.rendimiento_operacion_pct != null && (
         <div className="pie" style={{ marginTop: 6 }}>
           {t(`Promedio por operación: `, `Average per trade: `)}<b>{pct(ev.rendimiento_operacion_pct)}</b>
@@ -5913,6 +5923,18 @@ function Capm({ d, cartera, todos }) {
       <div className={"aviso " + (nivel === "alto" ? "ok" : nivel === "bajo" ? "mal" : "ojo")}>
         <b>R² = {d.r2}.</b> {d.diagnostico_r2?.texto}
       </div>
+      {d.real && (
+        <div className={"aviso " + (d.real.alpha_anual_pct >= 0 ? "ok" : "ojo")}>
+          <b>{t("Con tu cartera real", "With your actual portfolio")}</b>
+          {t(` (TWR, desde el ${d.real.desde}, ${d.real.n_ruedas} ruedas): rindió `,
+             ` (TWR, since ${d.real.desde}, ${d.real.n_ruedas} sessions): it returned `)}
+          <b>{pct(d.real.retorno_cartera_pct)}</b>{t(" anual contra ", " a year against ")}
+          {pct(d.real.retorno_benchmark_pct)}{t(" del ", " for the ")}{d.benchmark_nombre}
+          {` · beta ${num(d.real.beta, 2)} · ${t("alfa", "alpha")} ${pct(d.real.alpha_anual_pct)}. `}
+          {t("Los números de arriba son la composición de hoy llevada al pasado: una simulación.",
+             "The figures above are today's holdings taken back in time: a simulation.")}
+        </div>
+      )}
       {d.indice_sin_dividendos && (
         <div className="aviso ojo">
           {t(`El ${d.benchmark_nombre} es un índice de precios: no incluye dividendos, y tu cartera sí. La comparación te favorece un poco.`,

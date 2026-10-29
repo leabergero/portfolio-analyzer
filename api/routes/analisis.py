@@ -274,7 +274,10 @@ def mc_correlaciones(nombre):
 
 @bp.get("/capm/<nombre>")
 def capm_(nombre):
-    return _simple(nombre, capm.analizar, request.args.get("benchmark"))
+    pos = _posiciones(nombre)
+    if not pos:
+        return _falta(nombre)
+    return jsonify(jobs._capm(pos, nombre, request.args.get("benchmark")))
 
 
 @bp.get("/capm/<nombre>/benchmarks")
