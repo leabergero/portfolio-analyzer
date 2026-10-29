@@ -127,6 +127,8 @@ const MERCADOS = {
 const MON = () => t(MERCADOS[MERCADO].moneda, MERCADOS[MERCADO].moneda_en);
 
 let MERCADO = "AR";
+// `?lab=1`: H2 de la auditoría, "rindió por año" con CAGR. Viaja al server.
+const LAB = new URLSearchParams(location.search).get("lab");
 
 /* Idioma de la interfaz: "es" o "en". Mismo mecanismo que MERCADO/SIM_ACTIVA
    —un global que se fija en el render de App()— porque lo lee `t()` y los
@@ -177,6 +179,7 @@ const api = async (ruta, opciones) => {
   if (guardadoInviu) o.headers = { ...(o.headers || {}), "X-Sesion-Inviu": guardadoInviu };
   if (SIM_ACTIVA) o.headers = { ...(o.headers || {}), "X-Sim": SIM_ACTIVA };
   o.headers = { ...(o.headers || {}), "X-Mercado": MERCADO };
+  if (LAB) o.headers["X-Lab"] = LAB;
 
   // Si se corta la conexión (la notebook se durmió, cambió la red) `fetch`
   // rechaza y nadie llama al setState: la pantalla quedaba en "Calculando…"
@@ -2036,7 +2039,7 @@ function FlujoBonos({ cartera }) {
 // su nombre, porque el visor de un blob: lo guardaría con un nombre al azar.
 // La pestaña no corre scripts (la CSP no deja): se dibuja desde acá.
 function abrirReporte(nombre) {
-  const url = `/api/reporte/${encodeURIComponent(nombre)}`;
+  const url = `/api/reporte/${encodeURIComponent(nombre)}${LAB ? `?lab=${LAB}` : ""}`;
   const w = window.open("", "_blank");
   if (!w) { location.href = url; return; }
   const c = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();

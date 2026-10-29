@@ -175,7 +175,7 @@ def intervalo_bootstrap(retornos, metrica="sharpe", rf_anual: float = 0.0,
         "sharpe": lambda x: risk.sharpe(x, rf_anual),
         "sortino": lambda x: risk.sortino(x, rf_anual),
         "max_drawdown": lambda x: risk.max_drawdown(x) * 100,
-        "retorno_anual": lambda x: ((1 + x.mean()) ** RUEDAS - 1) * 100,
+        "retorno_anual": lambda x: risk.anual(x) * 100,
         "volatilidad": lambda x: x.std(ddof=1) * np.sqrt(RUEDAS) * 100,
     }
     f = funciones.get(metrica)
@@ -403,7 +403,7 @@ def comparar(carteras: dict, benchmark: str = None) -> dict:
     for n in nombres:
         r = alineadas[n].to_numpy()
         metricas[n] = {
-            "retorno_anual_pct": round(float((1 + r.mean()) ** RUEDAS - 1) * 100, 2),
+            "retorno_anual_pct": round(risk.anual(r) * 100, 2),
             "volatilidad_anual_pct": round(float(r.std(ddof=1)) * np.sqrt(RUEDAS) * 100, 2),
             "sharpe": round(risk.sharpe(r, rf), 3),
             "sortino": round(risk.sortino(r, rf), 3),

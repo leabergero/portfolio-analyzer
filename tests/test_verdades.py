@@ -3629,3 +3629,15 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+def test_rindio_por_anio_es_compuesto_en_lab():
+    """H2 de la auditoría: +50 % y −50 % dejan 75 de cada 100, no 100."""
+    from core.models import risk
+    r = [0.5, -0.5] * 126                       # un año de ruedas
+    assert abs(risk.anual(r)) < 1e-12            # media: 0 %, el sesgo de siempre
+    token = risk.CAGR_LAB.set(True)
+    try:
+        assert abs(risk.anual(r) - (0.75 ** 126 - 1)) < 1e-12
+    finally:
+        risk.CAGR_LAB.reset(token)

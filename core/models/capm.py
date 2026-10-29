@@ -23,6 +23,7 @@ import numpy as np
 import pandas as pd
 
 from core import mercado
+from core.models.risk import anual
 
 RUEDAS = 252
 
@@ -120,7 +121,7 @@ def analizar(posiciones, benchmark: str = None) -> dict:
 
     alpha_d = float(p.mean() - (rf_d + beta * (b.mean() - rf_d)))
     r2 = float(np.corrcoef(p, b)[0, 1] ** 2)
-    ret_cartera = float((1 + p.mean()) ** RUEDAS - 1)
+    ret_cartera = anual(p)
     activo = p - b
     te = float(activo.std(ddof=1)) * np.sqrt(RUEDAS)
 
@@ -153,7 +154,7 @@ def analizar(posiciones, benchmark: str = None) -> dict:
         "information_ratio": round(float(activo.mean()) * RUEDAS / te, 3) if te > 0 else None,
         "tracking_error_pct": round(te * 100, 2),
         "retorno_cartera_pct": round(ret_cartera * 100, 2),
-        "retorno_benchmark_pct": round(((1 + float(b.mean())) ** RUEDAS - 1) * 100, 2),
+        "retorno_benchmark_pct": round(anual(b) * 100, 2),
         "beta_movil": rolling,
         "nube": nube, "recta": recta,
         "historia_benchmark": [{"fecha": str(d.date()), "valor": round(float(v), 4)}

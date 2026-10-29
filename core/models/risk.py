@@ -21,6 +21,8 @@ Convención de signo: el VaR es un cuantil, o sea un número **negativo**. Se
 guarda así y se muestra como pérdida positiva. Fijarlo evita restar dos veces.
 """
 
+from contextvars import ContextVar
+
 import numpy as np
 import pandas as pd
 from scipy import stats
@@ -28,6 +30,25 @@ from scipy import stats
 from core.data import sources, symbols
 
 RUEDAS = 252
+
+# H2 de la auditoría 2026-10: lo que se rotula "rindió por año" componía la
+# media diaria, que sobrestima en ~σ²/2 (SPY +1,4 pp, MU +56 pp). En lab, CAGR.
+CAGR_LAB = ContextVar("cagr_lab", default=False)
+
+
+def anual(r) -> float:
+    """Retorno anual de una serie diaria, para mostrar como "rindió".
+
+    Con `CAGR_LAB` es el compuesto, lo que de verdad dejó la serie. Sin él, la
+    media aritmética anualizada de siempre. La media sigue siendo el insumo de
+    los optimizadores (media-varianza); esto no va ahí.
+    """
+    r = np.asarray(r, dtype=float)
+    if not r.size:
+        return 0.0
+    if CAGR_LAB.get():
+        return float(np.prod(1 + r) ** (RUEDAS / r.size) - 1)
+    return float((1 + r.mean()) ** RUEDAS - 1)
 
 
 # ── Medidas puras ─────────────────────────────────────────────────────────────
@@ -95,8 +116,7 @@ def calmar(retornos) -> float:
     mdd = max_drawdown(r)
     if r.size == 0 or mdd == 0:
         return 0.0
-    cagr = (1 + r.mean()) ** RUEDAS - 1
-    return float(cagr / abs(mdd))
+    return float(anual(r) / abs(mdd))
 
 
 def var_historico(retornos, alfa: float = 0.05) -> float:
@@ -234,7 +254,7 @@ def analizar(posiciones, benchmark: str = None) -> dict:
         "valor_total": round(valor_total, 2),
         "n_ruedas": int(len(cartera)),
 
-        "retorno_anual_pct": round(float((1 + cartera.mean()) ** RUEDAS - 1) * 100, 2),
+        "retorno_anual_pct": round(anual(cartera) * 100, 2),
         "volatilidad_anual_pct": round(float(cartera.std(ddof=1)) * np.sqrt(RUEDAS) * 100, 2),
 
         "var95_pct": round(var95 * 100, 3),
@@ -330,7 +350,7 @@ def _resumen(r, fechas, rf) -> dict:
     piso = int(np.argmin(caida))
     pico = int(np.argmax(nav[:piso + 1])) if piso else 0
     return {"desde": str(fechas[0].date()), "n_ruedas": int(len(r)),
-            "retorno_anual_pct": round(float((1 + r.mean()) ** RUEDAS - 1) * 100, 2),
+            "retorno_anual_pct": round(anual(r) * 100, 2),
             "volatilidad_anual_pct": round(float(r.std(ddof=1)) * np.sqrt(RUEDAS) * 100, 2),
             "sharpe": round(sharpe(r, rf), 3), "sortino": round(sortino(r, rf), 3),
             "calmar": round(calmar(r), 3),
@@ -564,7 +584,7 @@ def por_activo(posiciones, benchmark: str = None) -> dict:
             "ticker": t,
             "peso_pct": round(float(w[i]) * 100, 2),
             "valor_usd": round(valor, 2),
-            "retorno_anual_pct": round(float((1 + r.mean()) ** RUEDAS - 1) * 100, 2),
+            "retorno_anual_pct": round(anual(r) * 100, 2),
             "volatilidad_pct": round(float(r.std(ddof=1)) * np.sqrt(RUEDAS) * 100, 2),
             "var95_pct": round(var_historico(r, 0.05) * 100, 3),
             "var99_pct": round(var_historico(r, 0.01) * 100, 3),
@@ -579,7 +599,7 @@ def por_activo(posiciones, benchmark: str = None) -> dict:
     cartera = ret_df[tickers].to_numpy() @ w
     total = {
         "ticker": "CARTERA", "peso_pct": 100.0, "valor_usd": round(valor_total, 2),
-        "retorno_anual_pct": round(float((1 + cartera.mean()) ** RUEDAS - 1) * 100, 2),
+        "retorno_anual_pct": round(anual(cartera) * 100, 2),
         "volatilidad_pct": round(float(cartera.std(ddof=1)) * np.sqrt(RUEDAS) * 100, 2),
         "var95_pct": round(var_historico(cartera, 0.05) * 100, 3),
         "var99_pct": round(var_historico(cartera, 0.01) * 100, 3),

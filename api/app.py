@@ -134,6 +134,9 @@ def modo():
 @app.before_request
 def elegir_mercado():
     mercado.poner(request.headers.get("X-Mercado"))
+    # `?lab=1` del navegador: cabecera en los fetch, query en el PDF.
+    from core.models.risk import CAGR_LAB
+    CAGR_LAB.set("1" in (request.headers.get("X-Lab"), request.args.get("lab")))
 
 
 # ── Carteras compartidas ──────────────────────────────────────────────────────
