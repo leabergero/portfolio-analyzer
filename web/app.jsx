@@ -4675,7 +4675,9 @@ function Resumen({ d, ev, cartera, real, filas }) {
         {fig(t("Valor de cartera", "Portfolio value"), `${moneda} ${cifra}`, "",
              t(`costo ${usd(d.costo_total)} · ${filas.length} posiciones en ${activos} activos`,
                `cost ${usd(d.costo_total)} · ${filas.length} positions in ${activos} assets`), "grande")}
-        {d.pnl_dia != null && fig(dia === t("hoy", "today") ? t("Hoy", "Today") : t(`Rueda ${dia}`, `Session ${dia}`),
+        {d.pnl_dia != null && fig(dia === t("hoy", "today")
+               ? t("Hoy", "Today") + (LAB && d.dia_hora ? ` · ${d.dia_hora}` : "")
+               : t(`Rueda ${dia}`, `Session ${dia}`),
              usd(d.pnl_dia), signo(d.pnl_dia), pct(d.pnl_dia_pct))}
         {fig(t("Resultado total", "Total result"), usd(total), signo(total),
              ev ? (conCapital(ev)

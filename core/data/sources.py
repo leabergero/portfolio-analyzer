@@ -298,6 +298,13 @@ def _spot_yfinance(ticker: str, ttl_horas: float = 1.0, forzar: bool = False) ->
             try:
                 fi = tk.fast_info
                 precio = fi.get("lastPrice") or fi.get("last_price")
+                # La hora del último precio viene en la misma respuesta: no es
+                # otro pedido. Se guarda aparte para no cambiar el formato de
+                # la caché del precio.
+                hora = tk.get_history_metadata().get("regularMarketTime")
+                if hora is not None:
+                    cache.guardar_respuesta(f"yf:spothora:{ticker.upper()}",
+                                            pd.Timestamp(hora).tz_convert(TZ_BYMA).strftime("%H:%M"))
             except Exception:
                 precio = None
             if not precio:
@@ -566,6 +573,11 @@ def spot_rueda_nueva(ticker: str, source: str = None, hasta: str = None,
     if not len(cierres):
         return False
     return abs(float(spot["Close"].iloc[-1]) - float(cierres.iloc[-1])) > 1e-9
+
+
+def spot_hora(ticker: str) -> str | None:
+    """Hora (de Buenos Aires) del último precio que trajo `_spot_yfinance`."""
+    return cache.leer_respuesta(f"yf:spothora:{ticker.upper()}", TTL_SPOT_H, default=None)
 
 
 def spot_base(ticker: str, source: str = None, forzar: bool = False) -> float | None:

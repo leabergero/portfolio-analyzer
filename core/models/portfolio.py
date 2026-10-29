@@ -107,6 +107,10 @@ def precios_actuales(posiciones, hasta=None, previos=None, fechas=None,
             puntos[-1] = (hoy, ahora)          # rueda en curso: vale más que su vela
         elif ahora and sources.spot_rueda_nueva(t, origen, hasta, forzar):
             puntos.append((hoy, ahora))
+        if ahora and puntos[-1][0] == hoy and fechas is not None:
+            hora = sources.spot_hora(t)
+            if hora:
+                fechas.setdefault("_horas", []).append(hora)
         if len(puntos) < 2:
             continue
         salida[t] = puntos[-1][1]
@@ -115,7 +119,10 @@ def precios_actuales(posiciones, hasta=None, previos=None, fechas=None,
             fechas[t] = (str(puntos[-2][0]), str(puntos[-1][0]))
 
     if vivo and fechas is not None:
+        horas = fechas.pop("_horas", [])
         pares = [v for k, v in fechas.items() if not k.startswith("_")]
+        if horas:
+            fechas["_hora"] = max(horas)
         if pares:
             fechas["_previa"] = max(previa for previa, _ in pares)
             fechas["_ultima"] = max(ultima for _, ultima in pares)
@@ -245,6 +252,7 @@ def valuar(posiciones, precios=None, previos=None, fechas=None, vivo=False,
         "pnl_dia_pct": round((hoy_comp / ayer_comp - 1) * 100, 2) if ayer_comp else None,
         "dia_fecha": (fechas or {}).get("_ultima"),
         "dia_previa": (fechas or {}).get("_previa"),
+        "dia_hora": (fechas or {}).get("_hora"),
     }
 
 
