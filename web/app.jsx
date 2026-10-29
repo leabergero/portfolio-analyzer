@@ -17,9 +17,6 @@
 
 const { useState, useEffect, useRef, useCallback, useMemo } = React;
 
-// En evaluación detrás de ?lab=N (ver Posicion). Hoy: 1 = Tenencias por ticker.
-const LAB = new URLSearchParams(location.search).get("lab");
-
 
 /* La piel de la app vive en dos hojas, lab1.css y lab5.css, y sus reglas
    cuelgan de `data-lab="1"` en el <html>. Los nombres son historia: nacieron
@@ -2054,11 +2051,11 @@ function Posicion({ d, cartera, recargar, lanzar, extras, bench, sim, setSim }) 
     pnl_dia_pct: (f) => f.pnl_dia_pct, pnl_usd: (f) => f.pnl_usd, pnl_pct: (f) => f.pnl_pct,
     twu: (f) => (f.lotes ? f._tw : twu[claveLote(f)])?.dias ?? -1,
   };
-  // Lab 1 (?lab=1): una fila por ticker con el precio promedio ponderado; al
+  // Una fila por ticker con el precio promedio ponderado; al
   // tocar el ticker se despliegan las compras. El TWU de la fila es el del lote
   // que más lleva bajo el agua.
   const [abiertos, setAbiertos] = useState({});
-  const porTicker = LAB === "1" ? Object.values(filas.reduce((a, f) => {
+  const porTicker = Object.values(filas.reduce((a, f) => {
     (a[f.ticker] = a[f.ticker] || []).push(f); return a;
   }, {})).map((ls) => {
     if (ls.length === 1) return ls[0];
@@ -2075,7 +2072,7 @@ function Posicion({ d, cartera, recargar, lanzar, extras, bench, sim, setSim }) 
       pnl_dia_usd: dia, pnl_dia_pct: dia != null && baseDia ? (dia / baseDia) * 100 : null,
       precio_estimado: ls.some((l) => l.precio_estimado), sim: ls.some((l) => l.sim),
       _tw: tws.length ? tws.reduce((m, x) => ((x.dias || 0) > (m.dias || 0) || (!m.desde && x.desde) ? x : m)) : null };
-  }) : filas;
+  });
   const filasOrdenadas = sortCol ? [...porTicker].sort((a, b) => {
     const va = VALOR_COL[sortCol](a), vb = VALOR_COL[sortCol](b);
     return typeof va === "string" ? sortDir * va.localeCompare(vb) : sortDir * ((va ?? 0) - (vb ?? 0));
