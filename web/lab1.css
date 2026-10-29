@@ -352,3 +352,5 @@
 .btn .cadena{top:-5px;right:-5px}
 [data-lab="1"] .tenencias tr.lote-hijo td{background:var(--fondo-2,rgba(127,127,127,.06));font-size:.92em;color:var(--texto-2)}
 [data-lab="1"] .tenencias .n-compras{color:var(--acento-2);background:var(--acento-suave);padding:0 6px;border-radius:4px}
+[data-lab="1"] .tenencias tr.lote-hijo .pos{color:color-mix(in srgb,var(--positivo) 65%,var(--panel))}
+[data-lab="1"] .tenencias tr.lote-hijo .neg{color:color-mix(in srgb,var(--negativo) 65%,var(--panel))}
