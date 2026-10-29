@@ -21,32 +21,31 @@ Convención de signo: el VaR es un cuantil, o sea un número **negativo**. Se
 guarda así y se muestra como pérdida positiva. Fijarlo evita restar dos veces.
 """
 
-from contextvars import ContextVar
-
 import numpy as np
 import pandas as pd
 from scipy import stats
 
+from core import mercado
 from core.data import sources, symbols
+from core.models.dividendos import retorno_total
 
 RUEDAS = 252
 
 # H2 de la auditoría 2026-10: lo que se rotula "rindió por año" componía la
 # media diaria, que sobrestima en ~σ²/2 (SPY +1,4 pp, MU +56 pp). En lab, CAGR.
-CAGR_LAB = ContextVar("cagr_lab", default=False)
 
 
 def anual(r) -> float:
     """Retorno anual de una serie diaria, para mostrar como "rindió".
 
-    Con `CAGR_LAB` es el compuesto, lo que de verdad dejó la serie. Sin él, la
+    Con `mercado.LAB` es el compuesto, lo que de verdad dejó la serie. Sin él, la
     media aritmética anualizada de siempre. La media sigue siendo el insumo de
     los optimizadores (media-varianza); esto no va ahí.
     """
     r = np.asarray(r, dtype=float)
     if not r.size:
         return 0.0
-    if CAGR_LAB.get():
+    if mercado.LAB.get():
         return float(np.prod(1 + r) ** (RUEDAS / r.size) - 1)
     return float((1 + r.mean()) ** RUEDAS - 1)
 
@@ -473,10 +472,10 @@ def _serie_para(ticker, source, cache):
     en la misma dirección que el activo.
     """
     if ticker not in cache:
-        cache[ticker] = sources.precios_base(ticker, source=source)
+        cache[ticker] = retorno_total(sources.precios_base(ticker, source=source), ticker, source)
     base = symbols.base_symbol(ticker)
     if base != symbols.strip_ba(ticker) and base not in cache:
-        cache[base] = sources.precios_base(base)
+        cache[base] = retorno_total(sources.precios_base(base), base)
     return cache[ticker], (cache.get(base) if base != symbols.strip_ba(ticker) else None)
 
 

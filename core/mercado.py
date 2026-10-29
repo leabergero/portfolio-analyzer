@@ -49,6 +49,11 @@ PAR = {"EUR": "EURUSD=X"}
 
 _actual = ContextVar("mercado", default="AR")
 
+# `?lab=1` del navegador (cabecera X-Lab): las correcciones de la auditoría
+# 2026-10 que todavía se están evaluando. H2: "rindió" con CAGR. H3: series de
+# retorno total —cupones, amortizaciones y dividendos— para los modelos.
+LAB = ContextVar("lab", default=False)
+
 
 def poner(clave):
     _actual.set(clave if clave in PLAZAS else "AR")

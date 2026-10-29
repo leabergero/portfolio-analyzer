@@ -285,3 +285,73 @@ def registro(realizadas: list) -> list:
             "retencion_pct": round((1 - neto / bruto) * 100, 3) if bruto else None,
         })
     return filas
+
+
+# ── Retorno total para los modelos (H3 de la auditoría 2026-10, en lab) ───────
+# Yahoo y Cocos dan el precio sin ajustar: el día ex-pago un AL30D cae 13 % por
+# la amortización y un KO 0,7 % por el dividendo, y los modelos lo leían como
+# pérdida de mercado. Acá el cobro vuelve al retorno de ese día. La serie se
+# ajusta hacia atrás, como el Adj Close de Yahoo: el último punto sigue siendo
+# el precio de hoy, así que pesos y valuación no cambian. Sólo para modelos:
+# valuar o reconstruir la historia de la cartera sigue con el precio real.
+
+# Un dividendo de más del 20 % del precio es un dato roto de Yahoo (escala del
+# CEDEAR, moneda equivocada), no un pago: se descarta.
+# ponytail: tope fijo; un dividendo extraordinario real de más del 20 % se pierde.
+_DIVIDENDO_MAXIMO = 0.20
+
+
+def retorno_total(s, ticker: str, source: str = None):
+    """La serie `s` (precios en la moneda de medición) con cupones,
+    amortizaciones y dividendos reinvertidos. Fuera del lab, `s` tal cual.
+
+    Bonos: el flujo del cronograma, por cada 100 de nominal ORIGINAL —que es
+    como cotiza el mercado argentino—, en la última rueda antes de la fecha de
+    pago (liquidación T+1: AL30D cae el 08/01 por el pago del 09/01).
+    Acciones y CEDEARs: el dividendo bruto de Yahoo, en la primera rueda desde
+    el ex-dividendo, medido contra el cierre crudo del día anterior: el
+    cociente no depende de la moneda ni del ratio del CEDEAR.
+    """
+    import pandas as pd
+    from core import mercado
+    from core.models import bonds
+
+    if not mercado.LAB.get() or len(s) < 2 or source == SOURCE_FCI:
+        return s
+    idx = s.index
+    r = s.pct_change()
+    desde = idx[0].date().isoformat()
+
+    if sources.is_bond(ticker, source):
+        spec = bonds.especie(ticker)
+        if not spec:
+            return s          # sin cronograma (ONs de InvIU): queda para después
+        emision = date.fromisoformat(spec["issue_date"]) - timedelta(days=1)
+        for f, monto in bonds.flujos(ticker, emision, base="original"):
+            i = idx.searchsorted(pd.Timestamp(f)) - 1
+            # Sólo pagos ya hechos: un cupón de 2027 caía entero en la última
+            # rueda (AL30D +123 % el 06/10). Una semana cubre feriados largos.
+            if 1 <= i and (pd.Timestamp(f) - idx[i]).days <= 7:
+                r.iloc[i] += mercado.a_base(monto / 100.0, f) / float(s.iloc[i - 1])
+    else:
+        # Un CEDEAR, con el dividendo de su subyacente: el rendimiento es el
+        # mismo, y los pagos que Yahoo publica del CEDEAR vienen con otra
+        # escala cuando cambió el ratio (KO.BA 2019: un 16 % por trimestre).
+        fuente, fuente_src = ticker, source
+        if tipo(ticker, source) == "cedears":
+            from core.data.symbols import CEDEAR_EEUU
+            fuente, fuente_src = CEDEAR_EEUU.get(base_symbol(ticker), base_symbol(ticker)), None
+        pagos = {f: v for f, v in _serie(fuente).items() if f > desde}
+        if not pagos:
+            return s
+        crudo = sources.precios(fuente, source=fuente_src)["Close"].dropna()
+        for f, monto in pagos.items():
+            i = idx.searchsorted(pd.Timestamp(f))
+            if not 1 <= i < len(idx):
+                continue
+            previo = crudo.asof(idx[i - 1])
+            if previo and previo > 0 and monto / previo <= _DIVIDENDO_MAXIMO:
+                r.iloc[i] += monto / float(previo)
+
+    total = (1 + r.fillna(0.0)).cumprod()
+    return total * (float(s.iloc[-1]) / float(total.iloc[-1]))

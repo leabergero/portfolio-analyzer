@@ -20,6 +20,7 @@ import pandas as pd
 from core import mercado
 from core.data import mep as mep_mod
 from core.data import sources
+from core.models.dividendos import retorno_total
 
 
 def value_weights(posiciones, precios, tickers) -> np.ndarray:
@@ -424,6 +425,7 @@ def matriz_retornos(posiciones, desde=None, hasta=None, larga: bool = None):
         if t in retornos or p.get("source") == sources.SOURCE_FCI:
             continue
         s = sources.precios_base(t, desde=desde, hasta=hasta, source=p.get("source") or None)
+        s = retorno_total(s, t, p.get("source") or None)
         if len(s) < 30:
             continue
         precios[t] = float(s.iloc[-1])

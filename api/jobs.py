@@ -78,9 +78,8 @@ def suelto(cartera: str, clave: str, posiciones: list, *args, **kwargs):
     cambie nada de lo que se analiza (lo mismo que mira `_huella`) ni se pida
     recalcular. Los errores no se recuerdan: son el entorno, no un resultado."""
     from core.models.portfolio import HISTORIA_LARGA
-    from core.models.risk import CAGR_LAB
     quien = store.quien()
-    crudo = json.dumps([quien, mercado.actual(), HISTORIA_LARGA.get(), CAGR_LAB.get(), cartera,
+    crudo = json.dumps([quien, mercado.actual(), HISTORIA_LARGA.get(), mercado.LAB.get(), cartera,
                         _generacion.get((quien, cartera), 0), clave, args, kwargs, posiciones],
                        sort_keys=True, default=str)
     huella = hashlib.sha1(crudo.encode()).hexdigest()
@@ -241,8 +240,7 @@ _TTL_CORRIDA_S = TTL_SPOT_H * 3600
 
 def _huella(nombre_cartera, posiciones, elegidos) -> str:
     from core.models.portfolio import HISTORIA_LARGA
-    from core.models.risk import CAGR_LAB
-    crudo = json.dumps([store.quien(), mercado.actual(), HISTORIA_LARGA.get(), CAGR_LAB.get(), nombre_cartera,
+    crudo = json.dumps([store.quien(), mercado.actual(), HISTORIA_LARGA.get(), mercado.LAB.get(), nombre_cartera,
                         sorted(elegidos), posiciones],
                        sort_keys=True, default=str)
     return hashlib.sha1(crudo.encode()).hexdigest()[:16]

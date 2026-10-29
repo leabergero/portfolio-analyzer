@@ -267,7 +267,8 @@ def _serie_larga(ticker, source):
     """(serie propia, serie para calibrar, de dónde salió la historia o None)."""
     from core import mercado
     from core.data import mep, sources, symbols
-    propia = sources.precios_base(ticker, source=source)
+    from core.models.dividendos import retorno_total
+    propia = retorno_total(sources.precios_base(ticker, source=source), ticker, source)
     if symbols.is_bond(ticker, source):
         return propia, propia, None
     base = symbols.base_symbol(ticker)
@@ -275,10 +276,11 @@ def _serie_larga(ticker, source):
     try:
         if base != symbols.strip_ba(ticker) or symbols.es_cedear(ticker):  # CEDEAR → subyacente
             base = symbols.CEDEAR_EEUU.get(base, base)
-            larga, origen = sources.precios_base(base), base
+            larga, origen = retorno_total(sources.precios_base(base), base), base
         elif symbols.ticker_currency(ticker) == "ARS":          # acción local
             crudo = sources.precios(ticker, source=source)["Close"].dropna()
             larga, origen = mercado.desde_usd(mep.serie_a_usd(crudo, mep.serie_larga())), "MEP + CCL"
+            larga = retorno_total(larga, ticker, source)
     except Exception:
         larga = None
     if larga is not None and len(larga) > len(propia) + 252:
