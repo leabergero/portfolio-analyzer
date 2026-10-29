@@ -2055,7 +2055,7 @@ function Posicion({ d, cartera, recargar, lanzar, extras, bench, sim, setSim }) 
     twu: (f) => (f.lotes ? f._tw : twu[claveLote(f)])?.dias ?? -1,
   };
   // Lab 1 (?lab=1): una fila por ticker con el precio promedio ponderado; al
-  // tocar el precio se despliegan las compras. El TWU de la fila es el del lote
+  // tocar el ticker se despliegan las compras. El TWU de la fila es el del lote
   // que más lleva bajo el agua.
   const [abiertos, setAbiertos] = useState({});
   const porTicker = LAB === "1" ? Object.values(filas.reduce((a, f) => {
@@ -2206,7 +2206,10 @@ function Posicion({ d, cartera, recargar, lanzar, extras, bench, sim, setSim }) 
           </tr></thead>
           <tbody>{filasOrdenadas.flatMap((g, i) => [g, ...(g.lotes && abiertos[g.ticker] ? g.lotes : [])].map((f, j) => (
             <tr key={`${i}-${j}`} className={j ? "lote-hijo" : undefined}>
-              <td className="mono textochip" style={{ whiteSpace: "nowrap" }}>{j ? "└ " : f.ticker.replace(/\.BA$/, "")}<LogoTicker ticker={f.ticker} />
+              <td className="mono textochip" style={{ whiteSpace: "nowrap" }}>{j ? "└ " : f.lotes ? (
+                <a href="#" title={t("Ver las compras", "Show the purchases")}
+                   onClick={(e) => { e.preventDefault(); setAbiertos((x) => ({ ...x, [f.ticker]: !x[f.ticker] })); }}>
+                  {abiertos[f.ticker] ? "▾ " : "▸ "}{f.ticker.replace(/\.BA$/, "")}</a>) : f.ticker.replace(/\.BA$/, "")}<LogoTicker ticker={f.ticker} />
                 {f.es_bono && <span className="chip" style={{marginLeft:6}}>{t("bono", "bond")}</span>}
                 {f.sim && <span className="chip ojo" style={{marginLeft:6}}
                                 title={t("Simulada: no está en tu cartera", "Simulated: not in your portfolio")}>
@@ -2215,10 +2218,7 @@ function Posicion({ d, cartera, recargar, lanzar, extras, bench, sim, setSim }) 
                 ? t(`${f.lotes.length} compras`, `${f.lotes.length} buys`)
                 : f.buy_date.slice(2).split("-").reverse().join("/")}</td>
               <td className="n">{num(f.qty, 0)}</td>
-              <td className="n">{f.lotes ? (
-                <a href="#" title={t("Ver las compras", "Show the purchases")}
-                   onClick={(e) => { e.preventDefault(); setAbiertos((x) => ({ ...x, [f.ticker]: !x[f.ticker] })); }}>
-                  {abiertos[f.ticker] ? "▾ " : "▸ "}{usd(f.buy_price_usd)}</a>) : usd(f.buy_price_usd)}</td>
+              <td className="n">{usd(f.buy_price_usd)}</td>
               <td className="n" style={{ color: "var(--alerta)" }}>{f.precio_usd == null ? "—" : (
                 <>{usd(f.precio_usd)}{f.precio_estimado && (
                   // Cocos no publica la cuotaparte de un fondo que no tenés hoy
