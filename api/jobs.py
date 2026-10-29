@@ -79,7 +79,7 @@ def suelto(cartera: str, clave: str, posiciones: list, *args, **kwargs):
     recalcular. Los errores no se recuerdan: son el entorno, no un resultado."""
     from core.models.portfolio import HISTORIA_LARGA
     quien = store.quien()
-    crudo = json.dumps([quien, mercado.actual(), HISTORIA_LARGA.get(), mercado.LAB.get(), cartera,
+    crudo = json.dumps([quien, mercado.actual(), HISTORIA_LARGA.get(), cartera,
                         _generacion.get((quien, cartera), 0), clave, args, kwargs, posiciones],
                        sort_keys=True, default=str)
     huella = hashlib.sha1(crudo.encode()).hexdigest()
@@ -132,10 +132,10 @@ def _indice(p, c):
 
 
 def _capm(p, c, indice=None):
-    """En lab, además, la cartera real: el TWR de la evolución (H5 y H6)."""
+    """Además, la cartera real: el TWR de la evolución (H5 y H6)."""
     indice = indice or _indice(p, c)
     r = capm.analizar(p, indice)
-    if mercado.LAB.get() and isinstance(r, dict) and "error" not in r:
+    if isinstance(r, dict) and "error" not in r:
         import pandas as pd
         ev = ya_calculado(c, p, "evolucion")
         s = (ev or {}).get("twr_serie") or {}
@@ -259,7 +259,7 @@ _TTL_CORRIDA_S = TTL_SPOT_H * 3600
 
 def _huella(nombre_cartera, posiciones, elegidos) -> str:
     from core.models.portfolio import HISTORIA_LARGA
-    crudo = json.dumps([store.quien(), mercado.actual(), HISTORIA_LARGA.get(), mercado.LAB.get(), nombre_cartera,
+    crudo = json.dumps([store.quien(), mercado.actual(), HISTORIA_LARGA.get(), nombre_cartera,
                         sorted(elegidos), posiciones],
                        sort_keys=True, default=str)
     return hashlib.sha1(crudo.encode()).hexdigest()[:16]

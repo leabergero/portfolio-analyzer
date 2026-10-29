@@ -188,7 +188,7 @@ def analizar(posiciones, benchmark: str = None, serie: pd.Series = None) -> dict
                       for d, c, i in zip(par.index[::5], np.cumprod(1 + p)[::5],
                                          np.cumprod(1 + b)[::5])],
         "rf": round(rf, 4), "rf_label": rf_label,
-        "indice_sin_dividendos": bool(mercado.LAB.get() and not BENCHMARKS.get(
+        "indice_sin_dividendos": bool(not BENCHMARKS.get(
             benchmark, BENCHMARKS["SP500"]).get("dividendos")),
     }
 

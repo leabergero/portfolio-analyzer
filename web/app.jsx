@@ -127,8 +127,6 @@ const MERCADOS = {
 const MON = () => t(MERCADOS[MERCADO].moneda, MERCADOS[MERCADO].moneda_en);
 
 let MERCADO = "AR";
-// `?lab=1`: H2 de la auditoría, "rindió por año" con CAGR. Viaja al server.
-const LAB = new URLSearchParams(location.search).get("lab");
 
 /* Idioma de la interfaz: "es" o "en". Mismo mecanismo que MERCADO/SIM_ACTIVA
    —un global que se fija en el render de App()— porque lo lee `t()` y los
@@ -179,7 +177,6 @@ const api = async (ruta, opciones) => {
   if (guardadoInviu) o.headers = { ...(o.headers || {}), "X-Sesion-Inviu": guardadoInviu };
   if (SIM_ACTIVA) o.headers = { ...(o.headers || {}), "X-Sim": SIM_ACTIVA };
   o.headers = { ...(o.headers || {}), "X-Mercado": MERCADO };
-  if (LAB) o.headers["X-Lab"] = LAB;
 
   // Si se corta la conexión (la notebook se durmió, cambió la red) `fetch`
   // rechaza y nadie llama al setState: la pantalla quedaba en "Calculando…"
@@ -2039,7 +2036,7 @@ function FlujoBonos({ cartera }) {
 // su nombre, porque el visor de un blob: lo guardaría con un nombre al azar.
 // La pestaña no corre scripts (la CSP no deja): se dibuja desde acá.
 function abrirReporte(nombre) {
-  const url = `/api/reporte/${encodeURIComponent(nombre)}${LAB ? `?lab=${LAB}` : ""}`;
+  const url = `/api/reporte/${encodeURIComponent(nombre)}`;
   const w = window.open("", "_blank");
   if (!w) { location.href = url; return; }
   const c = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
@@ -3692,7 +3689,7 @@ function RendimientoTotal({ ev }) {
       <div style={{ fontSize: 15, marginTop: 2 }} className={signo(ev.resultado_usd)}>
         {t(`${usd(ev.resultado_usd)} sobre ${usd(ev.puesto_neto_usd)} puestos de tu bolsillo`,
            `${usd(ev.resultado_usd)} on ${usd(ev.puesto_neto_usd)} out of your own pocket`)}</div></>)}
-      {LAB && ev.twr_pct != null && (
+      {ev.twr_pct != null && (
         <div className="pie" style={{ marginTop: 6 }}>
           {t("Cómo le fue a tu manejo (TWR): ", "How your management did (TWR): ")}
           <b className={signo(ev.twr_pct)}>{pct(ev.twr_anual_pct ?? ev.twr_pct)}</b>
@@ -4676,7 +4673,7 @@ function Resumen({ d, ev, cartera, real, filas }) {
              t(`costo ${usd(d.costo_total)} · ${filas.length} posiciones en ${activos} activos`,
                `cost ${usd(d.costo_total)} · ${filas.length} positions in ${activos} assets`), "grande")}
         {d.pnl_dia != null && fig(dia === t("hoy", "today")
-               ? t("Hoy", "Today") + (LAB && d.dia_hora ? ` · ${d.dia_hora}` : "")
+               ? t("Hoy", "Today") + (d.dia_hora ? ` · ${d.dia_hora}` : "")
                : t(`Rueda ${dia}`, `Session ${dia}`),
              usd(d.pnl_dia), signo(d.pnl_dia), pct(d.pnl_dia_pct))}
         {fig(t("Resultado total", "Total result"), usd(total), signo(total),
@@ -5737,17 +5734,23 @@ function McMotores({ cartera, horizonte }) {
   );
 }
 
-function DistribucionFinal({ d, corriendo }) {
+// La primera vez que se entra a Monte Carlo en la sesión, las trayectorias se
+// dibujan solas; después, sólo con ▶.
+let mcAutoplayHecho = false;
+
+function DistribucionFinal({ d, corriendo: boton }) {
   const c = colores();
   const [paso, setPaso] = useState(0);
   const dist = d.distribucion || {};
   const a = d.abanico || {};
   const muestra = d.trayectorias_muestra || [];
   const LINEAS = muestra.length > 0;
-  // Lab: en vez de avanzar rueda a rueda, las trayectorias aparecen enteras de
-  // a una, todas en ~4 s. Una vez dibujadas quedan; no vuelve a empezar.
-  const DE_A_UNA = LAB && LINEAS;
+  // Con trayectorias, en vez de avanzar rueda a rueda, aparecen enteras de a
+  // una, todas en ~4 s. Una vez dibujadas quedan; no vuelve a empezar.
+  const DE_A_UNA = LINEAS;
   const [k, setK] = useState(0);
+  const [auto] = useState(() => DE_A_UNA && !mcAutoplayHecho && (mcAutoplayHecho = true));
+  const corriendo = boton || (auto && k < muestra.length);
 
   useEffect(() => { if (corriendo) { setPaso(0); setK(0); } }, [corriendo]);
 

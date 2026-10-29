@@ -25,7 +25,6 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
-from core import mercado
 from core.data import sources, symbols
 from core.models.dividendos import retorno_total
 
@@ -38,16 +37,15 @@ RUEDAS = 252
 def anual(r) -> float:
     """Retorno anual de una serie diaria, para mostrar como "rindió".
 
-    Con `mercado.LAB` es el compuesto, lo que de verdad dejó la serie. Sin él, la
-    media aritmética anualizada de siempre. La media sigue siendo el insumo de
-    los optimizadores (media-varianza); esto no va ahí.
+    Es el compuesto, lo que de verdad dejó la serie, y no la media aritmética
+    anualizada: +50 % y −50 % dejan 75 de cada 100, no 100 (H2 de la auditoría
+    2026-10). La media sigue siendo el insumo de los optimizadores
+    (media-varianza); esto no va ahí.
     """
     r = np.asarray(r, dtype=float)
     if not r.size:
         return 0.0
-    if mercado.LAB.get():
-        return float(np.prod(1 + r) ** (RUEDAS / r.size) - 1)
-    return float((1 + r.mean()) ** RUEDAS - 1)
+    return float(np.prod(1 + r) ** (RUEDAS / r.size) - 1)
 
 
 # ── Medidas puras ─────────────────────────────────────────────────────────────

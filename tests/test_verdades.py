@@ -3631,35 +3631,23 @@ if __name__ == "__main__":
     sys.exit(main())
 
 
-def test_rindio_por_anio_es_compuesto_en_lab():
+def test_rindio_por_anio_es_compuesto():
     """H2 de la auditoría: +50 % y −50 % dejan 75 de cada 100, no 100."""
-    from core import mercado
     from core.models import risk
-    r = [0.5, -0.5] * 126                       # un año de ruedas
-    assert abs(risk.anual(r)) < 1e-12            # media: 0 %, el sesgo de siempre
-    token = mercado.LAB.set(True)
-    try:
-        assert abs(risk.anual(r) - (0.75 ** 126 - 1)) < 1e-12
-    finally:
-        mercado.LAB.reset(token)
+    r = [0.5, -0.5] * 126                       # un año de ruedas; la media da 0 %
+    assert abs(risk.anual(r) - (0.75 ** 126 - 1)) < 1e-12
 
 
-def test_retorno_total_suma_el_pago_del_bono_en_lab(monkeypatch):
+def test_retorno_total_suma_el_pago_del_bono(monkeypatch):
     """H3: AL30D cae ~12 % el 08/01/2026 por amortización + cupón del 09/01.
-    En lab el retorno de ese día vuelve a ±2 %, el último precio no cambia y
+    El retorno de ese día vuelve a ±2 %, el último precio no cambia y
     los pagos que todavía no ocurrieron no se adelantan."""
     import pandas as pd
-    from core import mercado
     from core.models.dividendos import retorno_total
     fechas = pd.date_range("2025-12-01", "2026-01-20", freq="B")
     s = pd.Series(0.70, index=fechas)
     s[s.index >= "2026-01-08"] = 0.70 - 0.0833     # 8 % de amortización + cupón
-    assert retorno_total(s, "AL30D").equals(s)      # fuera del lab, intacta
-    token = mercado.LAB.set(True)
-    try:
-        a = retorno_total(s, "AL30D")
-    finally:
-        mercado.LAB.reset(token)
+    a = retorno_total(s, "AL30D")
     r = a.pct_change()
     assert abs(r["2026-01-08"]) < 0.02
     assert a.iloc[-1] == s.iloc[-1]
@@ -3670,7 +3658,6 @@ def test_retorno_total_de_un_cedear_usa_el_subyacente(monkeypatch):
     """Los dividendos que Yahoo publica del CEDEAR vienen con otra escala si
     cambió el ratio: se usa el rendimiento del subyacente (1 sobre 100 = 1 %)."""
     import pandas as pd
-    from core import mercado
     from core.models import dividendos
     fechas = pd.date_range("2026-03-02", periods=10, freq="B")
     s = pd.Series(10.0, index=fechas)
@@ -3679,11 +3666,7 @@ def test_retorno_total_de_un_cedear_usa_el_subyacente(monkeypatch):
                         lambda t: {"2026-03-09": 1.0} if t == "KO" else {"2026-03-09": 50.0})
     monkeypatch.setattr(dividendos.sources, "precios",
                         lambda t, *a, **k: pd.DataFrame({"Close": 100.0}, index=fechas))
-    token = mercado.LAB.set(True)
-    try:
-        a = dividendos.retorno_total(s, "KO.BA")
-    finally:
-        mercado.LAB.reset(token)
+    a = dividendos.retorno_total(s, "KO.BA")
     assert abs(a.pct_change()["2026-03-09"] - 0.01) < 1e-12
 
 

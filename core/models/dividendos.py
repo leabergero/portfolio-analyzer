@@ -316,7 +316,7 @@ def retorno_total(s, ticker: str, source: str = None):
     from core import mercado
     from core.models import bonds
 
-    if not mercado.LAB.get() or len(s) < 2 or source == SOURCE_FCI:
+    if len(s) < 2 or source == SOURCE_FCI:
         return s
     idx = s.index
     r = s.pct_change()
