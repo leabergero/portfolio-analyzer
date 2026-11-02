@@ -241,7 +241,90 @@ def optimizar(posiciones, benchmark: str = None, cap: float = None, lab: bool = 
     }
 
 
-def backtest(posiciones, meses: int = 6, benchmark: str = None, lab: bool = False) -> dict:
+# H11: lo que cuesta armar una cartera nueva, por lado. Tu cartera no lo paga: ya la tenías.
+COSTO_ENTRADA = 0.005
+
+
+def _comprar_y_mantener(retornos, w, costo: float = 0.0) -> np.ndarray:
+    """Retornos de comprar `w` el primer día y no tocarla, sin rebalanceo diario."""
+    valor = (np.cumprod(1 + retornos, axis=0) @ np.asarray(w)) * (1 - costo)
+    return np.diff(np.r_[1.0, valor]) / np.r_[1.0, valor[:-1]]
+
+
+def _tu_cartera_al_corte(posiciones, trades, corte, fechas) -> dict:
+    """Lo que tenías de verdad en la fecha de corte, valuado a esa fecha y quieto.
+
+    Los pesos de hoy conocen el futuro: lo que subió pesa más porque subió, y lo
+    que compraste después figura como si ya estuviera. Salen de los lotes: los
+    abiertos comprados hasta el corte y los cerrados que seguían vivos. El FCI es
+    la caja y no entra (H10). Si falta el precio de más del 10 % de lo que había,
+    no se inventa: devuelve `error`.
+    """
+    import pandas as pd
+    from core.data import sources
+    from core.models.dividendos import retorno_total
+    from core.models.portfolio import factor_split, pnl_realizado, valuar
+
+    tope = str(corte.date())
+    lotes = [(f["ticker"], f["qty"], f["source"] or None, f["costo_usd"], f["buy_date"], None)
+             for f in valuar(posiciones, precios={})["posiciones"]
+             if f["source"] != sources.SOURCE_FCI and not f["sim"]
+             and f["buy_date"] and str(f["buy_date"])[:10] <= tope]
+    for t in pnl_realizado(trades or [])["trades"]:
+        if t.get("tipo") in ("dividendo", "fci", "renta", "caucion"):
+            continue
+        if not (str(t["buy_date"])[:10] <= tope < str(t["sell_date"])[:10]):
+            continue
+        ticker = str(t["ticker"]).upper()
+        div = sources.divisor_nominal(ticker, max(abs(t.get("buy_price") or 0), abs(t.get("sell_price") or 0)))
+        costo = t["qty"] * (t.get("buy_price") or 0) / div / (t.get("mep_compra") or 1.0)
+        lotes.append((ticker, t["qty"], None, costo, t["buy_date"], t["sell_date"]))
+
+    inicial, curvas, sin_precio, costo_sin_precio = {}, {}, set(), 0.0
+    for ticker, qty, source, costo, compra, venta in lotes:
+        s = sources.precios_base(ticker, source=source)
+        previos = s.loc[:corte] if not s.empty else s
+        if previos.empty:
+            sin_precio.add(ticker)
+            costo_sin_precio += costo or 0.0
+            continue
+        desde_compra = s.loc[pd.Timestamp(compra):]
+        k = factor_split(ticker, venta, costo / qty if costo and qty else None,
+                         desde_compra.iloc[0] if len(desde_compra) else None)
+        inicial[ticker] = inicial.get(ticker, 0.0) + qty * k * float(previos.iloc[-1])
+        if ticker not in curvas:
+            rt = retorno_total(s, ticker, source)
+            rt = rt.reindex(rt.index.union(fechas).union([corte])).ffill()
+            curvas[ticker] = rt.loc[fechas].to_numpy() / float(rt.loc[corte])
+
+    total = sum(inicial.values())
+    cobertura = total / (total + costo_sin_precio) if total else 0.0
+    if not total or cobertura < 0.9:
+        return {"error": f"No se puede reconstruir tu cartera al {tope}: "
+                         + (f"faltan precios de {', '.join(sorted(sin_precio))}." if sin_precio
+                            else "no había tenencias en bolsa en esa fecha.")}
+    valor = sum(v * curvas[t] for t, v in inicial.items()) / total
+    return {"retornos": np.diff(np.r_[1.0, valor]) / np.r_[1.0, valor[:-1]],
+            "pesos": {t: round(v / total * 100, 1) for t, v in sorted(inicial.items(), key=lambda x: -x[1])},
+            "valor_usd": round(total, 2), "cobertura_pct": round(cobertura * 100, 1)}
+
+
+def _veredicto_con_prueba(optima, referencia, nombre, prueba, meses) -> tuple:
+    """(texto, concluyente). Una ventana sola no alcanza para declarar un ganador."""
+    p = prueba.get("p_valor")
+    cifras = (f"optimizada {optima['retorno_pct']} % y Sharpe {optima['sharpe']}, "
+              f"{nombre} {referencia['retorno_pct']} % y Sharpe {referencia['sharpe']}")
+    if p is None or p >= 0.05:
+        detalle = f"p = {p:.2f}" if p is not None else prueba.get("motivo", "sin prueba")
+        return (f"En estos {meses} meses no se puede distinguir del azar: {cifras} ({detalle}). "
+                "Con una sola ventana, ninguna de las dos demuestra ser mejor."), False
+    if optima["sharpe"] > referencia["sharpe"]:
+        return f"La cartera optimizada habría funcionado mejor: {cifras} (p = {p:.3f}).", True
+    return f"La optimización habría ido peor: {cifras} (p = {p:.3f}).", True
+
+
+def backtest(posiciones, meses: int = 6, benchmark: str = None, lab: bool = False,
+             trades: list = None) -> dict:
     """¿La cartera óptima habría funcionado de verdad?
 
     Se optimiza con los datos ANTERIORES a la ventana de prueba y se mide qué
@@ -296,10 +379,25 @@ def backtest(posiciones, meses: int = 6, benchmark: str = None, lab: bool = Fals
         "Equiponderada": np.ones(len(tickers)) / len(tickers),
     }
 
+    from core import mercado
     from core.models import risk as risk_mod
+    corregido = mercado.LAB.get()
+    tuya = None
+    if corregido:
+        tuya = _tu_cartera_al_corte(posiciones, trades, entrenamiento.index[-1], prueba.index)
+        del estrategias["Tu cartera"]
+        if "error" not in tuya:
+            estrategias["Tu cartera"] = np.array([])     # sus retornos ya están en `tuya`
+    series = {}
     salida, curvas = [], {}
     for nombre, w in estrategias.items():
-        r = prueba[tickers].to_numpy() @ w
+        if not corregido:
+            r = prueba[tickers].to_numpy() @ w
+        elif nombre == "Tu cartera":
+            r = tuya["retornos"]
+        else:
+            r = _comprar_y_mantener(prueba[tickers].to_numpy(), w, COSTO_ENTRADA)
+        series[nombre] = r
         acumulado = float(np.prod(1 + r) - 1)
         salida.append({
             "estrategia": nombre,
@@ -307,15 +405,29 @@ def backtest(posiciones, meses: int = 6, benchmark: str = None, lab: bool = Fals
             "volatilidad_pct": round(float(r.std(ddof=1)) * np.sqrt(RUEDAS) * 100, 2),
             "sharpe": round(risk_mod.sharpe(r, rf), 3),
             "max_drawdown_pct": round(risk_mod.max_drawdown(r) * 100, 2),
-            "pesos": {t: round(float(w[i]) * 100, 1) for i, t in enumerate(tickers)},
+            "pesos": (tuya["pesos"] if corregido and nombre == "Tu cartera"
+                      else {t: round(float(w[i]) * 100, 1) for i, t in enumerate(tickers)}),
         })
         curvas[nombre] = [round(float(v) * 100, 2) for v in np.cumprod(1 + r)]
 
     ganadora = max(salida, key=lambda s: s["sharpe"])
     optima = next(s for s in salida if s["estrategia"] == "Máximo Sharpe")
-    actual = next(s for s in salida if s["estrategia"] == "Tu cartera")
+    actual = next((s for s in salida if s["estrategia"] == "Tu cartera"), None)
 
-    if ganadora["estrategia"] == "Máximo Sharpe":
+    concluyente, p_valor, extra = None, None, {}
+    if corregido:
+        from core.models.comparacion import test_diferencia_sharpe
+        ref = "Tu cartera" if actual else "Equiponderada"
+        fila = actual or next(s for s in salida if s["estrategia"] == ref)
+        test = test_diferencia_sharpe(series["Máximo Sharpe"], series[ref], rf)
+        veredicto, concluyente = _veredicto_con_prueba(
+            optima, fila, "la tuya" if actual else "la equiponderada", test, meses)
+        p_valor = test.get("p_valor")
+        if actual:
+            extra = {"tu_cartera_valor_usd": tuya["valor_usd"], "tu_cartera_cobertura_pct": tuya["cobertura_pct"]}
+        else:
+            extra = {"aviso": tuya["error"]}
+    elif ganadora["estrategia"] == "Máximo Sharpe":
         veredicto = (f"La cartera optimizada habría funcionado: {optima['retorno_pct']} % "
                      f"contra {actual['retorno_pct']} % de la tuya en estos {meses} meses.")
     else:
@@ -335,5 +447,9 @@ def backtest(posiciones, meses: int = 6, benchmark: str = None, lab: bool = Fals
         "ganadora": ganadora["estrategia"], "veredicto": veredicto,
         "rf_label": rf_label,
         "nota": "Los pesos se calcularon SOLO con datos anteriores al período de prueba. "
-                "Optimizar y medir sobre el mismo período no prueba nada.",
+                "Optimizar y medir sobre el mismo período no prueba nada."
+                + (" Todas se compran al inicio y se mantienen sin rebalancear. El óptimo, la "
+                   "mínima varianza y la equiponderada pagan 0,5 % de entrada; tu cartera son "
+                   "las cantidades que tenías en esa fecha, sin el FCI." if corregido else ""),
+        **({"concluyente": concluyente, "p_valor": p_valor, **extra} if corregido else {}),
     }

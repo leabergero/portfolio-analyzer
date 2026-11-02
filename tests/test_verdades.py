@@ -3803,3 +3803,49 @@ def test_twr_con_split_y_lote_sin_serie():
     finally:
         mercado.LAB.reset(token)
         sources.precios_base, sources.splits = antes
+
+
+def test_backtest_comprar_y_mantener_no_rebalancea():
+    """H11: A duplica y B queda. La mitad y mitad pasa a valer 1,5; si A vuelve a
+    la mitad, cae a 1 (−33 %), no −25 % como con rebalanceo diario."""
+    import numpy as np
+    from core.models.markowitz import _comprar_y_mantener
+    r = _comprar_y_mantener(np.array([[1.0, 0.0], [-0.5, 0.0]]), [0.5, 0.5])
+    assert casi(r[0], 0.5, 1e-9) and casi(r[1], -1 / 3, 1e-9)
+    assert casi(_comprar_y_mantener(np.array([[0.0, 0.0]]), [0.5, 0.5], 0.005)[0], -0.005, 1e-9)
+
+
+def test_backtest_tu_cartera_son_los_lotes_de_esa_fecha():
+    """H11: lo comprado después del corte no entra; lo vendido después, sí."""
+    import pandas as pd
+    from core.data import sources
+    from core.models import markowitz, portfolio
+    fechas = pd.date_range("2026-01-01", periods=6, freq="B")
+    corte = fechas[2]
+    series = {"VIEJO": pd.Series([10.0, 10, 10, 20, 20, 20], index=fechas),
+              "NUEVO": pd.Series(10.0, index=fechas)}
+    lotes = [{"ticker": "NUEVO", "buy_date": str(fechas[4].date()), "buy_price": 10.0, "qty": 100, "currency": "USD"}]
+    vendido = {"ticker": "VIEJO", "buy_date": str(fechas[0].date()), "sell_date": str(fechas[4].date()), "qty": 5,
+               "buy_price": 10.0, "sell_price": 20.0, "buy_comm": 0, "sell_comm": 0, "moneda": "USD"}
+    antes = sources.precios_base, portfolio.pnl_realizado
+    try:
+        sources.precios_base = lambda t, *a, **k: series.get(t.upper(), pd.Series(dtype=float))
+        portfolio.pnl_realizado = lambda tr: {"trades": tr}
+        r = markowitz._tu_cartera_al_corte(lotes, [vendido], corte, fechas[3:])
+        assert r["pesos"] == {"VIEJO": 100.0}, r
+        assert casi(r["retornos"][0], 1.0, 1e-9)
+
+        sin = markowitz._tu_cartera_al_corte(lotes, [], corte, fechas[3:])
+        assert "error" in sin
+    finally:
+        sources.precios_base, portfolio.pnl_realizado = antes
+
+
+def test_backtest_una_ventana_no_declara_ganador_sin_prueba():
+    from core.models.markowitz import _veredicto_con_prueba
+    a = {"retorno_pct": 30.0, "sharpe": 2.0}
+    b = {"retorno_pct": 10.0, "sharpe": 1.0}
+    texto, ok = _veredicto_con_prueba(a, b, "la tuya", {"p_valor": 0.4}, 6)
+    assert not ok and "azar" in texto
+    assert _veredicto_con_prueba(a, b, "la tuya", {"p_valor": 0.01}, 6)[1] is True
+    assert "peor" in _veredicto_con_prueba(b, a, "la tuya", {"p_valor": 0.01}, 6)[0]

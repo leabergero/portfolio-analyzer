@@ -211,7 +211,7 @@ MODELOS = {
     "blacklitterman": ("Black-Litterman", lambda p, c: suelto(
         c, "blacklitterman", p, store.opiniones(c), _indice(p, c), None, True)),
     "hrp":          ("HRP",             _tibio("hrp", lambda p, c: (_indice(p, c), True))),
-    "backtest":     ("Backtest",        _tibio("backtest", lambda p, c: (6, _indice(p, c), True))),
+    "backtest":     ("Backtest",        _tibio("backtest", lambda p, c: (6, _indice(p, c), True, store.cargar_realizado(c)))),
 
     # ── Monte Carlo ──
     "montecarlo":   ("Monte Carlo",     lambda p, c: montecarlo.simular_fhs(p)),

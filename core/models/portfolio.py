@@ -588,6 +588,23 @@ def tir(movimientos) -> float:
     return round((bajo + alto) / 2 * 100, 2)
 
 
+def factor_split(ticker, hasta, costo_unitario, cierre) -> float:
+    """Cuántas acciones de HOY es una de un lote cerrado en `hasta`.
+
+    La serie de Yahoo viene ajustada por todo split posterior, y un lote cerrado
+    guarda las acciones de su época: BYMA 2023, comprada a 0,69 USD, figuraba a
+    0,07. Sólo se pregunta a Yahoo si el costo no calza con el cierre del día de
+    compra: son pocos papeles y evita salir por los demás.
+    """
+    if hasta is None or not costo_unitario or cierre is None or pd.isna(cierre) or not cierre:
+        return 1.0
+    ratio = costo_unitario / float(cierre)
+    if 0.62 < ratio < 1.6:
+        return 1.0
+    k = float(np.prod([r for d, r in sources.splits(ticker).items() if d > str(hasta)[:10]]))
+    return k if abs(np.log(ratio / k)) < abs(np.log(ratio)) else 1.0
+
+
 def evolucion(posiciones, trades=None, n_ruedas: int = 30, flujos_fci: dict = None) -> dict:
     """Cómo se movió la cartera en el tiempo: rendimiento acumulado y últimas ruedas.
 
@@ -698,24 +715,11 @@ def evolucion(posiciones, trades=None, n_ruedas: int = 30, flujos_fci: dict = No
     lab = mercado.LAB.get()
 
     def por_splits(ticker, qty, desde, hasta, costo):
-        """Cuántas acciones de HOY eran `qty` mientras estuvo el lote.
-
-        La serie de Yahoo viene ajustada por todo split posterior, y un lote
-        cerrado guarda las acciones de su época: BYMA 2023, comprada a 0,69 USD,
-        figuraba a 0,07. Sólo se pregunta a Yahoo si el costo no calza con el
-        cierre: son pocos papeles y evita salir por los demás.
-        """
-        if not lab or hasta is None or not qty or not costo:
+        if not lab or not qty:
             return 1.0
         f = rueda(desde)
-        cierre = px.at[f, ticker] if f is not None else None
-        if cierre is None or pd.isna(cierre) or not cierre:
-            return 1.0
-        ratio = (costo / qty) / float(cierre)
-        if 0.62 < ratio < 1.6:
-            return 1.0
-        k = float(np.prod([r for d, r in _src.splits(ticker).items() if d > str(hasta)[:10]]))
-        return k if abs(np.log(ratio / k)) < abs(np.log(ratio)) else 1.0
+        return factor_split(ticker, hasta, costo / qty if costo else None,
+                            px.at[f, ticker] if f is not None else None)
 
     cant = pd.DataFrame(0.0, index=px.index, columns=px.columns)
     flujo = pd.Series(0.0, index=px.index)

@@ -5330,7 +5330,8 @@ function Markowitz({ d, cartera, bench, extras }) {
                     <td className="n neg">{pct(r.max_drawdown_pct)}</td>
                   </tr>))}</tbody>
               </table></div>
-              <div className={"aviso " + (bt.ganadora === "Máximo Sharpe" ? "ok" : "ojo")}>
+              {bt.aviso && <div className="aviso">{bt.aviso}</div>}
+              <div className={"aviso " + (bt.ganadora === "Máximo Sharpe" && bt.concluyente !== false ? "ok" : "ojo")}>
                 {bt.veredicto}
               </div>
               <div className="pie">{bt.nota}</div>

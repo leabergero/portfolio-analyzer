@@ -174,7 +174,7 @@ def mk_backtest(nombre):
     """¿La cartera optimizada habría funcionado fuera de muestra?"""
     return _suelto(nombre, "backtest",
                    request.args.get("meses", 6, type=int),
-                   request.args.get("benchmark"), _lab())
+                   request.args.get("benchmark"), _lab(), store.cargar_realizado(nombre))
 
 
 @bp.get("/stress/<nombre>")
