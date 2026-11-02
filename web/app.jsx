@@ -169,6 +169,9 @@ const sesionInviu = {
   tirar: () => { try { localStorage.removeItem(SOBRE_INVIU); } catch { /* nada que hacer */ } },
 };
 
+// `?lab=1`: H7 de la auditoría, Black-Litterman corregido. Viaja al server.
+const LAB = new URLSearchParams(location.search).get("lab");
+
 const api = async (ruta, opciones) => {
   const o = { ...(opciones || {}) };
   const guardado = sesion.leer();
@@ -177,6 +180,7 @@ const api = async (ruta, opciones) => {
   if (guardadoInviu) o.headers = { ...(o.headers || {}), "X-Sesion-Inviu": guardadoInviu };
   if (SIM_ACTIVA) o.headers = { ...(o.headers || {}), "X-Sim": SIM_ACTIVA };
   o.headers = { ...(o.headers || {}), "X-Mercado": MERCADO };
+  if (LAB) o.headers["X-Lab"] = LAB;
 
   // Si se corta la conexión (la notebook se durmió, cambió la red) `fetch`
   // rechaza y nadie llama al setState: la pantalla quedaba en "Calculando…"
@@ -2036,7 +2040,7 @@ function FlujoBonos({ cartera }) {
 // su nombre, porque el visor de un blob: lo guardaría con un nombre al azar.
 // La pestaña no corre scripts (la CSP no deja): se dibuja desde acá.
 function abrirReporte(nombre) {
-  const url = `/api/reporte/${encodeURIComponent(nombre)}`;
+  const url = `/api/reporte/${encodeURIComponent(nombre)}${LAB ? `?lab=${LAB}` : ""}`;
   const w = window.open("", "_blank");
   if (!w) { location.href = url; return; }
   const c = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
@@ -6186,8 +6190,12 @@ function ObjetivosYBL({ cartera, extras, d, bench }) {
                   <td className="mono">{x.ticker}</td>
                   <td className="n">{usd(x.actual)}</td>
                   <td className="n">{x.objetivo_medio ? usd(x.objetivo_medio) : "—"}</td>
-                  <td className={"n " + signo(x.upside_pct)}>
-                    {x.upside_pct == null ? "—" : pct(x.upside_pct, 1)}</td>
+                  {LAB && x.es_futuro
+                    ? <td className="n" title={t("Sale de la curva de futuros: es tasa menos dividendos (o tasa más almacenaje), no un pronóstico. No entra en Black-Litterman.",
+                                                 "From the futures curve: it is rate minus dividends (or rate plus storage), not a forecast. It is left out of Black-Litterman.")}>
+                        {pct(x.upside_pct, 1)} <span style={{ color: "var(--texto-3)", fontSize: 11 }}>{t("acarreo", "carry")}</span></td>
+                    : <td className={"n " + signo(x.upside_pct)}>
+                        {x.upside_pct == null ? "—" : pct(x.upside_pct, 1)}</td>}
                   <td><span className={"chip " + (x.momentum === "FAVORABLE" ? "ok"
                         : x.momentum === "EVITAR" ? "mal"
                         : x.momentum === "ESPERAR" ? "ojo" : "")}>{x.momentum ? senalLabel(x.momentum) : "—"}</span></td>
@@ -6293,9 +6301,12 @@ function EditorView({ activo, onGuardar, onCerrar }) {
         {t(`Hoy cotiza ${usd(activo.actual)}. Tu rango da un precio medio de ${usd(medio)}, o sea`,
            `Today it trades at ${usd(activo.actual)}. Your range gives an average price of ${usd(medio)}, i.e.`)}{" "}
         <b>{pct(bruto * 100, 1)}</b>
-        {modo === "B2" && <> {t(`en ${meses} ${meses === 1 ? "mes" : "meses"}, que anualizado compuesto son`,
-                                `in ${meses} ${meses === 1 ? "month" : "months"}, which compounded annually is`)}{" "}
-          <b>{pct(anualizado * 100, 1)}</b></>}.
+        {modo === "B2" && (LAB
+          ? <> {t(`en ${meses} ${meses === 1 ? "mes" : "meses"}, más la tasa libre hasta completar el año`,
+                  `in ${meses} ${meses === 1 ? "month" : "months"}, plus the risk-free rate for the rest of the year`)}</>
+          : <> {t(`en ${meses} ${meses === 1 ? "mes" : "meses"}, que anualizado compuesto son`,
+                  `in ${meses} ${meses === 1 ? "month" : "months"}, which compounded annually is`)}{" "}
+            <b>{pct(anualizado * 100, 1)}</b></>)}.
         {" "}{t("Confianza estimada:", "Estimated confidence:")} <b>{confianza} %</b>.
       </div>
       <div className="pie">
@@ -6309,10 +6320,13 @@ function EditorView({ activo, onGuardar, onCerrar }) {
           + `opinion. The cap is 90 % even if the range is a single cent wide — with total certainty the `
           + `model would put everything into that asset.`)}
         {modo === "B2" && <> {t("El modo", "The")} <b>{t("evento corporativo", "corporate event")}</b>{" "}
-          {t("existe para casos como una OPA: el plazo real cambia el retorno anualizado y por lo tanto "
-            + "el peso que el modelo le da.",
-            "mode exists for cases like a tender offer: the actual timeline changes the annualized return "
-            + "and therefore the weight the model gives it.")}</>}
+          {LAB
+            ? t("existe para casos como una OPA: paga una vez y no se repite, así que no se anualiza.",
+                "mode exists for cases like a tender offer: it pays once and does not repeat, so it is not annualized.")
+            : t("existe para casos como una OPA: el plazo real cambia el retorno anualizado y por lo tanto "
+                + "el peso que el modelo le da.",
+                "mode exists for cases like a tender offer: the actual timeline changes the annualized return "
+                + "and therefore the weight the model gives it.")}</>}
       </div>
     </div>
   );

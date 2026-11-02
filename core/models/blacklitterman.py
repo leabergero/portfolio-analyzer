@@ -29,6 +29,7 @@ cartera personal, pero cambia la interpretación y hay que decirlo.
 
 import numpy as np
 
+from core import mercado
 from core.models.markowitz import cap_weights, max_sharpe_weights
 
 RUEDAS = 252
@@ -54,12 +55,18 @@ def _confianza_a_omega(confianzas, tau, Sigma, P):
 
     El tope de confianza es 90 % aunque el usuario esté seguro: con Ω → 0 la
     solución degenera y BL concentra toda la cartera en un activo.
+
+    Con `mercado.LAB`, Idzorek (2005): ω = (1−c)/c · Pᵀ τΣ P, y una opinión sola
+    mueve el retorno exactamente la fracción c hacia su objetivo. Con (1−c), el
+    movimiento es 1/(2−c): nunca baja de 50 %, aunque la confianza sea 10 %.
+    Con varias opiniones correlacionadas, c es aproximado.
     """
+    idzorek = mercado.LAB.get()
     diag = []
     for k, conf in enumerate(confianzas):
         c = np.clip(conf, 1, 90) / 100.0
         var_view = float(P[k] @ (tau * Sigma) @ P[k])
-        diag.append(max((1 - c) * var_view, 1e-10))
+        diag.append(max((1 - c) / (c if idzorek else 1) * var_view, 1e-10))
     return np.diag(diag)
 
 
@@ -174,34 +181,6 @@ def analizar(posiciones, views=None, benchmark: str = None,
     }
 
 
-def views_desde_objetivos(resultado_objetivos, resultado_momentum=None) -> list:
-    """Convierte precios objetivo en views, ajustando por momentum.
-
-    La confianza sale de la cobertura de analistas, y se **recorta 35 puntos si
-    el momentum está en contra**: sin eso, BL sobreasigna a un activo que viene
-    cayendo solo porque los analistas le ven recorrido. Es el problema de
-    "agarrar el cuchillo cayendo", trasladado a la optimización.
-    """
-    momentos = {m["ticker"]: m.get("señal")
-                for m in (resultado_momentum or {}).get("por_activo", [])}
-    views = []
-    for a in resultado_objetivos.get("por_activo", []):
-        if not a.get("disponible") or a.get("upside_pct") is None:
-            continue
-        if a.get("es_futuro"):
-            # La curva de futuros refleja costo de acarreo, no dirección.
-            confianza = 55
-        else:
-            n = a.get("n_analistas") or 1
-            confianza = min(85, 35 + 8 * n)
-        if momentos.get(a["ticker"]) in ("EVITAR", "ESPERAR"):
-            confianza = max(10, confianza - 35)
-        views.append({"ticker": a["ticker"], "ret": a["upside_pct"],
-                      "confidence": confianza, "n_analistas": a.get("n_analistas"),
-                      "momentum": momentos.get(a["ticker"])})
-    return views
-
-
 # ── Views manuales ────────────────────────────────────────────────────────────
 
 def _confianza_por_rango(bajo: float, alto: float, medio: float) -> int:
@@ -219,6 +198,15 @@ def _confianza_por_rango(bajo: float, alto: float, medio: float) -> int:
         return 50
     ancho_pct = (alto - bajo) / medio * 100
     return int(round(max(10, min(90, 90 - ancho_pct))))
+
+
+def retorno_evento(bruto: float, meses: int, rf: float) -> float:
+    """Lo que rinde en 12 meses un evento que paga `bruto` en `meses` y no se
+    repite: una OPA que paga 10 % en 3 meses no rinde 46 % en el año, rinde ese
+    10 % y después la tasa libre sobre la plata cobrada."""
+    if meses > 12:
+        return (1 + bruto) ** (12 / meses) - 1
+    return (1 + bruto) * (1 + rf) ** ((12 - meses) / 12) - 1
 
 
 def view_manual(ticker: str, modo: str, bajo: float, alto: float,
@@ -244,7 +232,11 @@ def view_manual(ticker: str, modo: str, bajo: float, alto: float,
 
     if modo == "B2":
         m = max(1, int(meses or 12))
-        ret = ((1 + bruto) ** (12 / m) - 1) * 100
+        if mercado.LAB.get():
+            from core.models.rates import risk_free_para
+            ret = retorno_evento(bruto, m, risk_free_para()[0]) * 100
+        else:
+            ret = ((1 + bruto) ** (12 / m) - 1) * 100
     else:
         ret = bruto * 100
 
@@ -287,7 +279,10 @@ def views_combinadas(resultado_objetivos, resultado_momentum=None,
         if a["ticker"] in manuales or not a.get("disponible") or a.get("upside_pct") is None:
             continue
         if a.get("es_futuro"):
-            confianza = 55        # la curva de futuros es costo de acarreo, no dirección
+            # La curva de futuros es costo de acarreo, no dirección: no es una opinión.
+            if mercado.LAB.get():
+                continue
+            confianza = 55
         else:
             n = a.get("n_analistas") or 1
             confianza = min(85, 35 + 8 * n)

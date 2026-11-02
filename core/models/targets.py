@@ -323,6 +323,7 @@ def _reexpresar(ticker, r, precio_propio, origen, precio_origen=None):
 
 def analizar(posiciones) -> dict:
     """Precios objetivo de toda la cartera, con la señal combinada."""
+    from core import mercado
     from core.models import momentum as mom
 
     momentos = {m["ticker"]: m for m in mom.analizar(posiciones).get("por_activo", [])}
@@ -336,10 +337,13 @@ def analizar(posiciones) -> dict:
         r = objetivo(ticker)
         señal_mom = momentos.get(ticker, {}).get("señal")
         r["momentum"] = señal_mom
-        r["combinada"], r["combinada_texto"] = _combinar(r.get("upside_pct"), señal_mom)
+        # H7: el "upside" de un futuro es costo de acarreo, no un recorrido esperado.
+        acarreo = mercado.LAB.get() and r.get("es_futuro")
+        r["combinada"], r["combinada_texto"] = _combinar(None if acarreo else r.get("upside_pct"), señal_mom)
         salida.append(r)
 
-    con_dato = [s for s in salida if s.get("disponible") and s.get("upside_pct") is not None]
+    con_dato = [s for s in salida if s.get("disponible") and s.get("upside_pct") is not None
+                and not (mercado.LAB.get() and s.get("es_futuro"))]
     return {
         "por_activo": salida,
         "upside_promedio_pct": (round(sum(s["upside_pct"] for s in con_dato) / len(con_dato), 1)

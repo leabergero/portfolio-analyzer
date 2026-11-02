@@ -583,7 +583,7 @@ def ajustes_analistas(posiciones, opiniones: dict = None) -> dict:
         bajo, alto = v["rango"]
         medio, m = (bajo + alto) / 2, max(1, int(v.get("meses") or 12))
         bruto = medio / v["precio_referencia"] - 1
-        anio = (1 + bruto) * (1 + rf) ** (max(0, 12 - m) / 12) - 1 if m <= 12 else (1 + bruto) ** (12 / m) - 1
+        anio = blacklitterman.retorno_evento(bruto, m, rf)
         v["ret"] = round(anio * 100, 2)
         # El rango es el 90 % central del precio al que se resuelve: ésa es toda
         # la incertidumbre del año, repartida pareja (después hay plata cobrada).
