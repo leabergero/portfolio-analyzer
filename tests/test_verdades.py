@@ -3768,3 +3768,38 @@ def test_escenario_analistas_sin_opiniones_usa_el_punto_de_partida():
         assert casi(montecarlo.ajustes_analistas([])["deriva"]["AAA"], 0.08, 1e-9)
     finally:
         targets.analizar, momentum.analizar, bl.analizar, rates.risk_free_para = antes
+
+
+def test_twr_con_split_y_lote_sin_serie():
+    """Con lab: un lote vendido antes de un split se valúa con las acciones de
+    hoy y uno comprado antes de la serie no vale cero. Son los dos errores que
+    falseaban el TWR de LEANDRO. Y una rotación no cuenta dos veces la plata."""
+    import pandas as pd
+    from core import mercado
+    from core.data import sources
+    evolucion = require("core.models.portfolio", "evolucion")
+    fechas = pd.date_range("2026-01-01", periods=6, freq="B")
+    # Precio de la acción plano en 10 USD reales; Yahoo ya lo muestra en 1 por un split 10:1 posterior.
+    series = {"BBB": pd.Series(1.0, index=fechas),
+              "CCC": pd.Series([None, None, None, 20.0, 20.0, 20.0], index=fechas),
+              "DDD": pd.Series(10.0, index=fechas)}
+    lote = lambda t, f, q, p: {"ticker": t, "buy_date": str(fechas[f].date()), "buy_price": p, "qty": q, "currency": "USD"}
+    vendido = {"ticker": "BBB", "buy_date": str(fechas[1].date()), "sell_date": str(fechas[4].date()), "qty": 10,
+               "buy_price": 10.0, "sell_price": 10.0, "buy_comm": 0, "sell_comm": 0}
+    antes = sources.precios_base, sources.splits
+    token = mercado.LAB.set(True)
+    try:
+        sources.precios_base = lambda t, *a, **k: series.get(t.upper(), pd.Series(dtype=float))
+        sources.splits = lambda t: {"2026-02-01": 10.0} if t == "BBB" else {}
+        ev = evolucion([lote("DDD", 1, 10, 10.0)], [vendido])        # sólo el split
+        assert casi(ev["twr_pct"], 0.0, 1e-6), ev["twr_pct"]
+        ev = evolucion([lote("CCC", 1, 5, 20.0), lote("DDD", 1, 10, 10.0)], [])    # sin serie al comprar
+        assert casi(ev["twr_pct"], 0.0, 1e-6), ev["twr_pct"]
+        # Rotación: vende 10 DDD a 10 y con esa plata compra 10 EEE a 10, que cierra en 11.
+        series["EEE"] = pd.Series([10.0, 10.0, 10.0, 11.0, 11.0, 11.0], index=fechas)
+        rota = {**vendido, "ticker": "DDD", "sell_date": str(fechas[3].date())}
+        ev = evolucion([lote("EEE", 3, 10, 10.0)], [rota])
+        assert casi(ev["twr_pct"], 10.0, 1e-6), ev["twr_pct"]
+    finally:
+        mercado.LAB.reset(token)
+        sources.precios_base, sources.splits = antes

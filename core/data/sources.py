@@ -384,6 +384,23 @@ def info(ticker: str, ttl_horas: float = 24 * 7):
     return datos
 
 
+def splits(ticker: str, ttl_horas: float = 24 * 30) -> dict:
+    """{fecha ISO: ratio} de los splits del papel, según Yahoo. Un fallo de red
+    devuelve vacío y no se guarda: el próximo pedido vuelve a preguntar."""
+    clave = f"yf:splits:{ticker.upper()}"
+    guardado = cache.leer_respuesta(clave, ttl_horas)
+    if guardado is not None:
+        return guardado
+    try:
+        from core.data import yahoo
+        s = yahoo.ticker(ticker).splits
+    except Exception:
+        return {}
+    salida = {str(f.date()): float(r) for f, r in s.items()} if s is not None else {}
+    cache.guardar_respuesta(clave, salida)
+    return salida
+
+
 def divisor_nominal(ticker: str, precio: float, source: str = None) -> float:
     """100 si ese precio viene por lámina de 100 nominales, 1 si viene por nominal.
 

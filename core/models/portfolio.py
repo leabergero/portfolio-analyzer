@@ -695,6 +695,28 @@ def evolucion(posiciones, trades=None, n_ruedas: int = 30, flujos_fci: dict = No
         futuras = px.index[px.index >= pd.Timestamp(fecha)]
         return futuras[0] if len(futuras) else None
 
+    lab = mercado.LAB.get()
+
+    def por_splits(ticker, qty, desde, hasta, costo):
+        """Cuántas acciones de HOY eran `qty` mientras estuvo el lote.
+
+        La serie de Yahoo viene ajustada por todo split posterior, y un lote
+        cerrado guarda las acciones de su época: BYMA 2023, comprada a 0,69 USD,
+        figuraba a 0,07. Sólo se pregunta a Yahoo si el costo no calza con el
+        cierre: son pocos papeles y evita salir por los demás.
+        """
+        if not lab or hasta is None or not qty or not costo:
+            return 1.0
+        f = rueda(desde)
+        cierre = px.at[f, ticker] if f is not None else None
+        if cierre is None or pd.isna(cierre) or not cierre:
+            return 1.0
+        ratio = (costo / qty) / float(cierre)
+        if 0.62 < ratio < 1.6:
+            return 1.0
+        k = float(np.prod([r for d, r in _src.splits(ticker).items() if d > str(hasta)[:10]]))
+        return k if abs(np.log(ratio / k)) < abs(np.log(ratio)) else 1.0
+
     cant = pd.DataFrame(0.0, index=px.index, columns=px.columns)
     flujo = pd.Series(0.0, index=px.index)
     caja = pd.Series(0.0, index=px.index)
@@ -703,7 +725,7 @@ def evolucion(posiciones, trades=None, n_ruedas: int = 30, flujos_fci: dict = No
         d = pd.Timestamp(desde)
         h = pd.Timestamp(hasta) if hasta else None
         vivo = (cant.index >= d) & (cant.index < h if h is not None else True)
-        cant.loc[vivo, ticker] += qty
+        cant.loc[vivo, ticker] += qty * por_splits(ticker, qty, desde, hasta, costo)
         # Solo cuenta como movimiento lo que pasó dentro de la ventana: un lote
         # anterior ya está en el capital inicial, no es plata que entró.
         if d >= px.index[0] and (f := rueda(d)) is not None:
@@ -719,7 +741,12 @@ def evolucion(posiciones, trades=None, n_ruedas: int = 30, flujos_fci: dict = No
 
     # El valor de las tenencias va sin la caja de dividendos, para que coincida
     # con el KPI "Valor total" de arriba; el resultado sí la cuenta.
-    tenencias = (cant * px).sum(axis=1)
+    # Un lote comprado antes de que empiece la serie del papel (QQQD 2024) valía
+    # cero y la plata reaparecía como ganancia el día del primer precio. En lab
+    # vale el primer precio conocido.
+    # ponytail: un lote cerrado antes de la serie toma un precio posterior; usar
+    # su costo si alguna vez pesa.
+    tenencias = (cant * (px.bfill() if lab else px)).sum(axis=1)
     puesto = flujo.cumsum()
     resultado = tenencias + caja - puesto
 
@@ -730,6 +757,8 @@ def evolucion(posiciones, trades=None, n_ruedas: int = 30, flujos_fci: dict = No
     # al principio de la rueda (al denominador: la plata ya estaba en riesgo) y
     # las ventas al final (no: si vendés todo, el denominador no se hace cero).
     valor = tenencias + caja
+    # Neto a propósito: en una rotación la plata de la venta es la que compra, y
+    # sumar las compras brutas contaría dos veces el mismo capital.
     base = valor.shift(1) + flujo.clip(lower=0)
     r_twr = ((valor - flujo - valor.shift(1)) / base).where(base > 1.0, 0.0).iloc[1:]
     twr = (1 + r_twr).cumprod()
