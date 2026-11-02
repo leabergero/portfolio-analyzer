@@ -1098,11 +1098,11 @@ function senales(R) {
         titulo: t("Sobre lo que invertiste", "On what you invested"), valor: pct(ev.rendimiento_capital_pct, 1),
         frase: t(`Lo máximo que tuviste invertido a la vez fueron ${usd(ev.puesto_max_usd, 0)} y, contando lo que vale hoy, lo que vendiste y los dividendos, `
                  + `estás ${usd(Math.abs(ev.resultado_usd), 0)} ${ev.resultado_usd < 0 ? "abajo" : "arriba"}: ${pct(ev.rendimiento_capital_pct, 1)}.`
-                 + (ev.rendimiento_con_fci_pct != null ? ` Contando los FCI, ${pct(ev.rendimiento_con_fci_pct, 1)}.` : "")
+                 + (!LAB && ev.rendimiento_con_fci_pct != null ? ` Contando los FCI, ${pct(ev.rendimiento_con_fci_pct, 1)}.` : "")
                  + (ev.rendimiento_operacion_pct != null ? ` Por cada dólar comprado (${usd(ev.comprado_usd, 0)} en total) quedó en promedio ${pct(ev.rendimiento_operacion_pct, 1)}.` : ""),
                  `The most you had invested at once was ${usd(ev.puesto_max_usd, 0)} and, counting what it's worth today, what you sold and the dividends, `
                  + `you're ${usd(Math.abs(ev.resultado_usd), 0)} ${ev.resultado_usd < 0 ? "down" : "up"}: ${pct(ev.rendimiento_capital_pct, 1)}.`
-                 + (ev.rendimiento_con_fci_pct != null ? ` Counting the funds, ${pct(ev.rendimiento_con_fci_pct, 1)}.` : "")
+                 + (!LAB && ev.rendimiento_con_fci_pct != null ? ` Counting the funds, ${pct(ev.rendimiento_con_fci_pct, 1)}.` : "")
                  + (ev.rendimiento_operacion_pct != null ? ` Each dollar bought (${usd(ev.comprado_usd, 0)} in total) left ${pct(ev.rendimiento_operacion_pct, 1)} on average.` : "")) } : {}),
       ...(conCapital(ev) ? {} : {
       titulo: t("Sobre lo que pusiste", "On what you put in"), valor: pct(ev.rendimiento_pct, 1),
@@ -1128,8 +1128,8 @@ function senales(R) {
     const v = Math.abs(r.var95_pct);
     add({ id: "dia", q: "perdida", nivel: v > ZONAS.limite ? "mal" : v > ZONAS.moderado ? "ojo" : "ok",
       titulo: t("Un día malo", "A bad day"), valor: usd(Math.abs(r.var95_usd), 0),
-      frase: t(`Uno de cada 20 días podés perder más de ${usd(Math.abs(r.var95_usd), 0)} (${pct(v, 1)}). El límite prudente es ${num(ZONAS.limite, 1)} % por día.`,
-               `One day in 20 you can lose more than ${usd(Math.abs(r.var95_usd), 0)} (${pct(v, 1)}). The prudent limit is ${num(ZONAS.limite, 1)} % a day.`) });
+      frase: t(`Uno de cada 20 días podés perder más de ${usd(Math.abs(r.var95_usd), 0)} (${pct(v, 1)}${LAB ? " de lo invertido" : ""}). El límite prudente es ${num(ZONAS.limite, 1)} % por día.`,
+               `One day in 20 you can lose more than ${usd(Math.abs(r.var95_usd), 0)} (${pct(v, 1)}${LAB ? " of what is invested" : ""}). The prudent limit is ${num(ZONAS.limite, 1)} % a day.`) });
     const dd = Math.abs(r.max_drawdown_pct);
     add({ id: "caida", q: "perdida", nivel: dd > 40 ? "mal" : dd > 20 ? "ojo" : "ok",
       titulo: t("La peor racha", "The worst streak"), valor: "−" + pct(dd, 0),
@@ -1823,7 +1823,16 @@ function Panel({ tab, R, M, cartera, bench, recargar, lanzar, sim, setSim }) {
     montecarlo: <McEscenarios d={d} cartera={cartera} />,
     regimenes: <Regimenes d={d} cartera={cartera} />,
   };
-  return vistas[tab] || <div className="cargando">—</div>;
+  // H10: todo esto se mide sobre lo invertido. El FCI es la caja: está en la
+  // cartera para coincidir con el broker, y no se le mide riesgo ni rendimiento.
+  const filasPos = ok_(R.posicion)?.posiciones || [];
+  const caja = filasPos.filter((f) => f.source === "cocos-fci").reduce((s, f) => s + (f.valor_usd || 0), 0);
+  const conBase = LAB && tab !== "posicion" && caja >= 0.01 * (ok_(R.posicion)?.valor_total || Infinity);
+  return (<>
+    {conBase && <div className="aviso">{t(`Se mide sobre lo invertido en bolsa. Los ${usd(caja, 0)} en FCI son la caja y quedan afuera.`,
+                                          `Measured on what's invested in stocks. The ${usd(caja, 0)} in funds are cash and stay out.`)}</div>}
+    {vistas[tab] || <div className="cargando">—</div>}
+  </>);
 }
 
 /* ── Posición ── */
@@ -3654,7 +3663,7 @@ function RendimientoTotal({ ev }) {
            lado del otro. Es lo ganado sobre lo máximo que hubo invertido, no una
            tasa anual: la TIR de la cartera va en su propio panel. */
         <div style={{ display: "flex", gap: 36, flexWrap: "wrap", marginTop: 6 }}>
-          <div style={{ flex: "1 1 260px" }}>
+          {!LAB && <div style={{ flex: "1 1 260px" }}>
             <div className="pie" style={{ margin: 0 }}>{t("Desde que empezaste a invertir · con FCI", "Since you started investing · with funds")}</div>
             {ev.rendimiento_con_fci_pct != null ? (<>
               <div style={{ fontSize: 30, fontWeight: 700 }} className={signo(ev.resultado_con_fci_usd)}>{pct(ev.rendimiento_con_fci_pct)}</div>
@@ -3678,7 +3687,7 @@ function RendimientoTotal({ ev }) {
                       {t(": se completa volviendo a importar los FCI desde Cocos.", ": it fills in by importing the funds from Cocos again.")}</>
                   : t("Esta cartera no tiene FCI: es el mismo número de al lado.", "This portfolio has no funds: it's the same number as the one beside it.")}
               </div></>)}
-          </div>
+          </div>}
           <div style={{ flex: "1 1 260px" }}>
             <div className="pie" style={{ margin: 0 }}>{t("Sólo bolsa · sin FCI", "Stocks only · without funds")}</div>
             <div style={{ fontSize: 30, fontWeight: 700 }} className={signo(ev.resultado_usd)}>{pct(ev.rendimiento_capital_pct)}</div>
@@ -6868,6 +6877,7 @@ function RiesgoComparado({ M, nombres }) {
   return (
     <div className="panel">
       <h3>{t("Los días feos, lado a lado", "The ugly days, side by side")}</h3>
+      {LAB && <div className="pie" style={{ margin: "0 0 8px" }}>{t("Sobre lo invertido en bolsa de cada cartera, sin FCI.", "On what each portfolio has invested in stocks, without funds.")}</div>}
       {[["var95_pct", t("Día malo", "Bad day"), t("VaR 95 % · 1 rueda de cada 20", "VaR 95 % · 1 session out of 20")],
         ["cvar95_pct", t("Día muy malo", "Very bad day"), t("CVaR 95 % · el promedio de ese 5 % peor", "CVaR 95 % · the average of that worst 5 %")]]
         .map(([k, titulo, detalle]) => (

@@ -593,7 +593,8 @@ def ajustes_analistas(posiciones, opiniones: dict = None) -> dict:
     bl = blacklitterman.analizar(posiciones, views, lab=True)
     if "error" in bl:
         return bl
-    deriva = {t: r / 100 for t, r in bl["retornos_bl_pct"].items()}
+    # Sin views, BL devuelve el punto de partida y no trae `retornos_bl_pct`.
+    deriva = {t: r / 100 for t, r in (bl.get("retornos_bl_pct") or bl["equilibrio_pct"]).items()}
     return {"deriva": deriva, "vol": vol, "escenario": {
         "nombre": "Según los analistas (Black-Litterman)",
         "views": [{"ticker": v["ticker"], "ret_pct": v["ret"], "confianza": v["confidence"],

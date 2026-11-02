@@ -3754,3 +3754,17 @@ def test_bl_una_opa_no_se_anualiza():
     finally:
         lab.reset(ficha)
         rates.risk_free_para = antes
+
+
+def test_escenario_analistas_sin_opiniones_usa_el_punto_de_partida():
+    """Una cartera sin views (INVIU, o sólo futuros con H7) no rompe el escenario."""
+    from core.models import blacklitterman as bl, momentum, montecarlo, rates, targets
+    antes = targets.analizar, momentum.analizar, bl.analizar, rates.risk_free_para
+    try:
+        targets.analizar = lambda p: {"por_activo": []}
+        momentum.analizar = lambda p: {"por_activo": []}
+        bl.analizar = lambda *a, **k: {"equilibrio_pct": {"AAA": 8.0}, "views_aplicadas": []}
+        rates.risk_free_para = lambda *a, **k: (0.04, "fija")
+        assert casi(montecarlo.ajustes_analistas([])["deriva"]["AAA"], 0.08, 1e-9)
+    finally:
+        targets.analizar, momentum.analizar, bl.analizar, rates.risk_free_para = antes

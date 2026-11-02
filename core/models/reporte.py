@@ -21,6 +21,8 @@ matplotlib.use("Agg")                       # sin ventana: corre en un servidor
 import matplotlib.pyplot as plt             # noqa: E402
 from matplotlib.backends.backend_pdf import PdfPages  # noqa: E402
 
+from core import mercado  # noqa: E402
+
 TINTA = "#16202A"
 SUAVE = "#6B7A86"
 LINEA = "#D2DAE0"
@@ -281,7 +283,8 @@ def _pagina_cuanto_baja(pdf, nombre, riesgo):
              fontsize=8, color=TINTA, va="top", linespacing=1.5)
 
     fig.text(0.06, 0.065,
-             f"Para especialistas: VaR 95 % {_pct(-var, 2)} y CVaR 95 % {_pct(-cvar, 2)} "
+             f"Para especialistas{' (sobre lo invertido en bolsa, sin FCI)' if mercado.LAB.get() else ''}: "
+             f"VaR 95 % {_pct(-var, 2)} y CVaR 95 % {_pct(-cvar, 2)} "
              f"(simulación histórica filtrada, de un día)\nvolatilidad anual "
              f"{_pct(riesgo['volatilidad_anual_pct'])} · Sharpe {_num(riesgo['sharpe'], 2)} · "
              f"Sortino {_num(riesgo['sortino'], 2)} · {riesgo['n_ruedas']} ruedas.",
