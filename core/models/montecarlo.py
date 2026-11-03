@@ -271,11 +271,10 @@ def _serie_larga(ticker, source):
     propia = retorno_total(sources.precios_base(ticker, source=source), ticker, source)
     if symbols.is_bond(ticker, source):
         return propia, propia, None
-    base = symbols.base_symbol(ticker)
+    base = symbols.eeuu(ticker)
     larga, origen = None, None
     try:
         if base != symbols.strip_ba(ticker) or symbols.es_cedear(ticker):  # CEDEAR → subyacente
-            base = symbols.CEDEAR_EEUU.get(base, base)
             larga, origen = retorno_total(sources.precios_base(base), base), base
         elif symbols.ticker_currency(ticker) == "ARS":          # acción local
             crudo = sources.precios(ticker, source=source)["Close"].dropna()
@@ -293,7 +292,7 @@ def _pais_y_mercado(ticker, source):
     para medirla contra SPY)."""
     from core.data import sources, symbols
     from core.models import composicion
-    base = sources.base_symbol(ticker)
+    base = symbols.eeuu(ticker)
     if base in _PAIS_POR_INGRESOS:
         return _PAIS_POR_INGRESOS[base], None
     tipo, ficha = composicion._clasificar_tipo(ticker, base, source)

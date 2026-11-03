@@ -4,7 +4,7 @@ from flask import Blueprint, Response, jsonify, request, send_file
 
 from api import jobs, sim
 from core.broker import cocos, inviu, sesion, vault
-from core.data import cache, connectors, fmp, mep, noticias, sources
+from core.data import cache, connectors, fmp, mep, noticias, sources, symbols
 from core.io import csv_native, store
 from core.models import comparacion
 
@@ -80,7 +80,7 @@ def validar(ticker):
         "moneda": moneda,
         "convertible": moneda in ("ARS", "USD", "EUR"),
         "es_bono": sources.is_bond(ticker),
-        "subyacente": sources.base_symbol(ticker),
+        "subyacente": symbols.eeuu(ticker),
         "ruedas": len(serie),
         "desde": str(serie.index[0].date()), "hasta": str(serie.index[-1].date()),
         "ultimo_usd": round(float(serie.iloc[-1]), 4),

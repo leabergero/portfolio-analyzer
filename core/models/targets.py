@@ -47,7 +47,7 @@ def underlying_candidates(ticker: str) -> list:
 
     Misma lógica que hace que el ETF del Dow sea DIA y no "DOW" (Dow Inc.).
     """
-    from core.data.symbols import base_symbol, strip_ba
+    from core.data.symbols import eeuu, strip_ba
 
     t = ticker.upper().strip()
     candidatos = [t]
@@ -56,7 +56,7 @@ def underlying_candidates(ticker: str) -> list:
         candidatos.append(ADR_MAP[t])
 
     if t.endswith(".BA"):
-        base = base_symbol(t)          # ya sin la D de moneda, si la tenía
+        base = eeuu(t)                 # ya sin la D de moneda, si la tenía
         sym = strip_ba(t)              # tal cual figura en BYMA
         candidatos.append(base)        # el subyacente real: prioridad
         if sym != base:

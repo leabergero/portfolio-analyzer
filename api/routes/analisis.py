@@ -14,7 +14,7 @@ Dos formas de pedir lo mismo, según haga falta:
 from flask import Blueprint, jsonify, request
 
 from api import jobs, sim
-from core.data import bonistas
+from core.data import bonistas, finviz
 from core.data.symbols import is_bond
 from core.io import store
 from core.models import (blacklitterman, bonds, capm, composicion, hrp, markowitz,
@@ -187,6 +187,12 @@ def mk(nombre):
     cap = request.args.get("cap", type=float)
     return _simple(nombre, markowitz.optimizar,
                    request.args.get("benchmark"), cap, _lab())
+
+
+@bp.get("/finviz/<nombre>")
+def finviz_ep(nombre):
+    """Earnings e insiders de cada subyacente en cartera."""
+    return _simple(nombre, finviz.analizar)
 
 
 @bp.get("/hrp/<nombre>")

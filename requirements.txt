@@ -8,6 +8,7 @@ requests>=2.31.0
 
 # Fuentes de mercado
 yfinance>=0.2.40
+finvizfinance>=1.5.0                                 # earnings e insiders del subyacente
 pycocos                                              # bonos, ONs, letras
 pyobd @ git+https://github.com/franco-lamas/PyOBD.git  # BYMA histórico
 playwright>=1.40                                     # InvIU: login exige reCAPTCHA real, no hay API pura

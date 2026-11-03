@@ -169,6 +169,9 @@ const sesionInviu = {
   tirar: () => { try { localStorage.removeItem(SOBRE_INVIU); } catch { /* nada que hacer */ } },
 };
 
+// `?lab=1`: earnings e insiders de Finviz, en prueba.
+const LAB = new URLSearchParams(location.search).get("lab");
+
 const api = async (ruta, opciones) => {
   const o = { ...(opciones || {}) };
   const guardado = sesion.leer();
@@ -447,11 +450,11 @@ const usarColapsable = (id, porDefecto = true) => {
    `id` (ver `usarColapsable`). `extra` es contenido del título que no debe
    disparar el toggle —un botón de descarga, por ejemplo— así que se le corta
    la propagación del clic aparte. */
-function Plegable({ id, titulo, extra, porDefecto = true, children }) {
+function Plegable({ id, titulo, junto, extra, porDefecto = true, clase = "", alTocar, children }) {
   const [abierto, alternar] = usarColapsable(id, porDefecto);
   return (
-    <div className="panel">
-      <h3 style={{ display: "flex", alignItems: "center", gap: 8 }}>
+    <div className={"panel " + clase} onClick={alTocar}>
+      <h3 style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
         <span onClick={alternar} role="button" tabIndex={0}
               style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: 8,
                        userSelect: "none" }}
@@ -460,6 +463,7 @@ function Plegable({ id, titulo, extra, porDefecto = true, children }) {
                          transform: abierto ? "rotate(90deg)" : "rotate(0deg)" }}>▸</span>
           {titulo}
         </span>
+        {junto && <span style={{ display: "flex", gap: 8, marginLeft: 8 }}>{junto}</span>}
         {extra && <span style={{ marginLeft: "auto" }} onClick={(e) => e.stopPropagation()}>
           {extra}
         </span>}
@@ -1422,11 +1426,10 @@ const BENCHMARKS = [["SP500", "S&P 500"], ["MERVAL", "Merval"], ["STOXX600", "ST
    la compra entra sin ganancia ni pérdida y lo único que mueve son los pesos,
    que es la pregunta. Vender descuenta de lo que ya tenés, del lote más viejo
    al más nuevo; no realiza resultado, porque no vendiste nada. */
-function Simulador({ cartera, sim, setSim, tenencias }) {
+function Simulador({ cartera, sim, setSim, tenencias, abierto, setAbierto }) {
   const [f, setF] = useState({ ticker: "", qty: "" });
   const [check, setCheck] = useState(null);
   const [msg, setMsg] = useState(null);
-  const [abierto, setAbierto] = useState(false);
 
   const tk = f.ticker.trim().toUpperCase();
   const tiene = tenencias[tk] || 0;
@@ -1458,9 +1461,7 @@ function Simulador({ cartera, sim, setSim, tenencias }) {
 
   const quitar = (x) => setSim(sim.filter((s2) => s2.ticker !== x.ticker));
 
-  if (!abierto && !sim.length) return (
-    <button className="lab-neon" style={{ marginBottom: 10 }} onClick={() => setAbierto(true)}>
-      {t("Simular operación", "Simulate a trade")}</button>);
+  if (!abierto && !sim.length) return null;
 
   return (
     <div className="panel lab-sim" style={{ marginBottom: 12 }}>
@@ -1830,14 +1831,13 @@ function Panel({ tab, R, M, cartera, bench, recargar, lanzar, sim, setSim }) {
 }
 
 /* ── Posición ── */
-function AltaRapida({ cartera, recargar, lanzar }) {
+function AltaRapida({ cartera, recargar, lanzar, abierto, setAbierto }) {
   const vacio = { ticker: "", fecha: new Date().toISOString().slice(0, 10),
                   precio: "", qty: "", commissions: "0", source: "", currency: "" };
   const [tipo, setTipo] = useState("compra");
   const [f, setF] = useState(vacio);
   const [check, setCheck] = useState(null);
   const [msg, setMsg] = useState(null);
-  const [abierto, setAbierto] = useState(false);
 
   const validar = async () => {
     const tk = f.ticker.trim().toUpperCase();
@@ -1877,9 +1877,7 @@ function AltaRapida({ cartera, recargar, lanzar }) {
     lanzar && lanzar(true);
   };
 
-  if (!abierto) return (
-    <button className="btn" style={{ marginBottom: 14 }}
-            onClick={() => setAbierto(true)}>+ {t("Agregar una posición", "Add a position")}</button>);
+  if (!abierto) return null;
 
   return (
     <div className="panel" style={{ marginBottom: 14 }}>
@@ -2095,6 +2093,8 @@ function abrirReporte(nombre) {
 
 function Posicion({ d, cartera, recargar, lanzar, extras, bench, sim, setSim }) {
   const filas = d.posiciones || [];
+  const [altaAbierta, setAltaAbierta] = useState(false);
+  const [simAbierto, setSimAbierto] = useState(false);
   const [crudo, setCrudo] = useState(null);
   const r = extras?.riesgo;
   // Correlaciones y evolución vienen con el lote de modelos, no de un pedido
@@ -2252,7 +2252,12 @@ function Posicion({ d, cartera, recargar, lanzar, extras, bench, sim, setSim }) 
       )}
       {real?.n > 0 && <CalendarioRealizado real={real} />}
 
-      <Plegable id={`tenencias-${cartera}`} titulo={t("Tenencias", "Holdings")} extra={
+      <Plegable id={`tenencias-${cartera}`} titulo={t("Tenencias", "Holdings")} junto={<>
+        <button className="btn" style={{ fontSize: 12.5 }} onClick={() => setAltaAbierta((x) => !x)}>
+          + {t("Agregar una posición", "Add a position")}</button>
+        <button className="lab-neon" style={{ fontSize: 12.5 }} onClick={() => setSimAbierto((x) => !x)}>
+          {t("Simular operación", "Simulate a trade")}</button>
+      </>} extra={
         <button className="btn" style={{ fontSize: 12.5 }}
                 onClick={() => abrirReporte(d.cartera_nombre || "")}>{t("Descargar PDF", "Download PDF")}</button>
       }>
@@ -2340,10 +2345,12 @@ function Posicion({ d, cartera, recargar, lanzar, extras, bench, sim, setSim }) 
 
       {esDeInviu && <FlujoBonos cartera={cartera} />}
 
-      {/* Cargar y simular van juntos y acá: debajo de lo que tenés —que es
+      {/* Los abre el título de Tenencias. Aparecen debajo de lo que tenés —que es
           contra lo que se agrega o se simula— y antes de lo que ya cerraste. */}
-      <AltaRapida cartera={cartera} recargar={recargar} lanzar={lanzar} />
+      <AltaRapida cartera={cartera} recargar={recargar} lanzar={lanzar}
+                  abierto={altaAbierta} setAbierto={setAltaAbierta} />
       <Simulador cartera={cartera} sim={sim} setSim={setSim}
+                 abierto={simAbierto} setAbierto={setSimAbierto}
                  tenencias={filas.reduce(
                    (a, f) => ({ ...a, [f.ticker]: (a[f.ticker] || 0) + f.qty }), {})} />
 
@@ -2352,6 +2359,7 @@ function Posicion({ d, cartera, recargar, lanzar, extras, bench, sim, setSim }) 
                              setConFci={(v) => { setConFci(v); guardarPref(v); }} />}
 
       {ev && <RuedasTicker ev={ev} />}
+      {LAB && <PanelesFinviz cartera={cartera} />}
 
       {/* 3 · En qué está invertida */}
       <Seccion titulo={t("En qué está invertida", "What it's invested in")} />
@@ -4277,7 +4285,6 @@ function TirVentana({ ev }) {
 
 /* DAT-03 · una fila por ticker, una columna por rueda. */
 function RuedasTicker({ ev }) {
-  const [abierto, setAbierto] = useState(true);
   const c = colores();
   if (!ev || ev.error || !ev.ruedas?.tickers?.length) return null;
   const { fechas, tickers } = ev.ruedas;
@@ -4290,14 +4297,8 @@ function RuedasTicker({ ev }) {
     return `color-mix(in srgb, ${v > 0 ? c.positivo : c.negativo} ${m.toFixed(0)}%, var(--panel-2))`;
   };
   return (
-    <div className="panel">
-      <h3>{t(`Las últimas ${fechas.length} ruedas, ticker por ticker`,
-             `The last ${fechas.length} sessions, ticker by ticker`)}
-        <button className="btn" style={{ marginLeft: "auto" }}
-                onClick={() => setAbierto((x) => !x)}>
-          {abierto ? t("Ocultar", "Hide") : t("Mostrar", "Show")}</button>
-      </h3>
-      {abierto && (<>
+    <Plegable id="ruedas-ticker" titulo={t(`Las últimas ${fechas.length} ruedas, ticker por ticker`,
+                                                `The last ${fechas.length} sessions, ticker by ticker`)}>
         <div className="lab-ruedas">
           {tickers.map((t) => (
             <React.Fragment key={t.ticker}>
@@ -4326,9 +4327,203 @@ function RuedasTicker({ ev }) {
                `Last column: cumulative over the last ${fechas.length} sessions.`)}
           </span>
         </div>
-      </>)}
-    </div>
+    </Plegable>
   );
+}
+
+/* Earnings e insiders del subyacente, desde Finviz. En prueba: sólo con ?lab=1. */
+const ETIQUETA_INSIDER = {
+  Buy: () => t("Compra", "Buy"), Sale: () => t("Venta", "Sale"),
+  "Proposed Sale": () => t("Venta propuesta", "Proposed sale"),
+  "Option Exercise": () => t("Ejercicio de opción", "Option exercise"),
+};
+
+// Como en Tenencias: el logo sale del ticker en cartera, el texto es el subyacente.
+const PapelFinviz = ({ a, nueva, ops }) => (
+  <td className="mono textochip" style={{ whiteSpace: "nowrap" }} title={a.empresa}>
+    {a.subyacente}<LogoTicker ticker={a.tickers[0]} />
+    {ops > 0 && <span className="n-compras" style={{ marginLeft: 8 }}>{ops} {t("op.", "tr.")}</span>}
+    {nueva && <i className="novedad-punto" title={t("Novedad", "New")} />}</td>);
+
+// Qué apareció desde la última vez que tocaste el panel, por subyacente. Lo guarda
+// cada navegador; lo que no conoce arranca mirando sólo la última semana.
+function usarNovedades(panel, cartera, filas, valorDe) {
+  const clave = `pa-finviz-visto-${panel}-${cartera}`;
+  const leer = () => { try { return JSON.parse(localStorage.getItem(clave)) || {}; } catch { return {}; } };
+  const [visto, setVisto] = useState(leer);
+  useEffect(() => setVisto(leer()), [clave]);
+  const base = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
+  const nuevos = new Set(filas.filter((a) => {
+    const v = valorDe(a);
+    return v && v > (visto[a.subyacente] || base);
+  }).map((a) => a.subyacente));
+  const marcar = () => {
+    if (!nuevos.size) return;
+    const hoyVisto = { ...visto };
+    filas.forEach((a) => { if (valorDe(a)) hoyVisto[a.subyacente] = valorDe(a); });
+    try { localStorage.setItem(clave, JSON.stringify(hoyVisto)); } catch { /* sigue sin recordarlo */ }
+    setVisto(hoyVisto);
+  };
+  return [nuevos, marcar];
+}
+const fechaFinviz = (f) => (f ? f.slice(2).split("-").reverse().join("/") : "—");
+// De la más nueva a la más vieja; lo que no tiene fecha, al final.
+const porFechaDesc = (fecha) => (a, b) => (fecha(b) || "").localeCompare(fecha(a) || "");
+
+function detalleEvento(e) {
+  if (e.tipo === "dividendo") return e.monto != null ? t(`${usd(e.monto)} por acción`, `${usd(e.monto)} per share`) : t("Monto sin publicar", "Amount not published");
+  if (e.tipo === "analista") return [e.firma, e.rating, e.objetivo && t(`objetivo ${e.objetivo}`, `target ${e.objetivo}`)].filter(Boolean).join(" · ");
+  const ventas = (x) => (x == null ? null : `${usd(x, 0)} M`);
+  return e.eps != null
+    ? t(`EPS ${usd(e.eps)} contra ${usd(e.eps_esperado)} esperado · ventas ${ventas(e.ventas_m) ?? "—"} contra ${ventas(e.ventas_esperado_m) ?? "—"}`,
+        `EPS ${usd(e.eps)} vs ${usd(e.eps_esperado)} expected · sales ${ventas(e.ventas_m) ?? "—"} vs ${ventas(e.ventas_esperado_m) ?? "—"}`)
+    : t(`Esperan EPS ${usd(e.eps_esperado)} · ventas ${ventas(e.ventas_esperado_m) ?? "—"}`,
+        `Expected EPS ${usd(e.eps_esperado)} · sales ${ventas(e.ventas_esperado_m) ?? "—"}`);
+}
+
+function FinvizCalendario({ activos }) {
+  const hoy = new Date().toISOString().slice(0, 10);
+  const nombre = (e) => ({
+    balance: e.fecha > hoy ? t("Próximo balance", "Next report") : t("Balance", "Report"),
+    dividendo: e.fecha > hoy ? t("Próximo ex-dividendo", "Next ex-dividend") : t("Ex-dividendo", "Ex-dividend"),
+    analista: { Upgrade: t("Suba de analista", "Analyst upgrade"), Downgrade: t("Baja de analista", "Analyst downgrade"),
+                Initiated: t("Inicio de cobertura", "Coverage initiated"), Resumed: t("Retoma cobertura", "Coverage resumed") }[e.accion],
+  }[e.tipo]);
+  const color = (e) => (e.accion === "Upgrade" ? "pos" : e.accion === "Downgrade" ? "neg" : undefined);
+  const filas = activos.flatMap((a) => a.eventos.map((e) => ({ a, e }))).sort(porFechaDesc((x) => x.e.fecha));
+  if (!filas.length) return null;
+  return (
+    <Plegable id="finviz-calendario" titulo={t("Calendario", "Calendar")}>
+      <div className="tabla-wrap"><table className="tenencias">
+        <thead><tr>
+          <th>{t("Fecha", "Date")}</th><th>Ticker</th><th>{t("Evento", "Event")}</th><th>{t("Detalle", "Detail")}</th>
+        </tr></thead>
+        <tbody>{filas.map(({ a, e }, k) => (
+          <tr key={k}>
+            <td className="mono" style={{ whiteSpace: "nowrap" }}>{fechaFinviz(e.fecha)}</td>
+            <PapelFinviz a={a} />
+            <td className={color(e)} style={{ whiteSpace: "nowrap" }}>{nombre(e)}</td>
+            <td>{detalleEvento(e)}</td>
+          </tr>))}</tbody>
+      </table></div>
+      <div className="pie">{t("Lo que viene y lo de los últimos 3 meses de cada subyacente, de lo más nuevo a lo más viejo. De los analistas, sólo suba, baja e inicio de cobertura. El dividendo es del subyacente en EE.UU., por acción de él y no por CEDEAR.",
+                              "What's coming and the last 3 months for each underlying, newest first. From analysts, only upgrades, downgrades and coverage starts. The dividend belongs to the US underlying, per share of it and not per CEDEAR.")}</div>
+    </Plegable>
+  );
+}
+
+function FinvizEarnings({ activos, cartera }) {
+  const filas = activos.filter((a) => a.earnings).sort(porFechaDesc((a) => a.earnings.fecha));
+  // Un balance que todavía no salió no es novedad.
+  const hoy = new Date().toISOString().slice(0, 10);
+  const [nuevos, marcar] = usarNovedades("earnings", cartera, filas,
+                                         (a) => (a.earnings.fecha <= hoy ? a.earnings.fecha : null));
+  if (!filas.length) return null;
+  return (
+    <Plegable id="finviz-earnings" titulo={"Earnings"} clase={nuevos.size ? "novedad" : ""} alTocar={marcar}>
+        <div className="tabla-wrap"><table className="tenencias">
+          <thead><tr>
+            <th>Ticker</th><th>{t("Balance", "Report")}</th>
+            <th className="n">{t("EPS 12 m", "EPS TTM")}</th><th className="n">{t("EPS próx. trim.", "EPS next Q")}</th>
+            <th className="n">{t("Sorpresa EPS", "EPS surprise")}</th><th className="n">{t("Sorpresa ventas", "Sales surprise")}</th>
+            <th className="n">EPS Q/Q</th><th className="n">{t("Ventas Q/Q", "Sales Q/Q")}</th>
+            <th className="n">P/E</th><th className="n">{t("P/E futuro", "Forward P/E")}</th>
+          </tr></thead>
+          <tbody>{filas.map((a) => {
+            const e = a.earnings;
+            return (
+              <tr key={a.subyacente}>
+                <PapelFinviz a={a} nueva={nuevos.has(a.subyacente)} />
+                <td className="mono" style={{ whiteSpace: "nowrap" }}>{fechaFinviz(e.fecha)}</td>
+                <td className="n">{usd(e.eps_12m)}</td><td className="n">{usd(e.eps_prox_q)}</td>
+                <td className={"n " + signo(e.sorpresa_eps)}>{pct(e.sorpresa_eps, 1)}</td>
+                <td className={"n " + signo(e.sorpresa_ventas)}>{pct(e.sorpresa_ventas, 1)}</td>
+                <td className={"n " + signo(e.eps_qq)}>{pct(e.eps_qq, 1)}</td>
+                <td className={"n " + signo(e.ventas_qq)}>{pct(e.ventas_qq, 1)}</td>
+                <td className="n">{num(e.pe, 1)}</td><td className="n">{num(e.pe_futuro, 1)}</td>
+              </tr>);
+          })}</tbody>
+        </table></div>
+        <div className="pie">{t("Son de la empresa en EE.UU., por acción de ella y no por CEDEAR. Sorpresa: lo publicado contra lo que esperaban los analistas en el último balance.",
+                                "They belong to the US company, per share of it and not per CEDEAR. Surprise: reported against what analysts expected in the latest report.")}</div>
+    </Plegable>
+  );
+}
+
+function FinvizInsiders({ activos, cartera }) {
+  const [fila, setFila] = useState(null);
+  const filas = activos.filter((a) => a.insiders).sort(porFechaDesc((a) => a.insiders.ultimo));
+  const [nuevos, marcar] = usarNovedades("insiders", cartera, filas, (a) => a.insiders.ult_presentado);
+  if (!filas.length) return null;
+  return (
+    <Plegable id="finviz-insiders" titulo={"Insiders"} clase={nuevos.size ? "novedad" : ""} alTocar={marcar}>
+        <div className="tabla-wrap"><table className="tenencias">
+          <thead><tr>
+            <th>Ticker</th><th className="n">{t("En manos de insiders", "Held by insiders")}</th>
+            <th className="n" title={t("El que publica Finviz, sobre su propia ventana de 6 meses.", "As published by Finviz, over its own 6-month window.")}>{t("Cambio 6 m", "6 m change")}</th>
+            <th className="n">{t("Compras 3 m", "Buys 3 m")}</th>
+            <th className="n">{t("Ventas 3 m", "Sales 3 m")}</th><th className="n">{t("Neto 3 m", "Net 3 m")}</th>
+            <th className="n">{t("Último movimiento", "Latest move")}</th>
+          </tr></thead>
+          <tbody>{filas.map((a) => {
+            const i = a.insiders, sel = fila === a.subyacente;
+            return (
+              <React.Fragment key={a.subyacente}>
+                <tr onClick={() => i.filas.length && setFila(sel ? null : a.subyacente)}
+                    style={{ cursor: i.filas.length ? "pointer" : "default" }}>
+                  <PapelFinviz a={a} nueva={nuevos.has(a.subyacente)} ops={i.filas.length} />
+                  <td className="n">{pct(i.propio_pct)}</td>
+                  <td className={"n " + signo(i.cambio_pct)}>{pct(i.cambio_pct)}</td>
+                  <td className="n">{usd(i.compras_usd, 0)}</td><td className="n">{usd(i.ventas_usd, 0)}</td>
+                  <td className={"n " + signo(i.neto_usd)}>{usd(i.neto_usd, 0)}</td>
+                  <td className="n">{fechaFinviz(i.ultimo)}</td>
+                </tr>
+                {sel && <tr><td colSpan={7} style={{ padding: 0 }}>
+                  <div className="tabla-wrap" style={{ border: 0, margin: 0 }}><table className="tenencias">
+                    <thead><tr>
+                      <th>{t("Fecha", "Date")}</th><th>{t("Quién", "Who")}</th><th>{t("Puesto", "Position")}</th>
+                      <th>{t("Operación", "Transaction")}</th><th className="n">{t("Precio", "Price")}</th>
+                      <th className="n">{t("Acciones", "Shares")}</th><th className="n">{t("Valor", "Value")}</th>
+                      <th className="n">{t("Le quedan", "Holds after")}</th><th>SEC</th>
+                    </tr></thead>
+                    <tbody>{i.filas.map((f, k) => (
+                      // Lo que no entra en la suma va apagado.
+                      <tr key={k} className={f.tipo === "Buy" || f.tipo === "Sale" ? undefined : "lote-hijo"}>
+                        <td className="mono" style={{ whiteSpace: "nowrap" }}>{fechaFinviz(f.fecha)}</td><td>{f.nombre}</td><td>{f.cargo}</td>
+                        <td className={f.tipo === "Buy" ? "pos" : f.tipo === "Sale" ? "neg" : undefined}>{ETIQUETA_INSIDER[f.tipo]?.() || f.tipo}</td>
+                        <td className="n">{usd(f.precio)}</td>
+                        <td className="n">{f.acciones == null ? "—" : Math.round(f.acciones).toLocaleString(IDIOMA === "en" ? "en-US" : "es-AR")}</td>
+                        <td className="n">{usd(f.valor_usd, 0)}</td>
+                        <td className="n">{f.tenencia == null ? "—" : Math.round(f.tenencia).toLocaleString(IDIOMA === "en" ? "en-US" : "es-AR")}</td>
+                        <td>{f.link ? <a href={f.link} target="_blank" rel="noopener noreferrer">{t("Ver", "View")}</a> : "—"}</td>
+                      </tr>))}</tbody>
+                  </table></div>
+                </td></tr>}
+              </React.Fragment>);
+          })}</tbody>
+        </table></div>
+        <div className="pie">{t("Tocá un ticker para ver sus operaciones de los últimos 3 meses. Las compras y ventas ejecutadas son las que suman; las ventas propuestas (Form 144), que después aparecen como venta, y los ejercicios de opciones van apagados. Muchas ventas son planes programados o pago en acciones: una compra dice más que una venta.",
+                                "Tap a ticker to see its transactions from the last 3 months. Executed buys and sales are what adds up; proposed sales (Form 144), which later show up as sales, and option exercises are dimmed. Many sales are scheduled plans or stock pay: a buy says more than a sale.")}</div>
+    </Plegable>
+  );
+}
+
+function PanelesFinviz({ cartera }) {
+  const [d, setD] = useState(null);
+  useEffect(() => {
+    let vivo = true;
+    setD(null);
+    api(`/api/finviz/${encodeURIComponent(cartera)}`).then((r) => vivo && setD(r));
+    return () => { vivo = false; };
+  }, [cartera]);
+  if (!d) return <div className="panel"><div className="cargando">{t("Buscando earnings e insiders…", "Fetching earnings and insiders…")}</div></div>;
+  if (d.error) return <div className="aviso mal">{d.error}</div>;
+  return (<>
+    {d.aviso && <div className="aviso">{t(d.aviso, "Finviz did not respond: some securities are missing. It retries on the next visit.")}</div>}
+    <FinvizCalendario activos={d.activos} />
+    <FinvizEarnings activos={d.activos} cartera={cartera} />
+    <FinvizInsiders activos={d.activos} cartera={cartera} />
+  </>);
 }
 
 /* ── Composición ── */

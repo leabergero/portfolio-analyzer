@@ -28,7 +28,7 @@ Tres trampas que este módulo resuelve y que costaron tiempo descubrir:
      es la pregunta que de verdad se hace sobre renta fija.
 """
 
-from core.data import sources
+from core.data import sources, symbols
 from core.models.targets import underlying_candidates
 
 # Acciones argentinas: yfinance las cubre mal o en inglés. Tabla corta y curada.
@@ -247,7 +247,7 @@ def analizar(posiciones, precios=None) -> dict:
             continue
 
         origen = p.get("source") or None
-        base = sources.base_symbol(ticker)
+        base = symbols.eeuu(ticker)
 
         tipo = p.get("asset_type") or None
         if tipo:

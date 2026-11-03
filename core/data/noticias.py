@@ -121,12 +121,12 @@ def por_cartera(posiciones, limite: int = 25) -> dict:
     "GGAL.BA" en un titular. El nombre sale del `.info` que ya está cacheado, así
     que no cuesta consultas nuevas.
     """
-    from core.data import sources
+    from core.data import sources, symbols
 
     nombres = {}
     for p in posiciones:
         ticker = str(p["ticker"]).upper()
-        info = sources.info(sources.base_symbol(ticker))
+        info = sources.info(symbols.eeuu(ticker))
         largo = (info.get("longName") or info.get("shortName") or "").strip()
         if largo:
             # "Grupo Financiero Galicia S.A." → "Grupo Financiero Galicia"

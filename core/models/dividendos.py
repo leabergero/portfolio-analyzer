@@ -25,7 +25,7 @@ Tres cosas que no son obvias:
 from datetime import date, timedelta
 
 from core.data import cache, mep, sources
-from core.data.symbols import SOURCE_FCI, base_symbol
+from core.data.symbols import SOURCE_FCI, base_symbol, eeuu
 
 LOTE = "yfinance:dividendos"
 # Un dividendo ya cargado —a mano, desde Yahoo o desde el broker— se reconoce
@@ -75,9 +75,7 @@ def cobros(ticker: str, clase: str, desde: str = "") -> dict:
     propios = {f: v for f, v in _serie(ticker).items() if f > desde}
     if clase != "cedears":
         return propios
-    # ponytail: el subyacente es el símbolo de BYMA sin la D; un CEDEAR cuyo
-    # símbolo difiere del de EE.UU. (BRKB → BRK-B) queda sin tapar sus huecos.
-    base = base_symbol(ticker)
+    base = eeuu(ticker)
     todos = dict(propios)
     fechas = [date.fromisoformat(f) for f in propios]
     for f, monto in _serie(base).items():
@@ -339,8 +337,7 @@ def retorno_total(s, ticker: str, source: str = None):
         # escala cuando cambió el ratio (KO.BA 2019: un 16 % por trimestre).
         fuente, fuente_src = ticker, source
         if tipo(ticker, source) == "cedears":
-            from core.data.symbols import CEDEAR_EEUU
-            fuente, fuente_src = CEDEAR_EEUU.get(base_symbol(ticker), base_symbol(ticker)), None
+            fuente, fuente_src = eeuu(ticker), None
         pagos = {f: v for f, v in _serie(fuente).items() if f > desde}
         if not pagos:
             return s

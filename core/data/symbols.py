@@ -71,7 +71,8 @@ def es_cedear(ticker: str) -> bool:
 # Los CEDEARs cuyo símbolo en BYMA no es el de EE.UU. Sin entrada, el mismo.
 # ponytail: sólo los conocidos; uno que falte cae a su propia historia corta
 # (el chequeo de largo de `_serie_larga`), no a la de otro papel.
-CEDEAR_EEUU = {"BRKB": "BRK-B"}
+# GOGLD es Alphabet: GOGL en Yahoo es otra cosa (un ETF apalancado).
+CEDEAR_EEUU = {"BRKB": "BRK-B", "GOGL": "GOOGL"}
 
 
 # ── Registro de instrumentos que solo existen en Cocos ────────────────────────
@@ -217,6 +218,13 @@ def base_symbol(ticker: str) -> str:
     if not is_d_variant(sym):
         return sym
     return ON_O_TICKER.get(sym, sym[:-1])
+
+
+def eeuu(ticker: str) -> str:
+    """Con qué símbolo buscar el papel afuera: como `base_symbol`, pero en la
+    nomenclatura de EE.UU. `base_symbol` sigue siendo el nombre en BYMA y Cocos."""
+    base = base_symbol(ticker)
+    return CEDEAR_EEUU.get(base, base)
 
 
 def d_ticker(symbol: str) -> str:

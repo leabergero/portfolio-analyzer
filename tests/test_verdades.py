@@ -3830,3 +3830,83 @@ def test_backtest_una_ventana_no_declara_ganador_sin_prueba():
     assert not ok and "azar" in texto
     assert _veredicto_con_prueba(a, b, "la tuya", {"p_valor": 0.01}, 6)[1] is True
     assert "peor" in _veredicto_con_prueba(b, a, "la tuya", {"p_valor": 0.01}, 6)[0]
+
+
+def test_finviz_busca_el_subyacente_correcto():
+    """KOD es Coca-Cola y no Kodiak, GOGLD es Alphabet y no GOGL; lo argentino sin
+    ADR, los bonos y los FCI no se buscan: allá serían otra cosa."""
+    from core.data.finviz import subyacente
+    assert subyacente("KOD.BA") == "KO"
+    assert subyacente("GOGLD.BA") == "GOOGL"
+    assert subyacente("GOOGL.BA") == "GOOGL"
+    assert subyacente("YPFD.BA") == "YPF"
+    assert subyacente("METR.BA") is None
+    assert subyacente("YM37D", "cocos") is None
+    assert subyacente("COCORMA", "cocos-fci") is None
+    assert subyacente("AL30D.BA") is None
+    assert subyacente("SAP.DE") is None
+
+
+def test_finviz_fecha_de_balance_y_numeros():
+    """Finviz no da el año: el más cercano a hoy, también al cruzar diciembre."""
+    from datetime import date
+    from core.data.finviz import _balance, _num
+    assert _balance("Nov 02 AMC", date(2026, 11, 3)) == ("2026-11-02", "AMC")
+    assert _balance("Jan 28 BMO", date(2026, 12, 20)) == ("2027-01-28", "BMO")
+    assert _balance("Dec 18 AMC", date(2027, 1, 5)) == ("2026-12-18", "AMC")
+    assert _balance(None, date(2026, 11, 3)) == (None, None)
+    assert _num("-57.20%") == -57.2 and _num("-") is None
+
+
+def test_finviz_insiders_no_cuenta_dos_veces_la_venta():
+    """El Form 144 anuncia la misma venta que después es Sale, y una opción no es
+    una decisión de mercado. Tampoco entra lo anterior a 3 meses."""
+    from datetime import date
+    from core.data.finviz import _resumen_insiders
+    fila = lambda fecha, tipo, valor: {"fecha": fecha, "tipo": tipo, "valor_usd": valor}
+    r = _resumen_insiders([fila("2026-10-20", "Sale", 100.0), fila("2026-10-18", "Proposed Sale", 100.0),
+                           fila("2026-09-01", "Buy", 30.0), fila("2026-08-01", "Option Exercise", 500.0),
+                           fila("2026-07-01", "Sale", 999.0)], date(2026, 11, 3))
+    assert (r["compras_usd"], r["ventas_usd"], r["neto_usd"]) == (30.0, 100.0, -70.0)
+    assert r["ultimo"] == "2026-10-20"
+
+
+def test_gogld_es_alphabet_afuera_y_gogld_en_byma():
+    """En Yahoo GOGL es un ETF apalancado: dejaba a Alphabet sin analistas y lo
+    clasificaba como otra cosa. Para BYMA y Cocos el nombre sigue siendo GOGL."""
+    from core.data.symbols import base_symbol, eeuu
+    from core.models.targets import underlying_candidates
+    assert eeuu("GOGLD.BA") == "GOOGL" and eeuu("BRKB.BA") == "BRK-B" and eeuu("KOD.BA") == "KO"
+    assert base_symbol("GOGLD.BA") == "GOGL"
+    assert "GOGL" not in underlying_candidates("GOGLD.BA")
+
+
+def test_finviz_presentado_y_29_de_febrero():
+    """Lo nuevo se reconoce por cuándo se presentó; el año sale de la fecha de hoy,
+    aunque el 29 de febrero no exista en todos."""
+    from datetime import date
+    from core.data.finviz import _balance, _presentado
+    assert _presentado("Oct 29 06:30 PM", date(2026, 11, 3)) == "2026-10-29T18:30"
+    assert _presentado("Dec 30 04:29 PM", date(2027, 1, 2)) == "2026-12-30T16:29"
+    assert _presentado("Nov 05 08:00 AM", date(2026, 11, 3)) == "2025-11-05T08:00"
+    assert _presentado(None, date(2026, 11, 3)) is None
+    assert _balance("Feb 29 BMO", date(2028, 3, 1)) == ("2028-02-29", "BMO")
+
+
+def test_finviz_calendario_del_papel():
+    """Un balance de NVDA a las 21:30 UTC es del día en Nueva York, Reiterated no es
+    un evento y un ex-dividendo anunciado entra aunque no esté en el gráfico."""
+    from core.data.finviz import _eventos_de
+    ev = _eventos_de(
+        [{"dateTimestamp": 1794951000, "eventType": "chartEvent/earnings", "epsEstimate": 2.47, "salesEstimate": 108801.5},
+         {"dateTimestamp": 1789012800, "eventType": "chartEvent/dividends", "ordinary": 0.25, "special": 0},
+         {"dateTimestamp": 1760500800, "eventType": "chartEvent/ratings", "ratings": []}],
+        [{"date": "2026-09-10", "action": "Upgrade", "firm": "HSBC", "rating": "Hold &rarr; Buy", "priceTarget": "$320"},
+         {"date": "2026-09-11", "action": "Reiterated", "firm": "JP Morgan", "rating": "Buy"}],
+        "Dec 05, 2026")
+    assert [(e["fecha"], e["tipo"]) for e in ev] == [("2026-11-17", "balance"), ("2026-09-10", "dividendo"),
+                                                     ("2026-09-10", "analista"), ("2026-12-05", "dividendo")]
+    assert ev[0]["eps"] is None and ev[1]["monto"] == 0.25 and ev[2]["rating"] == "Hold → Buy" and ev[3]["monto"] is None
+    # El anunciado que ya está en el gráfico no se repite.
+    assert len(_eventos_de([{"dateTimestamp": 1789012800, "eventType": "chartEvent/dividends", "ordinary": 0.25}],
+                           [], "Sep 10, 2026")) == 1

@@ -471,7 +471,7 @@ def _serie_para(ticker, source, cache):
     """
     if ticker not in cache:
         cache[ticker] = retorno_total(sources.precios_base(ticker, source=source), ticker, source)
-    base = symbols.base_symbol(ticker)
+    base = symbols.eeuu(ticker)
     if base != symbols.strip_ba(ticker) and base not in cache:
         cache[base] = retorno_total(sources.precios_base(base), base)
     return cache[ticker], (cache.get(base) if base != symbols.strip_ba(ticker) else None)
@@ -510,7 +510,7 @@ def stress_test(posiciones) -> dict:
             if len(tramo) < 2 and subyacente is not None:
                 tramo = subyacente.loc[e["desde"]:e["hasta"]]
                 if len(tramo) >= 2:
-                    proxies.append(symbols.base_symbol(t))
+                    proxies.append(symbols.eeuu(t))
             if len(tramo) >= 2:
                 columnas[t] = tramo
             else:
