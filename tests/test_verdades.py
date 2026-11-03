@@ -3920,4 +3920,5 @@ def test_finviz_brutos_del_ultimo_balance_publicado():
           {"tipo": "balance", "fecha": "2026-05-20", "eps": 1.87, "eps_esperado": 1.75},
           {"tipo": "dividendo", "fecha": "2026-09-10", "monto": 0.25}]
     assert _ultimo_balance(ev)["eps"] == 2.22 and _ultimo_balance(ev)["ventas_esperado_m"] == 92271
+    assert _ultimo_balance(ev)["fecha"] == "2026-08-26"
     assert _ultimo_balance([ev[0]]) == {}

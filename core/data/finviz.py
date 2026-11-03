@@ -210,20 +210,23 @@ def _ficha(sym: str, hasta: float):
 
 
 def _ultimo_balance(eventos) -> dict:
-    """Los brutos del último balance publicado, de los que sale la sorpresa."""
+    """El último balance con resultados: su fecha y los brutos de la sorpresa."""
     publicados = [e for e in eventos if e["tipo"] == "balance" and e.get("eps") is not None]
     if not publicados:
         return {}
     e = max(publicados, key=lambda x: x["fecha"])
-    return {k: e.get(k) for k in ("eps", "eps_esperado", "ventas_m", "ventas_esperado_m")}
+    return {k: e.get(k) for k in ("fecha", "eps", "eps_esperado", "ventas_m", "ventas_esperado_m")}
 
 
 def _armar(sym, tickers, ficha, hoy: date) -> dict:
     f = ficha["fund"]
-    fecha, momento = _balance(f.get("Earnings"), hoy)
+    # Finviz pasa a dar el próximo apenas se anuncia: sólo sirve si ya ocurrió.
+    anunciado, _ = _balance(f.get("Earnings"), hoy)
+    ultimo = _ultimo_balance(ficha.get("eventos", []))
+    fecha = ultimo.get("fecha") or (anunciado if anunciado and anunciado <= hoy.isoformat() else None)
     surpr = str(f.get("EPS/Sales Surpr.") or "").split()
     earnings = {k: _num(f.get(v)) for k, v in CAMPOS.items()}
-    earnings.update(_ultimo_balance(ficha.get("eventos", [])), fecha=fecha, momento=momento,
+    earnings.update(ultimo, fecha=fecha,
                     sorpresa_eps=_num(surpr[0]) if surpr else None,
                     sorpresa_ventas=_num(surpr[1]) if len(surpr) > 1 else None)
     filas = sorted(ficha["insiders"], key=lambda x: x["fecha"] or "", reverse=True)
