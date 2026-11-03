@@ -814,14 +814,28 @@ td:has(> .editar){position:relative}
   .bv-luz { animation: none }
 }
 
-/* Lab: novedad en Earnings o Insiders. Rojo rubí, igual en claro y oscuro. */
-.panel.novedad,[data-lab="1"] .panel.novedad{border-color:#E0115F;animation:novedad-pulso 1.8s ease-in-out infinite}
+/* Novedad en Earnings o Insiders: el contorno va de rojo rubí a nada y vuelve. */
+.panel.novedad,[data-lab="1"] .panel.novedad{animation:novedad-pulso 1.4s ease-in-out infinite}
 @keyframes novedad-pulso{
-  0%,100%{box-shadow:0 0 0 0 rgba(224,17,95,.55)}
-  50%{box-shadow:0 0 0 5px rgba(224,17,95,.12)}
+  0%,100%{border-color:#E0115F;box-shadow:0 0 0 2px #E0115F}
+  50%{border-color:transparent;box-shadow:0 0 0 2px transparent}
 }
 .novedad-punto{display:inline-block;width:7px;height:7px;margin-left:6px;border-radius:50%;background:#E0115F;vertical-align:1px}
-@media (prefers-reduced-motion:reduce){.panel.novedad{animation:none;box-shadow:0 0 0 2px #E0115F}}
+@media (prefers-reduced-motion:reduce){.panel.novedad,[data-lab="1"] .panel.novedad{animation:none;border-color:#E0115F;box-shadow:0 0 0 2px #E0115F}}
+
+/* Informe PDF: el rojo se mantiene igual en claro y oscuro. */
+.btn.btn-informe,[data-lab="1"] .btn.btn-informe{background:#C8102E;border-color:#C8102E;color:#fff;font-weight:600}
+.btn.btn-informe:hover,[data-lab="1"] .btn.btn-informe:hover{background:#A50D26;border-color:#A50D26;color:#fff}
+
+/* Posiciones cerradas sin scroll: en pantalla angosta el dólar queda como aviso
+   sobre T. cambio. Medido con LEANDRO y KARIN, las de renglones más anchos. */
+@media (max-width:1250px){
+  .solo-ancho{display:none}
+  [data-lab="1"] .cerradas th,[data-lab="1"] .cerradas td{padding-left:4px;padding-right:4px}
+}
+@media (max-width:1000px){
+  [data-lab="1"] table.cerradas th,[data-lab="1"] table.cerradas td{padding-left:3px;padding-right:3px}
+}
 </style>
 </head>
 <body>

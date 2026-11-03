@@ -3910,3 +3910,14 @@ def test_finviz_calendario_del_papel():
     # El anunciado que ya está en el gráfico no se repite.
     assert len(_eventos_de([{"dateTimestamp": 1789012800, "eventType": "chartEvent/dividends", "ordinary": 0.25}],
                            [], "Sep 10, 2026")) == 1
+
+
+def test_finviz_brutos_del_ultimo_balance_publicado():
+    """Un balance que todavía no salió no tiene real: los brutos son del anterior."""
+    from core.data.finviz import _ultimo_balance
+    ev = [{"tipo": "balance", "fecha": "2026-11-17", "eps": None, "eps_esperado": 2.47},
+          {"tipo": "balance", "fecha": "2026-08-26", "eps": 2.22, "eps_esperado": 2.09, "ventas_m": 96221, "ventas_esperado_m": 92271},
+          {"tipo": "balance", "fecha": "2026-05-20", "eps": 1.87, "eps_esperado": 1.75},
+          {"tipo": "dividendo", "fecha": "2026-09-10", "monto": 0.25}]
+    assert _ultimo_balance(ev)["eps"] == 2.22 and _ultimo_balance(ev)["ventas_esperado_m"] == 92271
+    assert _ultimo_balance([ev[0]]) == {}

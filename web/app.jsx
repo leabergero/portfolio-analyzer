@@ -169,9 +169,6 @@ const sesionInviu = {
   tirar: () => { try { localStorage.removeItem(SOBRE_INVIU); } catch { /* nada que hacer */ } },
 };
 
-// `?lab=1`: earnings e insiders de Finviz, en prueba.
-const LAB = new URLSearchParams(location.search).get("lab");
-
 const api = async (ruta, opciones) => {
   const o = { ...(opciones || {}) };
   const guardado = sesion.leer();
@@ -2091,6 +2088,8 @@ function abrirReporte(nombre) {
   });
 }
 
+const ACCION_TENENCIAS = { fontSize: 11.5, padding: "3px 10px", minHeight: 27 };
+
 function Posicion({ d, cartera, recargar, lanzar, extras, bench, sim, setSim }) {
   const filas = d.posiciones || [];
   const [altaAbierta, setAltaAbierta] = useState(false);
@@ -2253,13 +2252,13 @@ function Posicion({ d, cartera, recargar, lanzar, extras, bench, sim, setSim }) 
       {real?.n > 0 && <CalendarioRealizado real={real} />}
 
       <Plegable id={`tenencias-${cartera}`} titulo={t("Tenencias", "Holdings")} junto={<>
-        <button className="btn" style={{ fontSize: 12.5 }} onClick={() => setAltaAbierta((x) => !x)}>
+        <button className="btn" style={ACCION_TENENCIAS} onClick={() => setAltaAbierta((x) => !x)}>
           + {t("Agregar una posición", "Add a position")}</button>
-        <button className="lab-neon" style={{ fontSize: 12.5 }} onClick={() => setSimAbierto((x) => !x)}>
+        <button className="lab-neon" style={ACCION_TENENCIAS} onClick={() => setSimAbierto((x) => !x)}>
           {t("Simular operación", "Simulate a trade")}</button>
       </>} extra={
-        <button className="btn" style={{ fontSize: 12.5 }}
-                onClick={() => abrirReporte(d.cartera_nombre || "")}>{t("Descargar PDF", "Download PDF")}</button>
+        <button className="btn btn-informe" style={{ fontSize: 12.5 }}
+                onClick={() => abrirReporte(d.cartera_nombre || "")}>{t("Informe PDF", "PDF report")}</button>
       }>
         <div className="tabla-wrap"><table className="tenencias">
           <thead><tr>
@@ -2359,7 +2358,7 @@ function Posicion({ d, cartera, recargar, lanzar, extras, bench, sim, setSim }) 
                              setConFci={(v) => { setConFci(v); guardarPref(v); }} />}
 
       {ev && <RuedasTicker ev={ev} />}
-      {LAB && <PanelesFinviz cartera={cartera} />}
+      <PanelesFinviz cartera={cartera} />
 
       {/* 3 · En qué está invertida */}
       <Seccion titulo={t("En qué está invertida", "What it's invested in")} />
@@ -2832,7 +2831,7 @@ function PnlRealizado({ real, cartera, recargar, fciTrades, hayFci, conFci, setC
                              fontSize: 12, color: "var(--texto-3)" }}>
                 <select value={soloTicker} onChange={(e) => setSoloTicker(e.target.value)}>
                   <option value="">{t("todos los papeles", "all stocks")}</option>
-                  {porTicker.map((x) => <option key={x.ticker} value={x.ticker}>{x.ticker}</option>)}
+                  {porTicker.map((x) => <option key={x.ticker} value={x.ticker}>{x.ticker.replace(/\.BA$/, "")}</option>)}
                 </select>
                 {soloTicker && <>{detalladas.length}{" "}
                   {t(detalladas.length === 1 ? "operación" : "operaciones", detalladas.length === 1 ? "trade" : "trades")} ·{" "}
@@ -2840,18 +2839,18 @@ function PnlRealizado({ real, cartera, recargar, fciTrades, hayFci, conFci, setC
                   {" "}<button className="chip" onClick={() => setSoloTicker("")}>{t("ver todas", "view all")}</button></>}
               </span>)}
           </div>
-          <div className="tabla-wrap"><table>
+          <div className="tabla-wrap"><table className="tenencias cerradas">
             {detalle === "fci" ? (
               <>
                 <thead><tr><th>{t("Fondo", "Fund")}</th><th>{t("Desde", "From")}</th><th>{t("Hasta", "To")}</th>
                   <th className="n">{t("Suscripto", "Subscribed")}</th><th className="n">{t("Rescatado", "Redeemed")}</th>
                   <th className="n">{t("Rescates", "Redemptions")}</th>
-                  <th className="n">{t("Resultado en dólares", "Result in dollars")}</th></tr></thead>
+                  <th className="n" title={t("Resultado en dólares", "Result in dollars")}>USD</th></tr></thead>
                 <tbody>{[...fci].sort((a, b) => b.pnl_usd - a.pnl_usd).map((tr, i) => (
                   <tr key={i}>
                     <td className="mono"><b>{tr.ticker}</b></td>
-                    <td className="mono">{tr.buy_date}</td>
-                    <td className="mono">{tr.sell_date}</td>
+                    <td className="mono" style={{ whiteSpace: "nowrap" }}>{fechaCorta(tr.buy_date)}</td>
+                    <td className="mono" style={{ whiteSpace: "nowrap" }}>{fechaCorta(tr.sell_date)}</td>
                     <td className="n">{usd(tr.buy_price)}</td>
                     <td className="n">{usd(tr.sell_price)}</td>
                     <td className="n">{tr.n_ops || "—"}</td>
@@ -2867,12 +2866,12 @@ function PnlRealizado({ real, cartera, recargar, fciTrades, hayFci, conFci, setC
             ) : detalle === "caucion" ? (
               <>
                 <thead><tr><th>{t("Lado", "Side")}</th><th>{t("Desde", "From")}</th><th>{t("Hasta", "To")}</th>
-                  <th className="n">{t("Resultado en dólares", "Result in dollars")}</th></tr></thead>
+                  <th className="n" title={t("Resultado en dólares", "Result in dollars")}>USD</th></tr></thead>
                 <tbody>{[...caucion].sort((a, b) => b.pnl_usd - a.pnl_usd).map((tr, i) => (
                   <tr key={i}>
                     <td className="mono"><b>{tr.ticker === "CAUCIONT" ? "Tomadora" : "Colocadora"}</b></td>
-                    <td className="mono">{tr.buy_date}</td>
-                    <td className="mono">{tr.sell_date}</td>
+                    <td className="mono" style={{ whiteSpace: "nowrap" }}>{fechaCorta(tr.buy_date)}</td>
+                    <td className="mono" style={{ whiteSpace: "nowrap" }}>{fechaCorta(tr.sell_date)}</td>
                     <td className={"n " + signo(tr.pnl_usd)}>{usd(tr.pnl_usd)}</td>
                   </tr>))}
                   <tr style={{ fontWeight: 700 }}>
@@ -2884,16 +2883,16 @@ function PnlRealizado({ real, cartera, recargar, fciTrades, hayFci, conFci, setC
             ) : detalle ? (
               <>
                 <thead><tr><th>Ticker</th><th>{t("Compra", "Buy")}</th><th>{t("Venta", "Sell")}</th>
-                  <th className="n">{t("Cantidad", "Quantity")}</th>
-                  <th className="n">{t("Precio compra", "Buy price")}</th><th className="n">{t("Precio venta", "Sell price")}</th>
-                  <th className="n">{t("Dólar compra → venta", "Rate buy → sell")}</th>
-                  <th className="n">{t("Resultado origen", "Result, original currency")}</th>
-                  <th className="n">{t("Resultado inversión", "Investment result")}</th>
-                  <th className="n">{t("Resultado tipo cambio", "Exchange-rate result")}</th>
-                  <th className="n">{t("Resultado USD", "Result USD")}</th></tr></thead>
+                  <th className="n">{t("Cant.", "Qty.")}</th>
+                  <th className="n">{t("P. compra", "Buy")}</th><th className="n">{t("P. venta", "Sell")}</th>
+                  <th className="n solo-ancho" title={t("Dólar MEP de la compra y de la venta", "MEP rate at buy and at sell")}>{t("Dólar", "Rate")}</th>
+                  <th className="n" title={t("Resultado en la moneda de la operación", "Result in the trade's currency")}>{t("Moneda", "Currency")}</th>
+                  <th className="n" title={t("Resultado inversión", "Investment result")}>{t("Inversión", "Investment")}</th>
+                  <th className="n" title={t("Resultado tipo de cambio", "Exchange-rate result")}>{t("T. cambio", "FX")}</th>
+                  <th className="n" title={t("Resultado en dólares", "Result in dollars")}>USD</th></tr></thead>
                 <tbody>{[...detalladas].sort((a, b) => (a.sell_date < b.sell_date ? 1 : -1)).map((tr, i) => (
                   <tr key={i}>
-                    <td className="mono">{tr.ticker}<LogoTicker ticker={tr.ticker} />{tr.tipo === "dividendo" && (tr.estimado
+                    <td className="mono" style={{ whiteSpace: "nowrap" }}>{tr.ticker.replace(/\.BA$/, "")}<LogoTicker ticker={tr.ticker} />{tr.tipo === "dividendo" && (tr.estimado
                       ? <span className="chip ojo" style={{ marginLeft: 6, minWidth: 0, whiteSpace: "nowrap" }}
                               title={t(`${tr.notes}. Corregí el importe con lo que cobraste.`,
                                        `${tr.notes}. Correct the amount with what you actually collected.`)}>
@@ -2918,17 +2917,17 @@ function PnlRealizado({ real, cartera, recargar, fciTrades, hayFci, conFci, setC
                               title={porBorrar === claveTrade(tr)
                                      ? t("Clic de nuevo para borrarla", "Click again to delete it")
                                      : t(`Borrar esta operación de ${cartera}`, `Delete this trade from ${cartera}`)}>✕</button></td>
-                    <td className="mono">{tr.buy_date}</td>
-                    <td className="mono">{tr.sell_date}</td>
-                    <td className="n">{num(tr.qty, 2)}</td>
+                    <td className="mono" style={{ whiteSpace: "nowrap" }}>{fechaCorta(tr.buy_date)}</td>
+                    <td className="mono" style={{ whiteSpace: "nowrap" }}>{fechaCorta(tr.sell_date)}</td>
+                    <td className="n">{num(tr.qty, Number.isInteger(tr.qty) ? 0 : 2)}</td>
                     <td className="n">{num(tr.buy_price, 2)}</td>
                     <td className="n">{num(tr.sell_price, 2)}</td>
                     {/* Los dos MEP arriba y la variación debajo: en una sola línea esta
                         celda medía 223 px —el doble que cualquier otra— y era la que
                         empujaba la tabla hasta necesitar scroll horizontal. */}
-                    <td className={"n " + signo(tr.pnl_fx_usd)}>
+                    <td className={"n solo-ancho " + signo(tr.pnl_fx_usd)}>
                       {tr.mep_compra && tr.mep_venta ? <>
-                        {num(tr.mep_compra, 2)} → {num(tr.mep_venta, 2)}
+                        {num(tr.mep_compra, 0)} → {num(tr.mep_venta, 0)}
                         <div style={{ fontSize: 10.5, color: "var(--texto-3)" }}>
                           {tr.mep_venta >= tr.mep_compra ? "+" : ""}
                           {num((tr.mep_venta / tr.mep_compra - 1) * 100, 1)} %
@@ -2947,7 +2946,8 @@ function PnlRealizado({ real, cartera, recargar, fciTrades, hayFci, conFci, setC
                                 onClick={() => setEditando({ clave: claveTrade(tr),
                                                              valor: String(tr.pnl_origen ?? "") })}>✎</button>)}</td>
                     <td className={"n " + signo(tr.pnl_activo_usd)}>{usd(tr.pnl_activo_usd)}</td>
-                    <td className={"n " + (tr.pnl_fx_usd ? "fx " + signo(tr.pnl_fx_usd) : "")}>
+                    <td className={"n " + (tr.pnl_fx_usd ? "fx " + signo(tr.pnl_fx_usd) : "")}
+                        title={tr.mep_compra && tr.mep_venta ? `MEP ${num(tr.mep_compra, 2)} → ${num(tr.mep_venta, 2)}` : undefined}>
                       {tr.pnl_fx_usd ? usd(tr.pnl_fx_usd) : "—"}</td>
                     <td className={"n " + signo(tr.pnl_usd)}>{usd(tr.pnl_usd)}</td>
                   </tr>))}</tbody>
@@ -2955,13 +2955,13 @@ function PnlRealizado({ real, cartera, recargar, fciTrades, hayFci, conFci, setC
             ) : (
               <>
                 <thead><tr><th>Ticker</th><th className="n">{t("Operaciones", "Trades")}</th>
-                  <th className="n">{t("Resultado en su moneda", "Result in its own currency")}</th>
-                  <th className="n">{t("Resultado inversión", "Investment result")}</th>
-                  <th className="n">{t("Resultado tipo cambio", "Exchange-rate result")}</th>
-                  <th className="n">{t("Resultado en dólares", "Result in dollars")}</th></tr></thead>
+                  <th className="n" title={t("Resultado en la moneda de la operación", "Result in the trade's currency")}>{t("Moneda", "Currency")}</th>
+                  <th className="n" title={t("Resultado inversión", "Investment result")}>{t("Inversión", "Investment")}</th>
+                  <th className="n" title={t("Resultado tipo de cambio", "Exchange-rate result")}>{t("T. cambio", "FX")}</th>
+                  <th className="n" title={t("Resultado en dólares", "Result in dollars")}>USD</th></tr></thead>
                 <tbody>{porTicker.map((x) => (
                   <tr key={x.ticker}>
-                    <td className="mono">{x.ticker}<LogoTicker ticker={x.ticker} />{x.fci &&
+                    <td className="mono" style={{ whiteSpace: "nowrap" }}>{x.ticker.replace(/\.BA$/, "")}<LogoTicker ticker={x.ticker} />{x.fci &&
                       <span className="chip" style={{ marginLeft: 6, minWidth: 0 }}>fci</span>}
                       {x.caucion &&
                       <span className="chip" style={{ marginLeft: 6, minWidth: 0 }}>caución</span>}</td>
@@ -2974,8 +2974,7 @@ function PnlRealizado({ real, cartera, recargar, fciTrades, hayFci, conFci, setC
                   </tr>))}
                   <tr style={{ fontWeight: 700 }}>
                     <td>{t("NETO", "NET")}</td><td className="n">{real.n}</td>
-                    <td className="n">{enPesos != null ? `${num(enPesos, 2)} ARS` : ""}
-                      {enDolar != null ? ` · ${num(enDolar, 2)} USD` : ""}</td>
+                    <td />
                     <td className={"n " + signo(real.total_activo_usd)}>{usd(real.total_activo_usd)}</td>
                     <td className={"n fx " + signo(real.total_fx_usd)}>{usd(real.total_fx_usd)}</td>
                     <td className={"n " + signo(real.total_usd)}>{usd(real.total_usd)}</td>
@@ -4331,7 +4330,7 @@ function RuedasTicker({ ev }) {
   );
 }
 
-/* Earnings e insiders del subyacente, desde Finviz. En prueba: sólo con ?lab=1. */
+/* Calendario, earnings e insiders del subyacente, desde Finviz. */
 const ETIQUETA_INSIDER = {
   Buy: () => t("Compra", "Buy"), Sale: () => t("Venta", "Sale"),
   "Proposed Sale": () => t("Venta propuesta", "Proposed sale"),
@@ -4366,7 +4365,7 @@ function usarNovedades(panel, cartera, filas, valorDe) {
   };
   return [nuevos, marcar];
 }
-const fechaFinviz = (f) => (f ? f.slice(2).split("-").reverse().join("/") : "—");
+const fechaCorta = (f) => (f ? f.slice(2).split("-").reverse().join("/") : "—");
 // De la más nueva a la más vieja; lo que no tiene fecha, al final.
 const porFechaDesc = (fecha) => (a, b) => (fecha(b) || "").localeCompare(fecha(a) || "");
 
@@ -4400,7 +4399,7 @@ function FinvizCalendario({ activos }) {
         </tr></thead>
         <tbody>{filas.map(({ a, e }, k) => (
           <tr key={k}>
-            <td className="mono" style={{ whiteSpace: "nowrap" }}>{fechaFinviz(e.fecha)}</td>
+            <td className="mono" style={{ whiteSpace: "nowrap" }}>{fechaCorta(e.fecha)}</td>
             <PapelFinviz a={a} />
             <td className={color(e)} style={{ whiteSpace: "nowrap" }}>{nombre(e)}</td>
             <td>{detalleEvento(e)}</td>
@@ -4424,19 +4423,23 @@ function FinvizEarnings({ activos, cartera }) {
         <div className="tabla-wrap"><table className="tenencias">
           <thead><tr>
             <th>Ticker</th><th>{t("Balance", "Report")}</th>
-            <th className="n">{t("EPS 12 m", "EPS TTM")}</th><th className="n">{t("EPS próx. trim.", "EPS next Q")}</th>
-            <th className="n">{t("Sorpresa EPS", "EPS surprise")}</th><th className="n">{t("Sorpresa ventas", "Sales surprise")}</th>
+            <th className="n">{t("EPS 12 m", "EPS TTM")}</th><th className="n" title={t("EPS que esperan los analistas para el próximo trimestre", "EPS analysts expect for the next quarter")}>{t("EPS próx. Q", "EPS next Q")}</th>
+            <th className="n" title={t("EPS real del último balance / estimado de los analistas", "Actual EPS of the latest report / analyst estimate")}>EPS / Est.</th>
+            <th className="n" title={t("Ventas del último balance contra el estimado de los analistas", "Sales of the latest report against the analyst estimate")}>{t("Δ Ventas", "Δ Sales")}</th>
             <th className="n">EPS Q/Q</th><th className="n">{t("Ventas Q/Q", "Sales Q/Q")}</th>
-            <th className="n">P/E</th><th className="n">{t("P/E futuro", "Forward P/E")}</th>
+            <th className="n">P/E</th><th className="n" title={t("P/E sobre la ganancia esperada", "P/E on expected earnings")}>{t("P/E fut.", "Fwd P/E")}</th>
           </tr></thead>
           <tbody>{filas.map((a) => {
             const e = a.earnings;
             return (
               <tr key={a.subyacente}>
                 <PapelFinviz a={a} nueva={nuevos.has(a.subyacente)} />
-                <td className="mono" style={{ whiteSpace: "nowrap" }}>{fechaFinviz(e.fecha)}</td>
+                <td className="mono" style={{ whiteSpace: "nowrap" }}>{fechaCorta(e.fecha)}</td>
                 <td className="n">{usd(e.eps_12m)}</td><td className="n">{usd(e.eps_prox_q)}</td>
-                <td className={"n " + signo(e.sorpresa_eps)}>{pct(e.sorpresa_eps, 1)}</td>
+                {/* Como se lee en la industria: el real en verde o rojo según le haya ganado a lo esperado. */}
+                <td className="n">{e.eps == null ? "—" : <>
+                  <span className={e.eps_esperado != null ? signo(e.eps - e.eps_esperado) : undefined}>{usd(e.eps)}</span>
+                  {" / "}{usd(e.eps_esperado)}</>}</td>
                 <td className={"n " + signo(e.sorpresa_ventas)}>{pct(e.sorpresa_ventas, 1)}</td>
                 <td className={"n " + signo(e.eps_qq)}>{pct(e.eps_qq, 1)}</td>
                 <td className={"n " + signo(e.ventas_qq)}>{pct(e.ventas_qq, 1)}</td>
@@ -4444,8 +4447,8 @@ function FinvizEarnings({ activos, cartera }) {
               </tr>);
           })}</tbody>
         </table></div>
-        <div className="pie">{t("Son de la empresa en EE.UU., por acción de ella y no por CEDEAR. Sorpresa: lo publicado contra lo que esperaban los analistas en el último balance.",
-                                "They belong to the US company, per share of it and not per CEDEAR. Surprise: reported against what analysts expected in the latest report.")}</div>
+        <div className="pie">{t("Son de la empresa en EE.UU., por acción de ella y no por CEDEAR. EPS / Est. y Δ Ventas: lo publicado en el último balance contra lo que estimaban los analistas.",
+                                "They belong to the US company, per share of it and not per CEDEAR. EPS / Est. and Δ Sales: reported in the latest report against the analyst estimate.")}</div>
     </Plegable>
   );
 }
@@ -4459,11 +4462,11 @@ function FinvizInsiders({ activos, cartera }) {
     <Plegable id="finviz-insiders" titulo={"Insiders"} clase={nuevos.size ? "novedad" : ""} alTocar={marcar}>
         <div className="tabla-wrap"><table className="tenencias">
           <thead><tr>
-            <th>Ticker</th><th className="n">{t("En manos de insiders", "Held by insiders")}</th>
+            <th>Ticker</th><th className="n" title={t("Porcentaje de las acciones en manos de insiders", "Share of the stock held by insiders")}>{t("% insiders", "% insiders")}</th>
             <th className="n" title={t("El que publica Finviz, sobre su propia ventana de 6 meses.", "As published by Finviz, over its own 6-month window.")}>{t("Cambio 6 m", "6 m change")}</th>
             <th className="n">{t("Compras 3 m", "Buys 3 m")}</th>
             <th className="n">{t("Ventas 3 m", "Sales 3 m")}</th><th className="n">{t("Neto 3 m", "Net 3 m")}</th>
-            <th className="n">{t("Último movimiento", "Latest move")}</th>
+            <th className="n">{t("Último mov.", "Latest")}</th>
           </tr></thead>
           <tbody>{filas.map((a) => {
             const i = a.insiders, sel = fila === a.subyacente;
@@ -4476,7 +4479,7 @@ function FinvizInsiders({ activos, cartera }) {
                   <td className={"n " + signo(i.cambio_pct)}>{pct(i.cambio_pct)}</td>
                   <td className="n">{usd(i.compras_usd, 0)}</td><td className="n">{usd(i.ventas_usd, 0)}</td>
                   <td className={"n " + signo(i.neto_usd)}>{usd(i.neto_usd, 0)}</td>
-                  <td className="n">{fechaFinviz(i.ultimo)}</td>
+                  <td className="n">{fechaCorta(i.ultimo)}</td>
                 </tr>
                 {sel && <tr><td colSpan={7} style={{ padding: 0 }}>
                   <div className="tabla-wrap" style={{ border: 0, margin: 0 }}><table className="tenencias">
@@ -4489,7 +4492,7 @@ function FinvizInsiders({ activos, cartera }) {
                     <tbody>{i.filas.map((f, k) => (
                       // Lo que no entra en la suma va apagado.
                       <tr key={k} className={f.tipo === "Buy" || f.tipo === "Sale" ? undefined : "lote-hijo"}>
-                        <td className="mono" style={{ whiteSpace: "nowrap" }}>{fechaFinviz(f.fecha)}</td><td>{f.nombre}</td><td>{f.cargo}</td>
+                        <td className="mono" style={{ whiteSpace: "nowrap" }}>{fechaCorta(f.fecha)}</td><td>{f.nombre}</td><td>{f.cargo}</td>
                         <td className={f.tipo === "Buy" ? "pos" : f.tipo === "Sale" ? "neg" : undefined}>{ETIQUETA_INSIDER[f.tipo]?.() || f.tipo}</td>
                         <td className="n">{usd(f.precio)}</td>
                         <td className="n">{f.acciones == null ? "—" : Math.round(f.acciones).toLocaleString(IDIOMA === "en" ? "en-US" : "es-AR")}</td>
