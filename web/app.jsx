@@ -169,9 +169,6 @@ const sesionInviu = {
   tirar: () => { try { localStorage.removeItem(SOBRE_INVIU); } catch { /* nada que hacer */ } },
 };
 
-// `?lab=1`: H7 de la auditoría, Black-Litterman corregido. Viaja al server.
-const LAB = new URLSearchParams(location.search).get("lab");
-
 const api = async (ruta, opciones) => {
   const o = { ...(opciones || {}) };
   const guardado = sesion.leer();
@@ -180,7 +177,6 @@ const api = async (ruta, opciones) => {
   if (guardadoInviu) o.headers = { ...(o.headers || {}), "X-Sesion-Inviu": guardadoInviu };
   if (SIM_ACTIVA) o.headers = { ...(o.headers || {}), "X-Sim": SIM_ACTIVA };
   o.headers = { ...(o.headers || {}), "X-Mercado": MERCADO };
-  if (LAB) o.headers["X-Lab"] = LAB;
 
   // Si se corta la conexión (la notebook se durmió, cambió la red) `fetch`
   // rechaza y nadie llama al setState: la pantalla quedaba en "Calculando…"
@@ -1098,11 +1094,9 @@ function senales(R) {
         titulo: t("Sobre lo que invertiste", "On what you invested"), valor: pct(ev.rendimiento_capital_pct, 1),
         frase: t(`Lo máximo que tuviste invertido a la vez fueron ${usd(ev.puesto_max_usd, 0)} y, contando lo que vale hoy, lo que vendiste y los dividendos, `
                  + `estás ${usd(Math.abs(ev.resultado_usd), 0)} ${ev.resultado_usd < 0 ? "abajo" : "arriba"}: ${pct(ev.rendimiento_capital_pct, 1)}.`
-                 + (!LAB && ev.rendimiento_con_fci_pct != null ? ` Contando los FCI, ${pct(ev.rendimiento_con_fci_pct, 1)}.` : "")
                  + (ev.rendimiento_operacion_pct != null ? ` Por cada dólar comprado (${usd(ev.comprado_usd, 0)} en total) quedó en promedio ${pct(ev.rendimiento_operacion_pct, 1)}.` : ""),
                  `The most you had invested at once was ${usd(ev.puesto_max_usd, 0)} and, counting what it's worth today, what you sold and the dividends, `
                  + `you're ${usd(Math.abs(ev.resultado_usd), 0)} ${ev.resultado_usd < 0 ? "down" : "up"}: ${pct(ev.rendimiento_capital_pct, 1)}.`
-                 + (!LAB && ev.rendimiento_con_fci_pct != null ? ` Counting the funds, ${pct(ev.rendimiento_con_fci_pct, 1)}.` : "")
                  + (ev.rendimiento_operacion_pct != null ? ` Each dollar bought (${usd(ev.comprado_usd, 0)} in total) left ${pct(ev.rendimiento_operacion_pct, 1)} on average.` : "")) } : {}),
       ...(conCapital(ev) ? {} : {
       titulo: t("Sobre lo que pusiste", "On what you put in"), valor: pct(ev.rendimiento_pct, 1),
@@ -1128,8 +1122,8 @@ function senales(R) {
     const v = Math.abs(r.var95_pct);
     add({ id: "dia", q: "perdida", nivel: v > ZONAS.limite ? "mal" : v > ZONAS.moderado ? "ojo" : "ok",
       titulo: t("Un día malo", "A bad day"), valor: usd(Math.abs(r.var95_usd), 0),
-      frase: t(`Uno de cada 20 días podés perder más de ${usd(Math.abs(r.var95_usd), 0)} (${pct(v, 1)}${LAB ? " de lo invertido" : ""}). El límite prudente es ${num(ZONAS.limite, 1)} % por día.`,
-               `One day in 20 you can lose more than ${usd(Math.abs(r.var95_usd), 0)} (${pct(v, 1)}${LAB ? " of what is invested" : ""}). The prudent limit is ${num(ZONAS.limite, 1)} % a day.`) });
+      frase: t(`Uno de cada 20 días podés perder más de ${usd(Math.abs(r.var95_usd), 0)} (${pct(v, 1)} de lo invertido). El límite prudente es ${num(ZONAS.limite, 1)} % por día.`,
+               `One day in 20 you can lose more than ${usd(Math.abs(r.var95_usd), 0)} (${pct(v, 1)} of what is invested). The prudent limit is ${num(ZONAS.limite, 1)} % a day.`) });
     const dd = Math.abs(r.max_drawdown_pct);
     add({ id: "caida", q: "perdida", nivel: dd > 40 ? "mal" : dd > 20 ? "ojo" : "ok",
       titulo: t("La peor racha", "The worst streak"), valor: "−" + pct(dd, 0),
@@ -1827,7 +1821,7 @@ function Panel({ tab, R, M, cartera, bench, recargar, lanzar, sim, setSim }) {
   // cartera para coincidir con el broker, y no se le mide riesgo ni rendimiento.
   const filasPos = ok_(R.posicion)?.posiciones || [];
   const caja = filasPos.filter((f) => f.source === "cocos-fci").reduce((s, f) => s + (f.valor_usd || 0), 0);
-  const conBase = LAB && tab !== "posicion" && caja >= 0.01 * (ok_(R.posicion)?.valor_total || Infinity);
+  const conBase = tab !== "posicion" && caja >= 0.01 * (ok_(R.posicion)?.valor_total || Infinity);
   return (<>
     {conBase && <div className="aviso">{t(`Se mide sobre lo invertido en bolsa. Los ${usd(caja, 0)} en FCI son la caja y quedan afuera.`,
                                           `Measured on what's invested in stocks. The ${usd(caja, 0)} in funds are cash and stay out.`)}</div>}
@@ -2049,7 +2043,7 @@ function FlujoBonos({ cartera }) {
 // su nombre, porque el visor de un blob: lo guardaría con un nombre al azar.
 // La pestaña no corre scripts (la CSP no deja): se dibuja desde acá.
 function abrirReporte(nombre) {
-  const url = `/api/reporte/${encodeURIComponent(nombre)}${LAB ? `?lab=${LAB}` : ""}`;
+  const url = `/api/reporte/${encodeURIComponent(nombre)}`;
   const w = window.open("", "_blank");
   if (!w) { location.href = url; return; }
   const c = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
@@ -3659,35 +3653,10 @@ function RendimientoTotal({ ev }) {
     <div className="panel" style={{ position: "relative" }}>
       <h3>{t("Rendimiento total", "Total return")}</h3>
       {conCapital(ev) ? (
-        /* El rendimiento total, con los fondos y sin ellos, uno al
-           lado del otro. Es lo ganado sobre lo máximo que hubo invertido, no una
-           tasa anual: la TIR de la cartera va en su propio panel. */
+        /* El rendimiento total sobre lo invertido, sin FCI. Es lo ganado sobre lo
+           máximo que hubo invertido, no una tasa anual: la TIR de la cartera va en
+           su propio panel. */
         <div style={{ display: "flex", gap: 36, flexWrap: "wrap", marginTop: 6 }}>
-          {!LAB && <div style={{ flex: "1 1 260px" }}>
-            <div className="pie" style={{ margin: 0 }}>{t("Desde que empezaste a invertir · con FCI", "Since you started investing · with funds")}</div>
-            {ev.rendimiento_con_fci_pct != null ? (<>
-              <div style={{ fontSize: 30, fontWeight: 700 }} className={signo(ev.resultado_con_fci_usd)}>{pct(ev.rendimiento_con_fci_pct)}</div>
-              <div style={{ fontSize: 15, marginTop: 2 }} className={signo(ev.resultado_con_fci_usd)}>
-                {ev.con_fci_aproximado
-                  ? t(`${usd(ev.resultado_con_fci_usd)} sobre ${usd(ev.puesto_max_con_fci_usd)} invertidos entre bolsa y fondos`,
-                      `${usd(ev.resultado_con_fci_usd)} on ${usd(ev.puesto_max_con_fci_usd)} invested across stocks and funds`)
-                  : t(`${usd(ev.resultado_con_fci_usd)} sobre ${usd(ev.puesto_max_con_fci_usd)}, lo máximo invertido entre bolsa y fondos`,
-                      `${usd(ev.resultado_con_fci_usd)} on ${usd(ev.puesto_max_con_fci_usd)}, the most invested across stocks and funds`)}</div>
-              {ev.con_fci_aproximado && (
-                <div className="pie" style={{ marginTop: 4 }}>
-                  {t("El resultado es exacto. La base es lo invertido hoy: para saber el máximo que hubo entre bolsa y fondos hacen falta las fechas de suscripciones y rescates, que se guardan al volver a importar los FCI desde Cocos.",
-                     "The result is exact. The base is what's invested today: knowing the most ever invested across stocks and funds needs the dates of subscriptions and redemptions, saved when the funds are imported from Cocos again.")}
-                </div>)}
-            </>) : (<>
-              <div style={{ fontSize: 30, fontWeight: 700, color: "var(--texto-3)" }}>—</div>
-              <div className="pie" style={{ marginTop: 2 }}>
-                {(ev.fci_sin_flujos || []).length > 0
-                  ? <>{t("Falta la historia de suscripciones y rescates de ", "The subscription and redemption history is missing for ")}
-                      <b>{ev.fci_sin_flujos.join(", ")}</b>
-                      {t(": se completa volviendo a importar los FCI desde Cocos.", ": it fills in by importing the funds from Cocos again.")}</>
-                  : t("Esta cartera no tiene FCI: es el mismo número de al lado.", "This portfolio has no funds: it's the same number as the one beside it.")}
-              </div></>)}
-          </div>}
           <div style={{ flex: "1 1 260px" }}>
             <div className="pie" style={{ margin: 0 }}>{t("Sólo bolsa · sin FCI", "Stocks only · without funds")}</div>
             <div style={{ fontSize: 30, fontWeight: 700 }} className={signo(ev.resultado_usd)}>{pct(ev.rendimiento_capital_pct)}</div>
@@ -6200,7 +6169,7 @@ function ObjetivosYBL({ cartera, extras, d, bench }) {
                   <td className="mono">{x.ticker}</td>
                   <td className="n">{usd(x.actual)}</td>
                   <td className="n">{x.objetivo_medio ? usd(x.objetivo_medio) : "—"}</td>
-                  {LAB && x.es_futuro
+                  {x.es_futuro
                     ? <td className="n" title={t("Sale de la curva de futuros: es tasa menos dividendos (o tasa más almacenaje), no un pronóstico. No entra en Black-Litterman.",
                                                  "From the futures curve: it is rate minus dividends (or rate plus storage), not a forecast. It is left out of Black-Litterman.")}>
                         {pct(x.upside_pct, 1)} <span style={{ color: "var(--texto-3)", fontSize: 11 }}>{t("acarreo", "carry")}</span></td>
@@ -6277,7 +6246,6 @@ function EditorView({ activo, onGuardar, onCerrar }) {
 
   const medio = (dec(bajo) + dec(alto)) / 2;
   const bruto = activo.actual ? medio / activo.actual - 1 : 0;
-  const anualizado = modo === "B2" ? Math.pow(1 + bruto, 12 / Math.max(1, meses)) - 1 : bruto;
   const anchoPct = medio > 0 ? (dec(alto) - dec(bajo)) / medio * 100 : 100;
   const confianza = Math.round(Math.max(10, Math.min(90, 90 - anchoPct)));
 
@@ -6311,12 +6279,8 @@ function EditorView({ activo, onGuardar, onCerrar }) {
         {t(`Hoy cotiza ${usd(activo.actual)}. Tu rango da un precio medio de ${usd(medio)}, o sea`,
            `Today it trades at ${usd(activo.actual)}. Your range gives an average price of ${usd(medio)}, i.e.`)}{" "}
         <b>{pct(bruto * 100, 1)}</b>
-        {modo === "B2" && (LAB
-          ? <> {t(`en ${meses} ${meses === 1 ? "mes" : "meses"}, más la tasa libre hasta completar el año`,
-                  `in ${meses} ${meses === 1 ? "month" : "months"}, plus the risk-free rate for the rest of the year`)}</>
-          : <> {t(`en ${meses} ${meses === 1 ? "mes" : "meses"}, que anualizado compuesto son`,
-                  `in ${meses} ${meses === 1 ? "month" : "months"}, which compounded annually is`)}{" "}
-            <b>{pct(anualizado * 100, 1)}</b></>)}.
+        {modo === "B2" && <> {t(`en ${meses} ${meses === 1 ? "mes" : "meses"}, más la tasa libre hasta completar el año`,
+                                 `in ${meses} ${meses === 1 ? "month" : "months"}, plus the risk-free rate for the rest of the year`)}</>}.
         {" "}{t("Confianza estimada:", "Estimated confidence:")} <b>{confianza} %</b>.
       </div>
       <div className="pie">
@@ -6330,13 +6294,8 @@ function EditorView({ activo, onGuardar, onCerrar }) {
           + `opinion. The cap is 90 % even if the range is a single cent wide — with total certainty the `
           + `model would put everything into that asset.`)}
         {modo === "B2" && <> {t("El modo", "The")} <b>{t("evento corporativo", "corporate event")}</b>{" "}
-          {LAB
-            ? t("existe para casos como una OPA: paga una vez y no se repite, así que no se anualiza.",
-                "mode exists for cases like a tender offer: it pays once and does not repeat, so it is not annualized.")
-            : t("existe para casos como una OPA: el plazo real cambia el retorno anualizado y por lo tanto "
-                + "el peso que el modelo le da.",
-                "mode exists for cases like a tender offer: the actual timeline changes the annualized return "
-                + "and therefore the weight the model gives it.")}</>}
+          {t("existe para casos como una OPA: paga una vez y no se repite, así que no se anualiza.",
+             "mode exists for cases like a tender offer: it pays once and does not repeat, so it is not annualized.")}</>}
       </div>
     </div>
   );
@@ -6878,7 +6837,7 @@ function RiesgoComparado({ M, nombres }) {
   return (
     <div className="panel">
       <h3>{t("Los días feos, lado a lado", "The ugly days, side by side")}</h3>
-      {LAB && <div className="pie" style={{ margin: "0 0 8px" }}>{t("Sobre lo invertido en bolsa de cada cartera, sin FCI.", "On what each portfolio has invested in stocks, without funds.")}</div>}
+      <div className="pie" style={{ margin: "0 0 8px" }}>{t("Sobre lo invertido en bolsa de cada cartera, sin FCI.", "On what each portfolio has invested in stocks, without funds.")}</div>
       {[["var95_pct", t("Día malo", "Bad day"), t("VaR 95 % · 1 rueda de cada 20", "VaR 95 % · 1 session out of 20")],
         ["cvar95_pct", t("Día muy malo", "Very bad day"), t("CVaR 95 % · el promedio de ese 5 % peor", "CVaR 95 % · the average of that worst 5 %")]]
         .map(([k, titulo, detalle]) => (

@@ -712,10 +712,8 @@ def evolucion(posiciones, trades=None, n_ruedas: int = 30, flujos_fci: dict = No
         futuras = px.index[px.index >= pd.Timestamp(fecha)]
         return futuras[0] if len(futuras) else None
 
-    lab = mercado.LAB.get()
-
     def por_splits(ticker, qty, desde, hasta, costo):
-        if not lab or not qty:
+        if not qty:
             return 1.0
         f = rueda(desde)
         return factor_split(ticker, hasta, costo / qty if costo else None,
@@ -746,11 +744,11 @@ def evolucion(posiciones, trades=None, n_ruedas: int = 30, flujos_fci: dict = No
     # El valor de las tenencias va sin la caja de dividendos, para que coincida
     # con el KPI "Valor total" de arriba; el resultado sí la cuenta.
     # Un lote comprado antes de que empiece la serie del papel (QQQD 2024) valía
-    # cero y la plata reaparecía como ganancia el día del primer precio. En lab
-    # vale el primer precio conocido.
+    # cero y la plata reaparecía como ganancia el día del primer precio. Vale
+    # el primer precio conocido.
     # ponytail: un lote cerrado antes de la serie toma un precio posterior; usar
     # su costo si alguna vez pesa.
-    tenencias = (cant * (px.bfill() if lab else px)).sum(axis=1)
+    tenencias = (cant * px.bfill()).sum(axis=1)
     puesto = flujo.cumsum()
     resultado = tenencias + caja - puesto
 

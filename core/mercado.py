@@ -47,11 +47,6 @@ PLAZAS = {
 # ponytail: agregar una moneda es agregar su par acá y nada más.
 PAR = {"EUR": "EURUSD=X"}
 
-# `?lab=1` del navegador (cabecera X-Lab): las correcciones de la auditoría
-# 2026-10 que todavía se están evaluando. H7: Black-Litterman con Idzorek, sin
-# futuros como opinión y con los eventos B2 sin anualizar.
-LAB = ContextVar("lab", default=False)
-
 _actual = ContextVar("mercado", default="AR")
 
 

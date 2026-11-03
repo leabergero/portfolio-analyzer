@@ -3691,14 +3691,9 @@ def test_twr_neutraliza_los_aportes():
     assert ev["resultado_usd"] < 0                  # en plata, perdió
 
 
-def _con_lab(valor=True):
-    from core import mercado
-    return mercado.LAB, mercado.LAB.set(valor)
-
-
 def test_bl_la_confianza_es_la_fraccion_que_se_mueve():
     """H7: con Idzorek, una opinión con confianza c mueve el retorno exactamente
-    c hacia su objetivo. Sin el lab, 10 % de confianza movía 53 %."""
+    c hacia su objetivo. Antes, 10 % de confianza movía 53 %."""
     import numpy as np
     from core.models.blacklitterman import _confianza_a_omega
     tau, Sigma, P = 0.01, np.array([[0.04, 0.0], [0.0, 0.09]]), np.array([[1.0, 0.0]])
@@ -3707,13 +3702,8 @@ def test_bl_la_confianza_es_la_fraccion_que_se_mueve():
         omega = _confianza_a_omega([conf], tau, Sigma, P)[0, 0]
         return tau * Sigma[0, 0] / (tau * Sigma[0, 0] + omega)
 
-    assert casi(movimiento(10), 1 / 1.9, 1e-9)            # sin lab: 1/(2−c)
-    lab, ficha = _con_lab()
-    try:
-        for c in (10, 50, 90):
-            assert casi(movimiento(c), c / 100, 1e-9)
-    finally:
-        lab.reset(ficha)
+    for c in (10, 50, 90):
+        assert casi(movimiento(c), c / 100, 1e-9)
 
 
 def test_bl_un_futuro_no_es_una_opinion():
@@ -3724,10 +3714,7 @@ def test_bl_un_futuro_no_es_una_opinion():
     obj = {"por_activo": [fut, {**fut, "ticker": "GLDD.BA"},
                           {"ticker": "MUD.BA", "disponible": True, "upside_pct": 30.0, "n_analistas": 5, "actual": 100.0}]}
     manual = {"GLDD.BA": {"modo": "B1", "bajo": 110, "alto": 120}}
-    assert {v["ticker"] for v in bl.views_combinadas(obj)} == {"SPYD.BA", "GLDD.BA", "MUD.BA"}
-
     antes = targets.objetivo, momentum.analizar
-    lab, ficha = _con_lab()
     try:
         assert {v["ticker"] for v in bl.views_combinadas(obj, None, manual)} == {"GLDD.BA", "MUD.BA"}
         targets.objetivo = lambda t: {**fut, "ticker": t}
@@ -3737,22 +3724,18 @@ def test_bl_un_futuro_no_es_una_opinion():
         assert r["por_activo"][0]["combinada"] == sin_upside[0]
         assert r["upside_promedio_pct"] is None
     finally:
-        lab.reset(ficha)
         targets.objetivo, momentum.analizar = antes
 
 
 def test_bl_una_opa_no_se_anualiza():
     """H7: 10 % en 3 meses con tasa libre 4 % son 13,3 % en el año, no 46,4 %."""
     from core.models import blacklitterman as bl, rates
-    assert casi(bl.view_manual("X", "B2", 110, 110, 100.0, 3)["ret"], 46.4, 0.01)
     antes = rates.risk_free_para
-    lab, ficha = _con_lab()
     try:
         rates.risk_free_para = lambda *a, **k: (0.04, "fija")
         assert casi(bl.view_manual("X", "B2", 110, 110, 100.0, 3)["ret"], 13.3, 0.01)
         assert casi(bl.view_manual("X", "B1", 110, 110, 100.0)["ret"], 10.0, 0.01)
     finally:
-        lab.reset(ficha)
         rates.risk_free_para = antes
 
 
@@ -3787,7 +3770,6 @@ def test_twr_con_split_y_lote_sin_serie():
     vendido = {"ticker": "BBB", "buy_date": str(fechas[1].date()), "sell_date": str(fechas[4].date()), "qty": 10,
                "buy_price": 10.0, "sell_price": 10.0, "buy_comm": 0, "sell_comm": 0}
     antes = sources.precios_base, sources.splits
-    token = mercado.LAB.set(True)
     try:
         sources.precios_base = lambda t, *a, **k: series.get(t.upper(), pd.Series(dtype=float))
         sources.splits = lambda t: {"2026-02-01": 10.0} if t == "BBB" else {}
@@ -3801,7 +3783,6 @@ def test_twr_con_split_y_lote_sin_serie():
         ev = evolucion([lote("EEE", 3, 10, 10.0)], [rota])
         assert casi(ev["twr_pct"], 10.0, 1e-6), ev["twr_pct"]
     finally:
-        mercado.LAB.reset(token)
         sources.precios_base, sources.splits = antes
 
 

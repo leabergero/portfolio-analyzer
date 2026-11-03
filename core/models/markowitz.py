@@ -335,7 +335,7 @@ def backtest(posiciones, meses: int = 6, benchmark: str = None, lab: bool = Fals
     Se compara contra dos referencias que no requieren modelo: mantener la
     cartera como está, y equiponderar.
     """
-    from core.models.portfolio import matriz_retornos, value_weights
+    from core.models.portfolio import matriz_retornos
 
     ruedas_prueba = int(meses * 21)
     falta = {"error": f"Hace falta al menos un año más de historia para probar "
@@ -347,7 +347,7 @@ def backtest(posiciones, meses: int = 6, benchmark: str = None, lab: bool = Fals
         todo = _insumos_lab(posiciones)
         if todo is None:
             return {"error": "Hacen falta al menos dos activos."}
-        ret_df, precios = todo["px"].pct_change().dropna(), todo["precios"]
+        ret_df = todo["px"].pct_change().dropna()
         if len(ret_df) < ruedas_prueba + 252:
             return falta
         corte = ret_df.index[-ruedas_prueba - 1]
@@ -357,7 +357,7 @@ def backtest(posiciones, meses: int = 6, benchmark: str = None, lab: bool = Fals
         tickers, mu, cov = e["tickers"], e["mu"], e["cov"]
         entrenamiento, prueba = ret_df.loc[:corte], ret_df.loc[ret_df.index > corte]
     else:
-        ret_df, precios = matriz_retornos(posiciones)
+        ret_df, _ = matriz_retornos(posiciones)
         if ret_df.shape[1] < 2:
             return {"error": "Hacen falta al menos dos activos."}
         if len(ret_df) < ruedas_prueba + 252:
@@ -375,25 +375,17 @@ def backtest(posiciones, meses: int = 6, benchmark: str = None, lab: bool = Fals
     estrategias = {
         "Máximo Sharpe": max_sharpe_weights(mu, cov, rf),
         "Mínima varianza": min_variance_weights(cov),
-        "Tu cartera": value_weights(posiciones, precios, tickers),
         "Equiponderada": np.ones(len(tickers)) / len(tickers),
     }
 
-    from core import mercado
     from core.models import risk as risk_mod
-    corregido = mercado.LAB.get()
-    tuya = None
-    if corregido:
-        tuya = _tu_cartera_al_corte(posiciones, trades, entrenamiento.index[-1], prueba.index)
-        del estrategias["Tu cartera"]
-        if "error" not in tuya:
-            estrategias["Tu cartera"] = np.array([])     # sus retornos ya están en `tuya`
+    tuya = _tu_cartera_al_corte(posiciones, trades, entrenamiento.index[-1], prueba.index)
+    if "error" not in tuya:
+        estrategias["Tu cartera"] = np.array([])         # sus retornos ya están en `tuya`
     series = {}
     salida, curvas = [], {}
     for nombre, w in estrategias.items():
-        if not corregido:
-            r = prueba[tickers].to_numpy() @ w
-        elif nombre == "Tu cartera":
+        if nombre == "Tu cartera":
             r = tuya["retornos"]
         else:
             r = _comprar_y_mantener(prueba[tickers].to_numpy(), w, COSTO_ENTRADA)
@@ -405,7 +397,7 @@ def backtest(posiciones, meses: int = 6, benchmark: str = None, lab: bool = Fals
             "volatilidad_pct": round(float(r.std(ddof=1)) * np.sqrt(RUEDAS) * 100, 2),
             "sharpe": round(risk_mod.sharpe(r, rf), 3),
             "max_drawdown_pct": round(risk_mod.max_drawdown(r) * 100, 2),
-            "pesos": (tuya["pesos"] if corregido and nombre == "Tu cartera"
+            "pesos": (tuya["pesos"] if nombre == "Tu cartera"
                       else {t: round(float(w[i]) * 100, 1) for i, t in enumerate(tickers)}),
         })
         curvas[nombre] = [round(float(v) * 100, 2) for v in np.cumprod(1 + r)]
@@ -414,26 +406,16 @@ def backtest(posiciones, meses: int = 6, benchmark: str = None, lab: bool = Fals
     optima = next(s for s in salida if s["estrategia"] == "Máximo Sharpe")
     actual = next((s for s in salida if s["estrategia"] == "Tu cartera"), None)
 
-    concluyente, p_valor, extra = None, None, {}
-    if corregido:
-        from core.models.comparacion import test_diferencia_sharpe
-        ref = "Tu cartera" if actual else "Equiponderada"
-        fila = actual or next(s for s in salida if s["estrategia"] == ref)
-        test = test_diferencia_sharpe(series["Máximo Sharpe"], series[ref], rf)
-        veredicto, concluyente = _veredicto_con_prueba(
-            optima, fila, "la tuya" if actual else "la equiponderada", test, meses)
-        p_valor = test.get("p_valor")
-        if actual:
-            extra = {"tu_cartera_valor_usd": tuya["valor_usd"], "tu_cartera_cobertura_pct": tuya["cobertura_pct"]}
-        else:
-            extra = {"aviso": tuya["error"]}
-    elif ganadora["estrategia"] == "Máximo Sharpe":
-        veredicto = (f"La cartera optimizada habría funcionado: {optima['retorno_pct']} % "
-                     f"contra {actual['retorno_pct']} % de la tuya en estos {meses} meses.")
+    from core.models.comparacion import test_diferencia_sharpe
+    ref = "Tu cartera" if actual else "Equiponderada"
+    fila = actual or next(s for s in salida if s["estrategia"] == ref)
+    test = test_diferencia_sharpe(series["Máximo Sharpe"], series[ref], rf)
+    veredicto, concluyente = _veredicto_con_prueba(
+        optima, fila, "la tuya" if actual else "la equiponderada", test, meses)
+    if actual:
+        extra = {"tu_cartera_valor_usd": tuya["valor_usd"], "tu_cartera_cobertura_pct": tuya["cobertura_pct"]}
     else:
-        veredicto = (f"La optimización NO habría ayudado en este período: ganó "
-                     f"«{ganadora['estrategia']}». Es lo habitual — Markowitz optimiza "
-                     f"sobre retornos pasados, que son el peor insumo del modelo.")
+        extra = {"aviso": tuya["error"]}
 
     return {
         "meses": meses, "ruedas_prueba": len(prueba),
@@ -448,8 +430,8 @@ def backtest(posiciones, meses: int = 6, benchmark: str = None, lab: bool = Fals
         "rf_label": rf_label,
         "nota": "Los pesos se calcularon SOLO con datos anteriores al período de prueba. "
                 "Optimizar y medir sobre el mismo período no prueba nada."
-                + (" Todas se compran al inicio y se mantienen sin rebalancear. El óptimo, la "
-                   "mínima varianza y la equiponderada pagan 0,5 % de entrada; tu cartera son "
-                   "las cantidades que tenías en esa fecha, sin el FCI." if corregido else ""),
-        **({"concluyente": concluyente, "p_valor": p_valor, **extra} if corregido else {}),
+                " Todas se compran al inicio y se mantienen sin rebalancear. El óptimo, la "
+                "mínima varianza y la equiponderada pagan 0,5 % de entrada; tu cartera son "
+                "las cantidades que tenías en esa fecha, sin el FCI.",
+        "concluyente": concluyente, "p_valor": test.get("p_valor"), **extra,
     }
