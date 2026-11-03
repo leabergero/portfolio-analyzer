@@ -16,7 +16,6 @@
  */
 
 const { useState, useEffect, useRef, useCallback, useMemo } = React;
-const LAB = new URLSearchParams(location.search).get("lab");
 
 
 /* La piel de la app vive en dos hojas, lab1.css y lab5.css, y sus reglas
@@ -4397,7 +4396,7 @@ function FinvizCalendario({ activos }) {
   const u = filas.filter((x) => x.e.fecha >= hoy).pop() || filas[0];
   return (
     <Plegable id="finviz-calendario" titulo={t("Calendario", "Calendar")}
-              plegado={LAB && <>{fechaCorta(u.e.fecha)} · <b>{u.a.subyacente}</b> · <span className={color(u.e)}>{nombre(u.e)}</span> · {detalleEvento(u.e)}</>}>
+              plegado={<>{fechaCorta(u.e.fecha)} · <b>{u.a.subyacente}</b> · <span className={color(u.e)}>{nombre(u.e)}</span> · {detalleEvento(u.e)}</>}>
       <div className="tabla-wrap"><table className="tenencias">
         <thead><tr>
           <th>{t("Fecha", "Date")}</th><th>Ticker</th><th>{t("Evento", "Event")}</th><th>{t("Detalle", "Detail")}</th>
@@ -4426,7 +4425,7 @@ function FinvizEarnings({ activos, cartera }) {
   const u = filas.find((a) => a.earnings.fecha && a.earnings.fecha <= hoy), ue = u?.earnings;
   return (
     <Plegable id="finviz-earnings" titulo={"Earnings"} clase={nuevos.size ? "novedad" : ""} alTocar={marcar}
-              plegado={LAB && u && <>{fechaCorta(ue.fecha)} · <b>{u.subyacente}</b>
+              plegado={u && <>{fechaCorta(ue.fecha)} · <b>{u.subyacente}</b>
                 {ue.eps != null && <> · EPS <span className={ue.eps_esperado != null ? signo(ue.eps - ue.eps_esperado) : undefined}>{usd(ue.eps)}</span> / {usd(ue.eps_esperado)}</>}
                 {ue.sorpresa_ventas != null && <> · {t("Δ Ventas", "Δ Sales")} <span className={signo(ue.sorpresa_ventas)}>{pct(ue.sorpresa_ventas, 1)}</span></>}</>}>
         <div className="tabla-wrap"><table className="tenencias">
@@ -4474,7 +4473,7 @@ function FinvizInsiders({ activos, cartera }) {
     .sort((x, y) => clave(y).localeCompare(clave(x)) || y.f.valor_usd - x.f.valor_usd)[0];
   return (
     <Plegable id="finviz-insiders" titulo={"Insiders"} clase={nuevos.size ? "novedad" : ""} alTocar={marcar}
-              plegado={LAB && (u
+              plegado={(u
                 ? <>{fechaCorta(u.f.fecha)} · <b>{u.a.subyacente}</b> · <span className={u.f.tipo === "Buy" ? "pos" : u.f.tipo === "Sale" ? "neg" : undefined}>{ETIQUETA_INSIDER[u.f.tipo]?.() || u.f.tipo}</span> · {usd(u.f.valor_usd, 0)} · {u.f.nombre}</>
                 : t("Sin operaciones en 3 meses", "No transactions in 3 months"))}>
         <div className="tabla-wrap"><table className="tenencias">
