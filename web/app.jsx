@@ -16,6 +16,7 @@
  */
 
 const { useState, useEffect, useRef, useCallback, useMemo } = React;
+const LAB = new URLSearchParams(location.search).get("lab");
 
 
 /* La piel de la app vive en dos hojas, lab1.css y lab5.css, y sus reglas
@@ -447,7 +448,7 @@ const usarColapsable = (id, porDefecto = true) => {
    `id` (ver `usarColapsable`). `extra` es contenido del título que no debe
    disparar el toggle —un botón de descarga, por ejemplo— así que se le corta
    la propagación del clic aparte. */
-function Plegable({ id, titulo, junto, extra, porDefecto = true, clase = "", alTocar, children }) {
+function Plegable({ id, titulo, junto, extra, porDefecto = true, clase = "", alTocar, plegado, children }) {
   const [abierto, alternar] = usarColapsable(id, porDefecto);
   return (
     <div className={"panel " + clase} onClick={alTocar}>
@@ -461,6 +462,7 @@ function Plegable({ id, titulo, junto, extra, porDefecto = true, clase = "", alT
           {titulo}
         </span>
         {junto && <span style={{ display: "flex", gap: 8, marginLeft: 8 }}>{junto}</span>}
+        {!abierto && plegado && <span className="plegado-resumen" onClick={alternar}>{plegado}</span>}
         {extra && <span style={{ marginLeft: "auto" }} onClick={(e) => e.stopPropagation()}>
           {extra}
         </span>}
@@ -4391,8 +4393,11 @@ function FinvizCalendario({ activos }) {
   const color = (e) => (e.accion === "Upgrade" ? "pos" : e.accion === "Downgrade" ? "neg" : undefined);
   const filas = activos.flatMap((a) => a.eventos.map((e) => ({ a, e }))).sort(porFechaDesc((x) => x.e.fecha));
   if (!filas.length) return null;
+  // Lo más cercano que viene (van de la más nueva a la más vieja); si no viene nada, lo último que pasó.
+  const u = filas.filter((x) => x.e.fecha >= hoy).pop() || filas[0];
   return (
-    <Plegable id="finviz-calendario" titulo={t("Calendario", "Calendar")}>
+    <Plegable id="finviz-calendario" titulo={t("Calendario", "Calendar")}
+              plegado={LAB && <>{fechaCorta(u.e.fecha)} · <b>{u.a.subyacente}</b> · <span className={color(u.e)}>{nombre(u.e)}</span> · {detalleEvento(u.e)}</>}>
       <div className="tabla-wrap"><table className="tenencias">
         <thead><tr>
           <th>{t("Fecha", "Date")}</th><th>Ticker</th><th>{t("Evento", "Event")}</th><th>{t("Detalle", "Detail")}</th>
@@ -4418,8 +4423,12 @@ function FinvizEarnings({ activos, cartera }) {
   const [nuevos, marcar] = usarNovedades("earnings", cartera, filas,
                                          (a) => (a.earnings.fecha <= hoy ? a.earnings.fecha : null));
   if (!filas.length) return null;
+  const u = filas.find((a) => a.earnings.fecha && a.earnings.fecha <= hoy), ue = u?.earnings;
   return (
-    <Plegable id="finviz-earnings" titulo={"Earnings"} clase={nuevos.size ? "novedad" : ""} alTocar={marcar}>
+    <Plegable id="finviz-earnings" titulo={"Earnings"} clase={nuevos.size ? "novedad" : ""} alTocar={marcar}
+              plegado={LAB && u && <>{fechaCorta(ue.fecha)} · <b>{u.subyacente}</b>
+                {ue.eps != null && <> · EPS <span className={ue.eps_esperado != null ? signo(ue.eps - ue.eps_esperado) : undefined}>{usd(ue.eps)}</span> / {usd(ue.eps_esperado)}</>}
+                {ue.sorpresa_ventas != null && <> · {t("Δ Ventas", "Δ Sales")} <span className={signo(ue.sorpresa_ventas)}>{pct(ue.sorpresa_ventas, 1)}</span></>}</>}>
         <div className="tabla-wrap"><table className="tenencias">
           <thead><tr>
             <th>Ticker</th><th>{t("Balance", "Report")}</th>
@@ -4458,8 +4467,16 @@ function FinvizInsiders({ activos, cartera }) {
   const filas = activos.filter((a) => a.insiders).sort(porFechaDesc((a) => a.insiders.ultimo));
   const [nuevos, marcar] = usarNovedades("insiders", cartera, filas, (a) => a.insiders.ult_presentado);
   if (!filas.length) return null;
+  // Lo nuevo es lo último presentado, como en la novedad. Un mismo formulario trae
+  // varios renglones con la misma hora: va el de más plata.
+  const clave = (o) => o.f.presentado || o.f.fecha || "";
+  const u = filas.flatMap((a) => a.insiders.filas.map((f) => ({ a, f })))
+    .sort((x, y) => clave(y).localeCompare(clave(x)) || y.f.valor_usd - x.f.valor_usd)[0];
   return (
-    <Plegable id="finviz-insiders" titulo={"Insiders"} clase={nuevos.size ? "novedad" : ""} alTocar={marcar}>
+    <Plegable id="finviz-insiders" titulo={"Insiders"} clase={nuevos.size ? "novedad" : ""} alTocar={marcar}
+              plegado={LAB && (u
+                ? <>{fechaCorta(u.f.fecha)} · <b>{u.a.subyacente}</b> · <span className={u.f.tipo === "Buy" ? "pos" : u.f.tipo === "Sale" ? "neg" : undefined}>{ETIQUETA_INSIDER[u.f.tipo]?.() || u.f.tipo}</span> · {usd(u.f.valor_usd, 0)} · {u.f.nombre}</>
+                : t("Sin operaciones en 3 meses", "No transactions in 3 months"))}>
         <div className="tabla-wrap"><table className="tenencias">
           <thead><tr>
             <th>Ticker</th><th className="n" title={t("Porcentaje de las acciones en manos de insiders", "Share of the stock held by insiders")}>{t("% insiders", "% insiders")}</th>

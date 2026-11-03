@@ -3893,6 +3893,19 @@ def test_finviz_presentado_y_29_de_febrero():
     assert _balance("Feb 29 BMO", date(2028, 3, 1)) == ("2028-02-29", "BMO")
 
 
+def test_finviz_filas_de_insiders_con_presentado_ordenable():
+    """El resumen del panel plegado elige la última por cuándo se presentó: "Nov 05"
+    visto el 3 de noviembre es del año pasado, y como texto no se puede comparar."""
+    from datetime import date
+
+    from core.data.finviz import _armar
+
+    fila = {"fecha": "2026-10-27", "tipo": "Sale", "valor_usd": 100.0, "presentado": "Oct 29 06:30 PM"}
+    a = _armar("X", ["X"], {"fund": {}, "insiders": [fila]}, date(2026, 11, 3))
+    assert a["insiders"]["filas"][0]["presentado"] == "2026-10-29T18:30"
+    assert fila["presentado"] == "Oct 29 06:30 PM"     # la ficha es la de la caché: no se pisa
+
+
 def test_finviz_calendario_del_papel():
     """Un balance de NVDA a las 21:30 UTC es del día en Nueva York, Reiterated no es
     un evento y un ex-dividendo anunciado entra aunque no esté en el gráfico."""

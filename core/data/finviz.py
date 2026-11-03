@@ -238,7 +238,8 @@ def _armar(sym, tickers, ficha, hoy: date) -> dict:
                           **_resumen_insiders(filas, hoy),
                           # Las mismas de la suma, para que el total se pueda cotejar. Un
                           # ejercicio a $0 es acciones que entregan como sueldo: taparía lo que importa.
-                          "filas": [x for x in filas if x["valor_usd"] and (x["fecha"] or "") >= desde]}
+                          "filas": [{**x, "presentado": _presentado(x["presentado"], hoy)}
+                                    for x in filas if x["valor_usd"] and (x["fecha"] or "") >= desde]}
                          if filas or _num(f.get("Insider Own")) is not None else None)}
 
 
