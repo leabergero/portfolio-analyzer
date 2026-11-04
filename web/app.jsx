@@ -317,7 +317,7 @@ const LIBRES_EN = {
 const libre = (s) => (s == null ? s : t(s, LIBRES_EN[s] || s));
 
 // EVENTOS (regimenes.py) y ESCENARIOS de stress-test (risk.py): catálogos
-// fijos y acotados —34 eventos macro, 12 crisis reales—, no texto generado por
+// fijos y acotados —35 eventos macro, 13 crisis reales—, no texto generado por
 // usuario. Mismo criterio que LIBRES_EN: diccionario exacto, cae a español
 // si el backend agrega uno nuevo que todavía no está acá.
 const EVENTOS_EN = {
@@ -355,6 +355,7 @@ const EVENTOS_EN = {
   "El Banco de Japón sube la tasa a 1,25 %, máximo desde 1995": "The Bank of Japan raises rates to 1.25 %, highest since 1995",
   "Brasil, primera vuelta: Flávio Bolsonaro le gana a Lula": "Brazil, first round: Flávio Bolsonaro beats Lula",
   "Brasil, balotaje: gana Lula y caen las bolsas de la región": "Brazil, runoff: Lula wins and regional stock markets fall",
+  "Alphabet decepciona: arranca la crisis de deuda de la IA": "Alphabet disappoints: the AI debt crisis begins",
 };
 const eventoDescripcion = (s) => (s == null ? s : t(s, EVENTOS_EN[s] || s));
 const ALCANCE_EN = { AR: "AR", MUNDO: "WORLD", BR: "BR" };
@@ -383,6 +384,9 @@ const ESCENARIOS_EN = {
     "Flávio Bolsonaro wins: Ibovespa +7.7 %, EWZ +12.5 % in one session",
   "Gana Lula: Ibovespa −14 % el lunes y −17 % en tres ruedas, EWZ −21 %":
     "Lula wins: Ibovespa −14 % on Monday and −17 % in three sessions, EWZ −21 %",
+  "Crisis de deuda de la IA 2026": "AI debt crisis 2026",
+  "Alphabet decepciona; capex y deuda de la IA en duda, CDS en récord desde octubre: Alphabet −14 %, semiconductores −11 %, Nasdaq −4 %":
+    "Alphabet disappoints; AI capex and debt in doubt, CDS at records since October: Alphabet −14 %, semiconductors −11 %, Nasdaq −4 %",
 };
 const escenarioLabel = (s) => (s == null ? s : t(s, ESCENARIOS_EN[s] || s));
 
@@ -6758,7 +6762,7 @@ function Regimenes({ d, cartera }) {
 
 /* ── Stress ── */
 function Stress({ d, plegado = false }) {
-  const filas = d.escenarios || [];
+  const filas = (d.escenarios || []).slice().sort((a, b) => b.desde.localeCompare(a.desde));
   const conProxy = filas.some((e) => e.proxies?.length);
   const parcial = filas.some((e) => e.cobertura_pct != null && e.cobertura_pct < 99.5
                                     && e.pnl_pct != null);

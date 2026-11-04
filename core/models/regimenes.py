@@ -70,6 +70,7 @@ EVENTOS = [
     ("2026-09-18", "MUNDO", "El Banco de Japón sube la tasa a 1,25 %, máximo desde 1995"),
     ("2026-10-04", "BR", "Brasil, primera vuelta: Flávio Bolsonaro le gana a Lula"),
     ("2026-10-26", "BR", "Brasil, balotaje: gana Lula y caen las bolsas de la región"),
+    ("2026-10-28", "MUNDO", "Alphabet decepciona: arranca la crisis de deuda de la IA"),
 ]
 
 

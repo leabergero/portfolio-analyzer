@@ -456,6 +456,9 @@ ESCENARIOS = [
      "descripcion": "Gana Flávio Bolsonaro: Ibovespa +7,7 %, EWZ +12,5 % en una rueda"},
     {"nombre": "Balotaje en Brasil 2026", "desde": "2026-10-23", "hasta": "2026-10-28",
      "descripcion": "Gana Lula: Ibovespa −14 % el lunes y −17 % en tres ruedas, EWZ −21 %"},
+    {"nombre": "Crisis de deuda de la IA 2026", "desde": "2026-10-28", "hasta": "2026-11-03",
+     "descripcion": "Alphabet decepciona; capex y deuda de la IA en duda, CDS en récord desde "
+                    "octubre: Alphabet −14 %, semiconductores −11 %, Nasdaq −4 %"},
 ]
 
 
