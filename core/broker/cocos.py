@@ -12,9 +12,11 @@ Dos cosas que hay que tener presentes al leer este módulo:
      por 100 y convertir por MEP es responsabilidad de `sources.precios_base`,
      que es donde está la regla escrita una sola vez.
 
-  2. **El 2FA se pide una sola vez.** Los JWT de la sesión se guardan cifrados
-     con la misma API key del vault; mientras sigan vivos, arrancar no pide el
-     código del autenticador.
+  2. **Nada de Cocos se guarda en disco, ni en la máquina del usuario.** Email,
+     contraseña y 2FA se tipean en cada conexión. En modo local la sesión vive
+     en la memoria de este proceso y se pierde al reiniciarlo; en modo web va en
+     el sobre del navegador (`sesion.py`). Decidido 2026-11-04: antes había un
+     vault con la clave al lado, que protegía poco.
 """
 
 import contextvars
@@ -25,7 +27,7 @@ from datetime import date
 
 import pandas as pd
 
-from core.broker import _cocos_patch, sesion, vault
+from core.broker import _cocos_patch, sesion
 from core.data import cache, mep
 
 # ── Uno por request, no uno por proceso ───────────────────────────────────────
@@ -177,112 +179,27 @@ def _login(Cocos, kwargs: dict, codigo_2fa: str = ""):
             builtins.input = original
 
 
-def conectar(api_key: str, forzar_login: bool = False, codigo_2fa: str = "") -> dict:
-    """Conecta al broker. Reusa la sesión guardada si sigue viva.
-
-    El 2FA admite dos formas, y no hacen falta las dos:
-      · **semilla** (base32, la que se escanea una vez): pyCocos genera el código
-        solo en cada login, guardada en el vault.
-      · **código puntual** de 6 dígitos, el que muestra la app en el momento:
-        vale ~30 s, no se guarda, se pasa sólo en esta conexión.
-
-    Con cualquiera de las dos, tras el primer login se guarda la sesión y los
-    arranques siguientes ya no piden nada hasta que caduque.
-
-    Devuelve el estado; no lanza excepción, porque una caída del broker no debe
-    tumbar la aplicación entera — el resto de la cartera se sigue valuando con
-    la caché.
-    """
-
-    try:
-        Cocos = _clase()
-    except ImportError:
-        _est().update(conectado=False, detalle="falta pycocos")
-        return estado()
-
-    try:
-        credenciales = vault.abrir(api_key)
-    except Exception as e:
-        _est().update(conectado=False, detalle=f"vault: {e}")
-        return estado()
-
-    kwargs = {"email": credenciales["email"], "password": credenciales["password"],
-              "api_key": _cocos_patch.ANON_KEY}
-    if credenciales.get("totp_secret_key"):
-        # pyotp exige base32 puro (A-Z, 2-7). Las apps muestran la semilla con
-        # espacios o guiones y a veces en minúscula: se limpia antes de usarla,
-        # o el login corta con "Non-base32 digit found".
-        semilla = credenciales["totp_secret_key"].replace(" ", "").replace("-", "").upper()
-        kwargs["topt_secret_key"] = semilla   # sic: typo de pycocos
-
-    if not forzar_login:
-        sesion = vault.cargar_sesion(api_key)
-        if sesion:
-            try:
-                _poner(_restaurar(Cocos, kwargs, sesion))
-                # El access_token dura ~1 h; si venció, se renueva con el
-                # refresh_token (que vive mucho más) sin volver a pedir 2FA. Sin
-                # esto, reconectar tras una hora daba 401 "jwt expired" en cada
-                # llamada de datos aunque el login figurara conectado.
-                import time
-                if time.time() > sesion.get("token_expiration", 0) - 60:
-                    _c().connected = True
-                    _c()._refresh_access_token()
-                    # pyCocos cambia el token pero no la cabecera: sin esto cada
-                    # llamada seguía mandando el vencido y daba "jwt expired".
-                    _aplicar(_jwt_actual())
-                    _guardar_sesion(api_key)
-                    detalle = "sesión renovada"
-                else:
-                    detalle = "sesión restaurada"
-                _est().update(conectado=True, detalle=detalle,
-                              cuenta=getattr(_c(), "account_number", None))
-                return estado()
-            except Exception as e:
-                print(f"  [cocos] sesión rechazada ({e}); login completo")
-                vault.borrar_sesion()
-
-    try:
-        _poner(_login(Cocos, kwargs, codigo_2fa))   # acá se resuelve el 2FA
-    except Exception as e:
-        _est().update(conectado=False, detalle=f"login: {e}")
-        return estado()
-
-    _guardar_sesion(api_key)
-    _est().update(conectado=True, detalle="login nuevo",
-                  cuenta=getattr(_c(), "account_number", None))
-    return estado()
-
-
-def _guardar_sesion(api_key: str):
-    """Persiste los JWT vivos del cliente para reconectar sin 2FA."""
-    vault.guardar_sesion(api_key, _jwt_actual())
-
-
 def desconectar():
     _poner(None)
-    vault.borrar_sesion()
     _est().update(conectado=False, detalle="desconectado", cuenta=None)
 
 
-# ── Modo web: sin vault, sin disco ────────────────────────────────────────────
-# Las dos funciones de abajo son el camino multiusuario. No leen ni escriben
-# `data/vault/`: las credenciales llegan por parámetro, se usan para el login y
-# se van con el garbage collector. Lo único que persiste está en el navegador
-# del usuario, firmado por `core.broker.sesion`.
-#
-# El cliente y el estado son por request (ver `_ctx_cliente` arriba), así que
-# varios usuarios pueden estar conectados a la vez en el mismo proceso sin
-# verse entre ellos.
+# ── Login: sin disco ──────────────────────────────────────────────────────────
+# Las credenciales llegan por parámetro, se usan para el login y se van con el
+# garbage collector. `login` sirve a los dos modos; `restaurar` es sólo de la web,
+# donde lo único que persiste está en el navegador, firmado por
+# `core.broker.sesion`, y el cliente y el estado son por request (ver
+# `_ctx_cliente` arriba) para que nadie vea la sesión de otro.
 
 def login(email: str, password: str, codigo_2fa: str = "") -> tuple:
     """Login con credenciales que no se guardan en ningún lado.
 
     El 2FA es obligatorio en este camino y tiene que ser el código de 6 dígitos,
-    no la semilla: guardar la semilla dejaría al servidor generando códigos solo
-    para siempre, y la caducidad diaria del sobre no valdría nada.
+    no la semilla: guardar la semilla dejaría a la máquina generando códigos sola
+    para siempre.
 
-    Devuelve (estado, jwt). El `jwt` va firmado al navegador; acá no queda.
+    Devuelve (estado, jwt). En la web el `jwt` va firmado al navegador; en local
+    se descarta, porque el cliente queda vivo en memoria.
     """
 
     if not (email and password):
@@ -609,6 +526,9 @@ def _pagina_movimientos(limite: int, offset: int):
     if _c() is None:
         return {"error": "sin conectar"}
     try:
+        # Las llamadas crudas no pasan por pyCocos: sin esto, en modo local daban
+        # 401 pasada la hora de vida del token, y sin vault eso pide 2FA de nuevo.
+        _c().check_token_expiration()
         r = _c().client.session.get(
             "https://api.cocos.capital/api/movements",
             params={"limit": limite, "offset": offset}, timeout=25).json()
@@ -1107,6 +1027,7 @@ def cuotaparte_fci(ticker: str):
         return None
     sesion = _c().client.session
     try:
+        _c().check_token_expiration()   # llamada cruda: ver `_pagina_movimientos`
         # Ticker → (securityId, moneda). No es dato de nadie: se guarda un día.
         fondos = cache.leer_respuesta("cocos:fci:ids", 24)
         if not fondos:

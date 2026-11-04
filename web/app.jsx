@@ -7785,8 +7785,8 @@ const post = (ruta, cuerpo) => api(ruta, {
 
 /* Las dos credenciales se cargan desde acá y no desde un archivo a mano: son la
    única configuración que la aplicación pide, y esconderla en el disco obliga a
-   documentar un formato que después nadie recuerda. La de Cocos va al vault
-   cifrado del proyecto (`data/vault/`), la de FMP a `data/connectors.json`.
+   documentar un formato que después nadie recuerda. La de Cocos no se guarda
+   en ningún lado, la de FMP va a `data/connectors.json`.
    Ninguna de las dos se versiona ni vuelve al navegador una vez guardada. */
 
 function Ficha({ f }) {
@@ -7853,119 +7853,30 @@ function Fmp({ f, brk, recargar }) {
 }
 
 function Cocos({ f, brk, recargar }) {
-  const vacias = { email: "", password: "", totp_secret_key: "" };
-  const [c, setC] = useState(vacias);
-  const [codigo, setCodigo] = useState("");
-  const [msg, setMsg] = useState(null);
-  const [yendo, setYendo] = useState(false);
-  const campo = (k, v) => setC((x) => ({ ...x, [k]: v }));
-
-  const resultado = (r) => setMsg(
-    r.conectado ? ["ok", `Conectado — ${r.detalle}.`]
-                : ["mal", r.error || r.detalle || "No se pudo conectar."]);
-
-  // Un solo paso: cifra las credenciales, guarda la clave sola y hace el login.
-  const ingresar = async () => {
-    setYendo(true); setMsg(null);
-    const r = await post("/api/broker/vault", c);
-    setYendo(false);
-    if (r.error) { setMsg(["mal", r.error]); recargar(); return; }
-    setC(vacias); resultado(r); recargar();
+  const web = brk?.modo === "web";
+  // En la web la sesión es el sobre de este navegador; en local, la memoria del server.
+  const salir = async () => {
+    if (web) { sesion.tirar(); location.reload(); return; }
+    await post("/api/broker/desconectar");
+    recargar();
   };
-
-  // Reconecta con las credenciales ya guardadas, sin volver a tipearlas.
-  const reconectar = async (forzar) => {
-    setYendo(true); setMsg(null);
-    resultado(await post("/api/broker/conectar",
-                         { forzar_login: !!forzar, codigo_2fa: codigo.trim() }));
-    setYendo(false); setCodigo(""); recargar();
-  };
-
-  const salir = async () => { await post("/api/broker/desconectar"); setMsg(null); recargar(); };
-  const borrar = async () => {
-    if (!confirm("¿Borrar las credenciales de Cocos guardadas?")) return;
-    await post("/api/broker/borrar"); setMsg(null); recargar();
-  };
-
-  // Modo web: no hay vault ni credenciales en el servidor, y conectar el broker
-  // es opcional. Lo único que existe es el sobre de este navegador.
-  if (brk?.modo === "web") return (
-    <div className="panel">
-      <Ficha f={f} />
-      {f.conectado ? (
-        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-          <button className="btn peligro"
-                  onClick={() => { sesion.tirar(); location.reload(); }}>
-            Desconectar Cocos</button>
-          <span className="pie" style={{ margin: 0 }}>
-            {f.cuenta ? `Cuenta ${f.cuenta}.` : "Sesión activa."} Tu contraseña no
-            está guardada en ningún lado: la sesión vive en este navegador y vence
-            a las 24 horas.
-          </span>
-        </div>
-      ) : (
-        <EntrarCocos onEntrar={recargar} />
-      )}
-    </div>
-  );
 
   return (
     <div className="panel">
       <Ficha f={f} />
-
-      {!brk?.vault_cargado && (
-        <>
-          <div style={{ display: "grid", gap: 7 }}>
-            <input type="email" placeholder="Email de Cocos" value={c.email}
-                   autoComplete="off" onChange={(e) => campo("email", e.target.value)} />
-            <input type="password" placeholder="Contraseña" value={c.password}
-                   autoComplete="new-password" onChange={(e) => campo("password", e.target.value)} />
-            <input type="text" inputMode="numeric" placeholder="Código 2FA de la app (6 dígitos)"
-                   value={c.totp_secret_key} autoComplete="off"
-                   onChange={(e) => campo("totp_secret_key", e.target.value)} />
-            <button className="btn primario" disabled={yendo || !c.email || !c.password}
-                    onClick={ingresar}>{yendo ? "Conectando…" : "Ingresar y conectar"}</button>
-          </div>
-          <div className="pie">
-            Abrí tu app de autenticación y poné el <b>código de 6 dígitos</b> del momento: la app
-            entra con eso y guarda la sesión, así los próximos arranques no piden nada. Las
-            credenciales se cifran con AES-256-GCM en <span className="mono">data/vault/</span>.
-            Si en cambio tenés la <b>semilla</b> (el texto largo que se escanea una vez),
-            pegala ahí y no vuelve a pedir código nunca.
-          </div>
-        </>
-      )}
-
-      {brk?.vault_cargado && !f.conectado && (
-        <>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-            <input type="text" inputMode="numeric" placeholder="Código 2FA (si lo pide)"
-                   value={codigo} style={{ width: 170 }} autoComplete="off"
-                   onChange={(e) => setCodigo(e.target.value)}
-                   onKeyDown={(e) => { if (e.key === "Enter") reconectar(true); }} />
-            <button className="btn primario" disabled={yendo}
-                    onClick={() => reconectar(false)}>{yendo ? "Conectando…" : "Conectar"}</button>
-            <button className="btn peligro" disabled={yendo} onClick={borrar}>Borrar credenciales</button>
-          </div>
-          <div className="pie">
-            Primero intenta con la sesión guardada. Si caducó, poné el código de 6 dígitos de la
-            app y tocá Conectar.
-          </div>
-        </>
-      )}
-
-      {f.conectado && (
+      {f.conectado ? (
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-          <button className="btn peligro" onClick={salir}>Desconectar</button>
-          <button className="btn peligro" onClick={borrar}>Borrar credenciales</button>
+          <button className="btn peligro" onClick={salir}>Desconectar Cocos</button>
           <span className="pie" style={{ margin: 0 }}>
-            {f.cuenta ? `Cuenta ${f.cuenta}` : "Sesión activa"}. Desconectar deja las
-            credenciales; borrarlas las elimina del disco.
+            {f.cuenta ? `Cuenta ${f.cuenta}.` : "Sesión activa."} Tu contraseña no
+            está guardada en ningún lado: {web
+              ? "la sesión vive en este navegador y vence a las 24 horas."
+              : "la sesión vive en memoria y se pierde al cerrar la aplicación."}
           </span>
         </div>
+      ) : (
+        <EntrarCocos onEntrar={recargar} local={!web} />
       )}
-
-      {msg && <div className={"aviso " + msg[0]}>{msg[1]}</div>}
     </div>
   );
 }
@@ -9584,7 +9495,7 @@ function Ingreso({ configurado }) {
    tipear de memoria. El campo del 2FA lleva one-time-code: en el celular el
    teclado sugiere el código, y le dice al gestor que ese valor no se guarda. */
 
-function EntrarCocos({ motivo, onEntrar }) {
+function EntrarCocos({ motivo, onEntrar, local }) {
   const [c, setC] = useState({ email: "", password: "", codigo_2fa: "" });
   const [msg, setMsg] = useState(motivo || null);
   const [yendo, setYendo] = useState(false);
@@ -9598,7 +9509,7 @@ function EntrarCocos({ motivo, onEntrar }) {
     const r = await post("/api/broker/web/login", c);
     setYendo(false);
     if (!r.ok) { setMsg(r.error || "No se pudo conectar."); return; }
-    sesion.poner(r.sobre);
+    if (r.sobre) sesion.poner(r.sobre);
     setC({ email: "", password: "", codigo_2fa: "" });
     onEntrar();
   };
@@ -9622,8 +9533,9 @@ function EntrarCocos({ motivo, onEntrar }) {
       {msg && <div className="aviso mal">{msg}</div>}
       <div className="pie" style={{ marginTop: 10 }}>
         Tu contraseña de Cocos <b>no se guarda</b>: se usa para el login y se
-        descarta. Queda una sesión en este navegador que vence a las 24 horas,
-        por eso el código de la app se pide una vez por día.
+        descarta. {local
+          ? "Nada queda en disco: la sesión vive en memoria, así que al cerrar la aplicación hay que volver a conectarse."
+          : "Queda una sesión en este navegador que vence a las 24 horas, por eso el código de la app se pide una vez por día."}
       </div>
     </>
   );

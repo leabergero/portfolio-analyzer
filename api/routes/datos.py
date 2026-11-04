@@ -200,57 +200,10 @@ def guardar_fmp():
 @bp.get("/broker/estado")
 def broker_estado():
     return jsonify({**cocos.estado(),
-                    "modo": "web" if sesion.modo_web() else "local",
-                    "vault_cargado": False if sesion.modo_web() else vault.existe()})
+                    "modo": "web" if sesion.modo_web() else "local"})
 
 
-def _parte_2fa(valor: str):
-    """Separa lo que el usuario puso en el campo 2FA en (semilla, código puntual).
-
-    Un código de la app son 6 dígitos y vale medio minuto: no se guarda, se usa
-    sólo en esta conexión. Cualquier otra cosa se toma como semilla base32 y sí
-    se guarda, porque genera los códigos sola de ahí en más.
-    """
-    v = (valor or "").strip()
-    if v.replace(" ", "").isdigit() and len(v.replace(" ", "")) == 6:
-        return "", v.replace(" ", "")
-    return v, ""
-
-
-@bp.post("/broker/vault")
-def broker_vault():
-    """Cifra email/contraseña, guarda la clave sola y conecta en un paso.
-
-    El usuario nunca ve ni maneja la clave del vault. El 2FA puede ser la semilla
-    (se guarda) o el código de 6 dígitos del momento (no se guarda: sirve sólo
-    para este login, y después manda la sesión guardada).
-    """
-    c = request.json or {}
-    semilla, codigo = _parte_2fa(c.get("totp_secret_key", ""))
-    try:
-        api_key = vault.crear({"email": c.get("email", ""),
-                               "password": c.get("password", ""),
-                               "totp_secret_key": semilla})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 400
-    return jsonify({"ok": True, **cocos.conectar(api_key, forzar_login=True, codigo_2fa=codigo)})
-
-
-@bp.post("/broker/conectar")
-def broker_conectar():
-    """Conecta con la clave guardada. Reusa la sesión salvo forzar_login.
-
-    Acepta un código 2FA puntual para cuando la sesión caducó y no hay semilla.
-    """
-    api_key = vault.clave_guardada()
-    if not api_key:
-        return jsonify({"error": "No hay credenciales cargadas."}), 400
-    c = request.json or {}
-    _, codigo = _parte_2fa(c.get("codigo_2fa", ""))
-    return jsonify(cocos.conectar(api_key, c.get("forzar_login", False), codigo_2fa=codigo))
-
-
-# ── Modo web: login sin vault ─────────────────────────────────────────────────
+# ── Login sin guardar nada ───────────────────────────────────────────────────
 
 _INTENTOS = {}
 _MAX_INTENTOS, _VENTANA = 5, 15 * 60
@@ -285,26 +238,19 @@ def _anotar_fallo(clave: str):
 def broker_web_login():
     """Login con credenciales que no se guardan: ni en disco, ni cifradas.
 
-    El usuario tipea email, contraseña y el código de 6 dígitos. Se hace el
-    login contra Cocos, se le devuelve al navegador un sobre firmado con los
-    JWT adentro, y las credenciales se van con el garbage collector.
+    El usuario tipea email, contraseña y el código de 6 dígitos, y las
+    credenciales se van con el garbage collector. En la web se devuelve un sobre
+    firmado con los JWT; en local el cliente queda en la memoria del proceso y no
+    sale nada, así que un reinicio pide conectarse de nuevo.
 
-    La semilla TOTP se rechaza a propósito: guardarla dejaría al servidor
-    generando códigos solo para siempre, y la caducidad diaria del sobre —lo
-    único que obliga al segundo factor a aparecer— no valdría nada.
+    Sólo se acepta el código del momento: una semilla TOTP permitiría generar
+    códigos para siempre, y es justo lo que no se quiere guardar.
     """
-    if not sesion.modo_web():
-        return jsonify({"error": "Este servidor corre en modo local: "
-                                 "la conexión va por el vault."}), 400
-
     c = request.json or {}
     email = (c.get("email") or "").strip()
-    semilla, codigo = _parte_2fa(c.get("codigo_2fa", ""))
+    codigo = (c.get("codigo_2fa") or "").replace(" ", "")
 
-    if semilla:
-        return jsonify({"error": "Acá va el código de 6 dígitos de la app, "
-                                 "no la semilla: la semilla no se guarda."}), 400
-    if not codigo:
+    if not (codigo.isdigit() and len(codigo) == 6):
         return jsonify({"error": "Falta el código 2FA de 6 dígitos."}), 400
 
     if espera := _frenado(email):
@@ -317,6 +263,8 @@ def broker_web_login():
         return jsonify({"error": estado["detalle"]}), 401
 
     _INTENTOS.pop(email, None)
+    if not sesion.modo_web():
+        return jsonify({"ok": True, **estado})
     return jsonify({"ok": True, "sobre": sesion.emitir(jwt),
                     "vence_en": sesion.DIA, **estado})
 
@@ -324,14 +272,6 @@ def broker_web_login():
 @bp.post("/broker/desconectar")
 def broker_desconectar():
     cocos.desconectar()
-    return jsonify({"ok": True})
-
-
-@bp.post("/broker/borrar")
-def broker_borrar():
-    """Desconecta y elimina credenciales, sesión y clave guardada."""
-    cocos.desconectar()
-    vault.borrar_todo()
     return jsonify({"ok": True})
 
 

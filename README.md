@@ -145,8 +145,11 @@ El estado de las fuentes de datos. Dos piden credencial y las dos son
 opcionales: **Cocos Capital** (bonos, ONs, letras) y **Financial Modeling Prep**
 (precios objetivo). Las públicas (dólar MEP, yfinance) van sin credencial.
 
-**Modelos:** `broker/vault` (credenciales cifradas AES-256-GCM en `data/vault/`,
-fuera de git), `data/connectors`, `data/fmp`.
+Las credenciales de Cocos no se guardan: email, contraseña y 2FA se escriben en
+cada conexión y la sesión vive en memoria.
+
+**Modelos:** `broker/cocos`, `broker/vault` (sólo InvIU: cifrado AES-256-GCM en
+`data/vault/`, fuera de git), `data/connectors`, `data/fmp`.
 
 ![Conectores](docs/img/conectores.png)
 

@@ -2230,20 +2230,64 @@ def test_cocos_es_opcional_no_una_puerta():
 def test_en_la_web_nadie_toca_el_vault_ni_la_clave_compartida():
     """Los endpoints de la app de escritorio no existen para un usuario web.
 
-    El front no los muestra, pero un POST a mano llega igual. Del otro lado hay
-    dos cosas que no son de quien entra: el vault del dueño de la máquina —que
-    `/api/broker/borrar` elimina— y la API key de FMP, que la ponemos nosotros y
-    la comparten todos. Sin este corte, cualquiera con sesión se la cambiaba a
-    todo el mundo.
+    El front no los muestra, pero un POST a mano llega igual. Del otro lado está
+    la API key de FMP, que la ponemos nosotros y la comparten todos, y la sesión
+    de Cocos del proceso local. Sin este corte, cualquiera con sesión se la
+    cambiaba a todo el mundo.
     """
     flask_app = require("api", "app").app
 
-    for ruta in ("/api/broker/vault", "/api/broker/borrar", "/api/broker/conectar",
-                 "/api/broker/desconectar", "/api/conectores/fmp"):
+    for ruta in ("/api/broker/desconectar", "/api/conectores/fmp"):
         with modo_web():
             r = cliente_web(flask_app).post(ruta, json={})
         assert r.status_code == 403, \
             f"{ruta} tiene que estar cerrado en la web, devolvió {r.status_code}"
+
+
+def test_en_local_el_login_de_cocos_no_deja_nada_en_disco():
+    """Decisión del 2026-11-04: ni usuario, ni clave, ni tokens en la máquina.
+
+    Los JWT llevan el email adentro, así que tampoco pueden salir en la respuesta
+    ni guardarse: el cliente queda en la memoria del proceso y nada más.
+    """
+    flask_app = require("api", "app").app
+    datos = require("api.routes", "datos")
+    vault = require("core.broker", "vault")
+    cocos = require("core.broker", "cocos")
+
+    original = cocos.login
+    llamadas = []
+    jwt = {"access_token": "SECRETO"}
+
+    def falso(email, password, codigo):
+        llamadas.append((email, password, codigo))
+        return {"conectado": True, "detalle": "login nuevo", "cuenta": "1"}, jwt
+
+    escrituras = []
+    escribir = vault._escribir_privado
+    vault._escribir_privado = lambda *a: escrituras.append(a)
+    cocos.login = falso
+    try:
+        c = flask_app.test_client()
+        datos._INTENTOS.clear()
+        r = c.post("/api/broker/web/login",
+                   json={"email": "a@b.c", "password": "x", "codigo_2fa": "123 456"})
+        assert r.status_code == 200 and llamadas == [("a@b.c", "x", "123456")], r.get_json()
+        cuerpo = r.get_json()
+        assert "sobre" not in cuerpo and "SECRETO" not in r.get_data(as_text=True), \
+            "en local los tokens no salen del proceso"
+        assert escrituras == [], "el login no puede tocar el vault"
+
+        r = c.post("/api/broker/web/login",
+                   json={"email": "a@b.c", "password": "x", "codigo_2fa": "JBSWY3DPEHPK3PXP"})
+        assert r.status_code == 400 and len(llamadas) == 1, "una semilla TOTP no se acepta"
+
+        for ruta in ("/api/broker/vault", "/api/broker/conectar", "/api/broker/borrar"):
+            assert c.post(ruta, json={}).status_code in (404, 405), \
+                f"{ruta} guardaba o usaba credenciales en disco: no puede volver"
+    finally:
+        cocos.login = original
+        vault._escribir_privado = escribir
 
 
 def test_la_suite_no_escribe_en_los_datos_de_verdad():
@@ -2527,7 +2571,7 @@ def test_sin_cabecera_el_modo_local_sigue_intacto():
 
     assert r.status_code == 200, "sin cabecera tiene que responder normal"
     assert "X-Sesion" not in r.headers, "sin sesión web no se emite ningún sobre"
-    assert "vault_cargado" in r.get_json(), "el modo local sigue reportando el vault"
+    assert r.get_json()["modo"] == "local", "sin PA_MODO manda el modo local"
 
 
 # ══════════════════════════════════════════════════════════════════════════

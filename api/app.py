@@ -110,8 +110,7 @@ LIBRES = ("/api/modo", "/api/yo", "/api/entrar", "/api/entrar/google", "/api/sal
 # máquina y la API key de FMP, que es nuestra y la comparten todos los usuarios.
 # Sin este corte, cualquiera con sesión podía borrar el vault o cambiarle la
 # clave de FMP a todo el mundo.
-SOLO_LOCAL = ("/api/broker/vault", "/api/broker/conectar", "/api/broker/borrar",
-              "/api/broker/desconectar", "/api/conectores/fmp",
+SOLO_LOCAL = ("/api/broker/desconectar", "/api/conectores/fmp",
               # InvIU guarda su sesión en `vault.py`, que es global al proceso —
               # no por usuario, como el sobre firmado de Cocos. Conectarlo en la
               # web mezclaría la sesión de un usuario con la de cualquier otro

@@ -24,7 +24,7 @@ que lo sustentan → comparar contra benchmarks y entre carteras.
 | Estructura del frontend | React 18 UMD por CDN, **JSX precompilado** | Sin Babel en el navegador: son 2.914 KB que no dibujan nada. Un comando, no un toolchain |
 | Tema | Claro / oscuro / seguir al sistema | Tokens CSS en un solo lugar; Plotly toma los colores de las mismas variables |
 | Moneda | **Dólar siempre** | MEP por la fecha exacta de cada operación, nunca el de hoy |
-| Precios de bonos | Cocos Capital + vault AES-256-GCM + 2FA | Único acceso a ONs y letras |
+| Precios de bonos | Cocos Capital + 2FA, sin guardar credenciales | Único acceso a ONs y letras |
 | Caché de mercado | Se reconstruye de cero | Las dos bases viejas se descartan |
 | Control de versiones | git desde el primer commit | Ninguno de los dos proyectos anteriores lo tenía |
 
@@ -40,10 +40,11 @@ funcionalidad central puede depender de ellas.
 | **Cocos Capital** | cuenta de broker | Bonos soberanos, ONs, letras | Todo lo demás anda; falta el precio de renta fija |
 | **FMP** | API key gratuita | Precios objetivo de analistas (EE.UU.) | Los objetivos salen de yfinance, con menos cobertura |
 
-Las credenciales del broker van cifradas en el vault (pueden mover dinero); la
+Las credenciales de Cocos no se guardan en ningún lado (pueden mover dinero):
+se tipean en cada conexión y la sesión vive en memoria. Decidido 2026-11-04,
+borrando el vault que había: tenía la clave al lado, así que protegía poco. La
 API key de FMP va en `data/connectors.json` con permisos 600 y fuera de git (es
-de solo lectura, y meterla en el vault obligaría a desbloquear el broker para
-consultar un precio objetivo).
+de solo lectura).
 
 ### FMP: la cuota manda el diseño
 
