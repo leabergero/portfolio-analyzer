@@ -183,7 +183,8 @@ const api = async (ruta, opciones) => {
   // para siempre (KARIN, Riesgo, 2026-10-07). Vuelve como cualquier error.
   let r;
   try { r = await fetch(ruta, o); }
-  catch { return { error: t("Se cortó la conexión con el servidor. Recargá la página.",
+  catch { return { sinConexion: true,
+                   error: t("Se cortó la conexión con el servidor. Recargá la página.",
                             "The connection to the server dropped. Reload the page.") }; }
 
   // Cocos renovó el token: el servidor devuelve un sobre nuevo y hay que
@@ -207,6 +208,8 @@ const api = async (ruta, opciones) => {
 
   const d = await r.json().catch(() => ({ error: "Respuesta ilegible del servidor." }));
   if (!r.ok && !d.error) d.error = `Error ${r.status}`;
+  // Caddy contesta esto mientras gunicorn reinicia: es un corte, no una respuesta.
+  if ([502, 503, 504].includes(r.status)) d.sinConexion = true;
 
   // Dos cosas distintas se pueden haber caído, y no se arreglan igual:
   //   ingresar     → la sesión de la app. Volver a entrar con Google.
@@ -1654,8 +1657,16 @@ function Analisis({ cartera, recargar, sim, setSim }) {
   // La simulación es parte de qué se está analizando: cambiarla es relanzar.
   const simKey = simul.cabecera(sim);
 
+  // `api` no rechaza cuando se corta la conexión: devuelve `{sinConexion, error}`.
+  // Un `.catch` acá no se enteraba, no había `run_id` que consultar y la pantalla
+  // quedaba en "Lanzando los modelos…" para siempre (MAMI, 2026-11-04). El corte
+  // se reintenta; un error de verdad se muestra. `intento` descarta la respuesta
+  // o el reintento de un pedido viejo: si no, volverían con la cartera anterior.
+  const intento = useRef(0);
+  const [sinRed, setSinRed] = useState(false);
   const lanzar = useCallback((forzar = false) => {
     if (!cartera) return;
+    const mio = ++intento.current;
     // Recalcular no vacía la pantalla: los números de antes se quedan a la vista
     // mientras se rehacen, y el botón es el que cuenta que está trabajando.
     setEstado((e) => (forzar && e ? { ...e, estado: "corriendo" } : null));
@@ -1663,11 +1674,19 @@ function Analisis({ cartera, recargar, sim, setSim }) {
     precalentarInviu().then(() => api(`/api/analisis/${encodeURIComponent(cartera)}`,
         { method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ forzar }) }))
-      .then((d) => d.run_id && setRun(d.run_id))
-      .catch(() => setTimeout(lanzar, 2000));
+      .then((d) => {
+        if (mio !== intento.current) return;
+        setSinRed(!!d.sinConexion);
+        if (d.run_id) setRun(d.run_id);
+        else if (d.sinConexion) setTimeout(() => mio === intento.current && lanzar(forzar), 2000);
+        else setEstado({ error: d.error });
+      });
   }, [cartera]);
 
-  useEffect(() => { lanzar(); }, [lanzar, simKey]);
+  useEffect(() => {
+    lanzar();
+    return () => { intento.current++; };
+  }, [lanzar, simKey]);
 
   /* El bucle que va pintando los paneles a medida que terminan.
 
@@ -1694,7 +1713,8 @@ function Analisis({ cartera, recargar, sim, setSim }) {
       } catch { /* se reintenta abajo */ }
       if (!vivo) return;
       if (d && /no existe|se descartó/i.test(d.error || "")) { lanzar(); return; }
-      if (d) setEstado(d);
+      // Un corte a mitad de corrida no borra lo que ya está pintado.
+      if (d && !d.sinConexion) setEstado(d);
       if (!d || d.estado !== "terminado") setTimeout(consultar, 1200);
     };
     consultar();
@@ -1703,7 +1723,10 @@ function Analisis({ cartera, recargar, sim, setSim }) {
 
   if (!cartera) return <div className="vacio">{t("Elegí una cartera arriba para analizarla.",
                                                   "Choose a portfolio above to analyze it.")}</div>;
-  if (!estado) return <div className="cargando">{t("Lanzando los modelos…", "Launching the models…")}</div>;
+  if (!estado) return <div className="cargando">{sinRed
+    ? t("Se cortó la conexión. Reintentando…", "The connection dropped. Retrying…")
+    : t("Lanzando los modelos…", "Launching the models…")}</div>;
+  if (estado.error && !estado.modelos) return <div className="vacio">{estado.error}</div>;
 
   const R = estado.resultados || {};
   const M = estado.modelos || {};
