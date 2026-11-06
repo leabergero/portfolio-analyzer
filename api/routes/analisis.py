@@ -14,7 +14,7 @@ Dos formas de pedir lo mismo, según haga falta:
 from flask import Blueprint, jsonify, request
 
 from api import jobs, sim
-from core.data import bonistas, finviz
+from core.data import bonistas, cds, finviz
 from core.data.symbols import is_bond
 from core.io import store
 from core.models import (blacklitterman, bonds, capm, composicion, hrp, markowitz,
@@ -144,6 +144,12 @@ def riesgo_rolling(nombre):
 def riesgo_decisiones(nombre):
     """VaR y rendimiento esperado antes y después de cada día operado."""
     return _suelto(nombre, "riesgo_decisiones", nombre)
+
+
+@bp.get("/riesgo/<nombre>/credito")
+def riesgo_credito(nombre):
+    """Qué chance le pone el CDS a un evento de crédito, por emisor y por cartera."""
+    return _simple(nombre, cds.analizar)
 
 
 @bp.get("/riesgo/<nombre>/cambiario")

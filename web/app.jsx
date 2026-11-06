@@ -169,6 +169,9 @@ const sesionInviu = {
   tirar: () => { try { localStorage.removeItem(SOBRE_INVIU); } catch { /* nada que hacer */ } },
 };
 
+// `?lab=1`: probabilidad de un evento de crédito según el CDS, en prueba.
+const LAB = new URLSearchParams(location.search).get("lab");
+
 const api = async (ruta, opciones) => {
   const o = { ...(opciones || {}) };
   const guardado = sesion.leer();
@@ -4753,6 +4756,10 @@ function Riesgo({ d, cartera, extras }) {
       <RiesgoEvolucion cartera={cartera} />
       <Seccion titulo={t("El riesgo de cada activo por separado", "The risk of each asset, separately")} />
       <RiesgoActivos cartera={cartera} />
+      {LAB && <>
+        <Seccion titulo={t("¿Qué chance hay de que un emisor no pague?", "How likely is an issuer to default?")} />
+        <RiesgoCredito cartera={cartera} />
+      </>}
       <Seccion titulo={t("Quién trae el riesgo de la cartera", "Who brings the portfolio's risk")} />
       <RiesgoResumen d={d} />
       <Seccion titulo={t("¿Cuánto del riesgo es el dólar?", "How much of the risk is the exchange rate?")} />
@@ -5075,6 +5082,86 @@ function RiesgoActivos({ cartera }) {
         </div>
       </div>
     </>
+  );
+}
+
+/* Probabilidad de un evento de crédito según el CDS a 5 años de ICE. En prueba: ?lab=1. */
+const nivelCds = (pb) => pb == null ? null : pb < 100 ? ["bien", "Sólido", "Solid"]
+  : pb < 300 ? ["debil", "Vigilar", "Watch"] : ["mal", "En riesgo", "At risk"];
+
+const CambioPb = ({ v }) => v == null ? <span className="pie">—</span>
+  : <span className={v > 0 ? "neg" : v < 0 ? "pos" : ""}>{v > 0 ? "+" : ""}{num(v, 0)}</span>;
+
+function RiesgoCredito({ cartera }) {
+  const c = colores();
+  const [d, setD] = useState(null);
+  const [sel, setSel] = useState(null);
+  useEffect(() => { setD(null); api(`/api/riesgo/${encodeURIComponent(cartera)}/credito`).then(setD); }, [cartera]);
+  if (!d) return <div className="cargando">{t("Leyendo los CDS de ICE…", "Reading ICE CDS…")}</div>;
+  if (d.error) return <div className="aviso mal">{d.error}</div>;
+  const k = d.cartera;
+  const foco = d.activos.find((a) => a.ticker === sel);
+  return (
+    <div className="panel">
+      <h3>{t("El seguro contra el default de cada emisor", "The default insurance on each issuer")}
+        {d.fecha && <span className="pie" style={{ marginLeft: "auto" }}>ICE · {d.fecha}</span>}</h3>
+      {d.aviso && <div className="aviso">{d.aviso}</div>}
+      {!k ? <div className="pie">{t("Ningún papel de esta cartera tiene CDS en ICE.",
+                                    "No holding in this portfolio has a CDS at ICE.")}</div> : (<>
+        <div className="kpis">
+          <Kpi etiqueta={t("CDS ponderado", "Weighted CDS")} valor={`${num(k.spread_pb, 0)} pb`}
+               nivel={nivelCds(k.spread_pb)}
+               sub={t(`sobre el ${pct(k.cobertura_pct, 0)} de la cartera`, `on ${pct(k.cobertura_pct, 0)} of the portfolio`)} />
+          <Kpi etiqueta={t("Chance en 12 meses", "Odds in 12 months")} valor={pct(k.prob_1a_pct)}
+               sub={t("promedio ponderado por emisor", "issuer-weighted average")} />
+          <Kpi etiqueta={t("Que caiga al menos uno", "At least one defaults")} valor={pct(k.alguno_1a_pct)}
+               sub={t("en 12 meses", "within 12 months")} />
+          <Kpi etiqueta={t("Pérdida esperada", "Expected loss")} valor={pct(k.perdida_1a_pct, 2)}
+               sub={t("de la cartera en 12 meses", "of the portfolio in 12 months")} />
+        </div>
+        <div className="tabla-wrap"><table>
+          <thead><tr><th>{t("Activo", "Asset")}</th><th>{t("Emisor", "Issuer")}</th>
+            <th className="n">{t("Peso", "Weight")}</th><th className="n">CDS 5a</th>
+            <th className="n">{t("Δ día", "Δ day")}</th><th className="n">{t("Δ 30 días", "Δ 30 days")}</th>
+            <th className="n">{t("12 meses", "12 months")}</th><th className="n">{t(`Hasta ${d.activos[0]?.vto?.slice(0, 4)}`, `Through ${d.activos[0]?.vto?.slice(0, 4)}`)}</th>
+          </tr></thead>
+          <tbody>{d.activos.map((a) => (
+            <tr key={a.ticker} onClick={() => setSel(sel === a.ticker ? null : a.ticker)}
+                style={{ cursor: "pointer", background: sel === a.ticker ? "var(--panel-2)" : null }}>
+              <td className="mono" style={{ whiteSpace: "nowrap" }}>{a.ticker}<LogoTicker ticker={a.ticker} /></td>
+              <td>{a.emisor}</td>
+              <td className="n">{pct(a.peso_pct, 1)}</td>
+              <td className="n"><span className={"nivel " + nivelCds(a.spread_pb)[0]}>{num(a.spread_pb, 0)} pb</span></td>
+              <td className="n"><CambioPb v={a.cambio_1d_pb} /></td>
+              <td className="n"><CambioPb v={a.cambio_30d_pb} /></td>
+              <td className="n">{pct(a.prob_1a_pct)}</td>
+              <td className="n">{pct(a.prob_vto_pct, 1)}</td>
+            </tr>))}</tbody>
+        </table></div>
+        {foco && (foco.serie.length > 1
+          ? <Grafico alto={220}
+              datos={[{ type: "scatter", mode: "lines+markers", x: foco.serie.map((p) => p[0]), y: foco.serie.map((p) => p[1]),
+                        line: { color: c.alerta, width: 1.5 }, hovertemplate: "%{x}: %{y:.0f} pb<extra></extra>" }]}
+              layout={{ yaxis: { title: `CDS ${foco.ticker}`, ticksuffix: " pb" } }} />
+          : <div className="pie">{t(`La historia de ${foco.ticker} empieza hoy: ICE publica sólo el último cierre y se guarda un día por vez.`,
+                                    `${foco.ticker}'s history starts today: ICE only publishes the last close, one day is kept at a time.`)}</div>)}
+      </>)}
+      {d.sin_cds?.length > 0 && <div className="pie">{t("Sin CDS en ICE: ", "No CDS at ICE: ")}{d.sin_cds.join(", ")}.</div>}
+      <div className="pie">
+        {t(`Un CDS es un seguro contra un evento de crédito del emisor: no pagar, reestructurar o quebrar. Más caro = el mercado ve más riesgo. `
+          + `La chance sale del precio del seguro con el modelo estándar de ISDA y un recupero del ${d.recupero_pct} %: incluye una prima por riesgo, `
+          + `así que es un techo, mejor para comparar y ver tendencias que como pronóstico.`,
+          `A CDS is insurance against a credit event of the issuer: missing a payment, restructuring or going bankrupt. Pricier = the market sees more risk. `
+          + `The odds come from the insurance price with the standard ISDA model and ${d.recupero_pct} % recovery: they include a risk premium, `
+          + `so they are a ceiling, better for comparing and spotting trends than as a forecast.`)}
+      </div>
+      <div className="pie">
+        {t(`La pérdida esperada supone que una acción va a cero y un bono recupera el ${d.recupero_pct} %. `
+          + `Un bono del Tesoro en dólares toma el CDS de Argentina; las ONs y los FCI quedan afuera.`,
+          `Expected loss assumes a stock goes to zero and a bond recovers ${d.recupero_pct} %. `
+          + `A Treasury dollar bond takes Argentina's CDS; corporate notes and funds are left out.`)}
+      </div>
+    </div>
   );
 }
 
