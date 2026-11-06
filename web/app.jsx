@@ -323,7 +323,7 @@ const LIBRES_EN = {
 const libre = (s) => (s == null ? s : t(s, LIBRES_EN[s] || s));
 
 // EVENTOS (regimenes.py) y ESCENARIOS de stress-test (risk.py): catálogos
-// fijos y acotados —35 eventos macro, 13 crisis reales—, no texto generado por
+// fijos y acotados —36 eventos macro, 14 crisis reales—, no texto generado por
 // usuario. Mismo criterio que LIBRES_EN: diccionario exacto, cae a español
 // si el backend agrega uno nuevo que todavía no está acá.
 const EVENTOS_EN = {
@@ -362,6 +362,7 @@ const EVENTOS_EN = {
   "Brasil, primera vuelta: Flávio Bolsonaro le gana a Lula": "Brazil, first round: Flávio Bolsonaro beats Lula",
   "Brasil, balotaje: gana Lula y caen las bolsas de la región": "Brazil, runoff: Lula wins and regional stock markets fall",
   "Alphabet decepciona: arranca la crisis de deuda de la IA": "Alphabet disappoints: the AI debt crisis begins",
+  "Congreso demócrata y miedo a reglas para la IA: el Nasdaq cae 5,5 %": "Democratic Congress and fear of AI rules: the Nasdaq falls 5.5 %",
 };
 const eventoDescripcion = (s) => (s == null ? s : t(s, EVENTOS_EN[s] || s));
 const ALCANCE_EN = { AR: "AR", MUNDO: "WORLD", BR: "BR" };
@@ -393,6 +394,9 @@ const ESCENARIOS_EN = {
   "Crisis de deuda de la IA 2026": "AI debt crisis 2026",
   "Alphabet decepciona; capex y deuda de la IA en duda, CDS en récord desde octubre: Alphabet −14 %, semiconductores −11 %, Nasdaq −4 %":
     "Alphabet disappoints; AI capex and debt in doubt, CDS at records since October: Alphabet −14 %, semiconductors −11 %, Nasdaq −4 %",
+  "Derrumbe de los chips 2026": "Chip crash 2026",
+  "Los demócratas ganan el Congreso y el mercado teme reglas duras para la IA: Nasdaq −5,5 %, su peor día en 19 meses; semiconductores −12 %, NVIDIA −9 %, S&P 500 −4,4 %":
+    "Democrats win Congress and the market fears tough AI rules: Nasdaq −5.5 %, its worst day in 19 months; semiconductors −12 %, NVIDIA −9 %, S&P 500 −4.4 %",
 };
 const escenarioLabel = (s) => (s == null ? s : t(s, ESCENARIOS_EN[s] || s));
 

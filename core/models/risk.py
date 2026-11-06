@@ -459,6 +459,10 @@ ESCENARIOS = [
     {"nombre": "Crisis de deuda de la IA 2026", "desde": "2026-10-28", "hasta": "2026-11-03",
      "descripcion": "Alphabet decepciona; capex y deuda de la IA en duda, CDS en récord desde "
                     "octubre: Alphabet −14 %, semiconductores −11 %, Nasdaq −4 %"},
+    {"nombre": "Derrumbe de los chips 2026", "desde": "2026-11-04", "hasta": "2026-11-05",
+     "descripcion": "Los demócratas ganan el Congreso y el mercado teme reglas duras para la IA: "
+                    "Nasdaq −5,5 %, su peor día en 19 meses; semiconductores −12 %, NVIDIA −9 %, "
+                    "S&P 500 −4,4 %"},
 ]
 
 

@@ -71,6 +71,7 @@ EVENTOS = [
     ("2026-10-04", "BR", "Brasil, primera vuelta: Flávio Bolsonaro le gana a Lula"),
     ("2026-10-26", "BR", "Brasil, balotaje: gana Lula y caen las bolsas de la región"),
     ("2026-10-28", "MUNDO", "Alphabet decepciona: arranca la crisis de deuda de la IA"),
+    ("2026-11-05", "MUNDO", "Congreso demócrata y miedo a reglas para la IA: el Nasdaq cae 5,5 %"),
 ]
 
 
