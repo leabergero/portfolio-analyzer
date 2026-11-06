@@ -169,9 +169,6 @@ const sesionInviu = {
   tirar: () => { try { localStorage.removeItem(SOBRE_INVIU); } catch { /* nada que hacer */ } },
 };
 
-// `?lab=1`: probabilidad de un evento de crédito según el CDS, en prueba.
-const LAB = new URLSearchParams(location.search).get("lab");
-
 const api = async (ruta, opciones) => {
   const o = { ...(opciones || {}) };
   const guardado = sesion.leer();
@@ -2139,7 +2136,6 @@ function Posicion({ d, cartera, recargar, lanzar, extras, bench, sim, setSim }) 
   const filas = d.posiciones || [];
   const [cds, setCds] = useState(null);
   useEffect(() => {
-    if (!LAB) return;
     let vivo = true;
     setCds(null);
     api(`/api/cds/${encodeURIComponent(cartera)}/marcas`).then((x) => vivo && !x.error && setCds(x));
@@ -4784,10 +4780,8 @@ function Riesgo({ d, cartera, extras }) {
       <RiesgoEvolucion cartera={cartera} />
       <Seccion titulo={t("El riesgo de cada activo por separado", "The risk of each asset, separately")} />
       <RiesgoActivos cartera={cartera} />
-      {LAB && <>
-        <Seccion titulo={t("¿Qué chance hay de que un emisor no pague?", "How likely is an issuer to default?")} />
-        <RiesgoCredito cartera={cartera} />
-      </>}
+      <Seccion titulo={t("¿Qué chance hay de que un emisor no pague?", "How likely is an issuer to default?")} />
+      <RiesgoCredito cartera={cartera} />
       <Seccion titulo={t("Quién trae el riesgo de la cartera", "Who brings the portfolio's risk")} />
       <RiesgoResumen d={d} />
       <Seccion titulo={t("¿Cuánto del riesgo es el dólar?", "How much of the risk is the exchange rate?")} />
@@ -5113,7 +5107,7 @@ function RiesgoActivos({ cartera }) {
   );
 }
 
-/* Probabilidad de un evento de crédito según el CDS a 5 años de ICE. En prueba: ?lab=1. */
+/* Probabilidad de un evento de crédito según el CDS a 5 años de ICE, o la TIR del bono. */
 const nivelCds = (pb) => pb == null ? null : pb < 100 ? ["bien", "Sólido", "Solid"]
   : pb < 300 ? ["debil", "Vigilar", "Watch"] : ["mal", "En riesgo", "At risk"];
 
