@@ -72,9 +72,10 @@ EMISOR = {
     "AMX": "AMSAB", "DOW": "DOW", "WBA": "WALGBOO", "FISV": "FISV", "SHW": "SHW",
 }
 ARGENTINA = "ARGENT"
-# Bonos del Tesoro en dólares (Bonares, Globales, Bonte, AO27/AO28). Las letras y
-# los bonos en pesos son el mismo deudor, pero su default es otro.
-_SOBERANO_USD = ("AL", "GD", "AE", "AO")
+# Un bono argentino no usa el CDS del país sino lo que paga él mismo: su TIR menos
+# la del Treasury del mismo plazo. El CDS es a 5 años y de deuda en ley extranjera;
+# AO28D vence en 2028 y es ley argentina. El del país queda de referencia.
+TIR = "TIR:"
 
 
 def emisor(ticker: str, source: str = None):
@@ -84,9 +85,78 @@ def emisor(ticker: str, source: str = None):
     if source == symbols.SOURCE_FCI:
         return None
     if symbols.is_bond(t, source):
-        base = symbols.base_symbol(t)
-        return ARGENTINA if base[:2] in _SOBERANO_USD and base[2:4].isdigit() and len(base) == 4 else None
+        return TIR + symbols.strip_ba(t)
     return EMISOR.get(finviz.subyacente(t, source) or "")
+
+
+# ── Bonos: spread de su propia TIR ────────────────────────────────────────────
+
+_CURVA_UST = (("^IRX", 0.25), ("^FVX", 5), ("^TNX", 10), ("^TYX", 30))
+
+
+def _curva_ust() -> list:
+    """[(años, rendimiento efectivo anual)] del Treasury, del día."""
+    clave = f"cds:ust:{date.today().isoformat()}"
+    c = cache.leer_respuesta(clave, 24)
+    if c:
+        return c
+    from core.data import yahoo
+    c = []
+    for sym, anios in _CURVA_UST:
+        try:
+            y = float(yahoo.ticker(sym).history(period="10d")["Close"].dropna().iloc[-1]) / 100
+            c.append((anios, (1 + y / 2) ** 2 - 1))     # Yahoo da semestral; bonistas, efectiva
+        except Exception as e:
+            log.warning("UST %s: %s", sym, e)
+    if len(c) >= 2:
+        cache.guardar_respuesta(clave, c)
+    return c
+
+
+def _ust(anios: float, curva: list) -> float:
+    """Interpolación lineal; ponytail: entre 3 meses y 5 años es una recta, sin el de 2."""
+    import numpy as np
+    x, y = zip(*curva)
+    return float(np.interp(anios, x, y))
+
+
+def spread_bono(tir: float, anios: float, curva: list):
+    """(spread en pb, prob. 12 meses %, prob. al vto. %) con el mismo recupero que los CDS."""
+    s = max((tir - _ust(anios, curva)) * 1e4, 0.0)
+    lam = s / 1e4 / (1 - RECUPERO)
+    return round(s, 1), round((1 - math.exp(-lam)) * 100, 2), round((1 - math.exp(-lam * anios)) * 100, 2)
+
+
+def _fecha_bonistas(texto, hoy: date) -> str:
+    """'November 6th, 2026' → '2026-11-06'. La caché de bonistas puede ser de ayer."""
+    import re
+    try:
+        return datetime.strptime(re.sub(r"(\d)(st|nd|rd|th)", r"\1", texto or ""), "%B %d, %Y").date().isoformat()
+    except ValueError:
+        return hoy.isoformat()
+
+
+def _bonos_tir() -> dict:
+    """{TIR:ticker: …} de todos los bonos en dólares de bonistas, como un emisor más."""
+    from core.data import bonistas
+    curva = _curva_ust()
+    if len(curva) < 2:
+        return {}
+    hoy, salida = date.today(), {}
+    for b in bonistas._bonos():
+        tir, vto = b.get("tir"), b.get("end_date")
+        if b.get("index") != "USS" or b.get("settlement") != "24hs" or tir is None or not vto:
+            continue
+        anios = (date.fromisoformat(vto) - hoy).days / 365.0
+        if anios <= 0.05:
+            continue
+        s, p1, pv = spread_bono(float(tir), anios, curva)
+        emi = b.get("emisor") or ""
+        salida[TIR + b["bond_name"]] = {
+            "spread_pb": s, "prob_1a_pct": p1, "prob_vto_pct": pv, "fecha": _fecha_bonistas(b.get("fecha"), hoy),
+            "nombre": "República Argentina" if emi == "Argentino" else emi, "vto": vto, "cupon_pb": None,
+            "tir_pct": round(float(tir) * 100, 2), "ley": b.get("bond_law"), "origen": "tir"}
+    return salida
 
 
 # ── Modelo estándar: riesgo de default constante ──────────────────────────────
@@ -243,6 +313,10 @@ def ultimo(forzar: bool = False) -> tuple:
             datos = cache.leer_respuesta(clave, 24 * 30, {})
             aviso = "ICE no respondió: se muestra el último cierre guardado." if datos else \
                     "ICE no respondió y no hay un cierre guardado."
+    try:
+        datos = {**datos, **_bonos_tir()}
+    except Exception as e:                       # bonistas es respaldo: no tumba los CDS
+        log.warning("bonos por TIR: %s", e)
     return datos, (_guardar_historia(datos) if datos else {}), aviso
 
 
@@ -311,10 +385,42 @@ def intensidad(spread_pb, z20):
     return round(r, 3) if r >= CERCA else None
 
 
+def _con_catalogo(datos: dict, posiciones) -> dict:
+    """Los bonos que `bonds.py` reconstruye con su flujo de fondos mandan sobre
+    bonistas, como en /api/tir: es la TIR exacta. Sin bonos, ni lo calcula."""
+    if not any(symbols.is_bond(str(p["ticker"]).upper(), p.get("source")) for p in posiciones):
+        return datos
+    from core.models import bonds
+    try:
+        propio = bonds.riesgo_tasa_cartera(posiciones)
+        curva = _curva_ust()
+    except Exception as e:
+        log.warning("bonos propios: %s", e)
+        return datos
+    if propio.get("error") or len(curva) < 2:
+        return datos
+    datos = dict(datos)
+    hoy = date.today()
+    for b in propio.get("bonos", []):
+        anios = b.get("anios_al_vencimiento")
+        tir = b.get("tir_efectiva_anual_pct")
+        if not anios or tir is None:
+            continue
+        s, p1, pv = spread_bono(tir / 100, anios, curva)
+        previo = datos.get(TIR + b["ticker"], {})
+        datos[TIR + b["ticker"]] = {
+            **previo, "spread_pb": s, "prob_1a_pct": p1, "prob_vto_pct": pv, "fecha": hoy.isoformat(),
+            "nombre": previo.get("nombre") or b.get("nombre"), "cupon_pb": None, "origen": "tir",
+            "vto": previo.get("vto") or date.fromordinal(hoy.toordinal() + round(anios * 365)).isoformat(),
+            "tir_pct": round(tir, 2)}
+    return datos
+
+
 def marcas(posiciones) -> dict:
     """{ticker: {riesgo, spread_pb, z20}} sólo de los que se acercan a un umbral.
     Sin valuar la cartera: es para pintar Tenencias, tiene que ser liviano."""
     datos, historia, _ = ultimo()
+    datos = _con_catalogo(datos, posiciones)
     salida = {}
     for p in posiciones:
         t = str(p["ticker"]).upper()
@@ -334,6 +440,8 @@ def analizar(posiciones) -> dict:
     """Por ticker y por cartera, pesado por lo que vale hoy cada posición."""
     from core.models import portfolio
     datos, historia, aviso = ultimo()
+    datos = _con_catalogo(datos, posiciones)
+    historia = _guardar_historia({k: v for k, v in datos.items() if k.startswith(TIR)})
     val = portfolio.valuar(posiciones)
     valor, tipo = {}, {}
     for f in val["posiciones"]:
@@ -351,7 +459,10 @@ def analizar(posiciones) -> dict:
             sin_cds.append(t)
             continue
         bono = symbols.is_bond(t, tipo[t])
+        pais = datos.get(ARGENTINA) if bono else None
         activos.append({
+            "origen": d.get("origen", "cds"), "ley": d.get("ley"), "tir_pct": d.get("tir_pct"),
+            "cds_pais_pb": pais["spread_pb"] if pais else None,
             "ticker": t, "emisor": d["nombre"], "codigo": cod, "es_bono": bono,
             "valor_usd": round(valor[t], 2), "peso_pct": round(valor[t] / total * 100, 2),
             **{k: d[k] for k in ("spread_pb", "prob_1a_pct", "prob_vto_pct", "fecha", "vto", "cupon_pb")},
@@ -398,4 +509,8 @@ if __name__ == "__main__":                       # chequeo de ida y vuelta, sin 
     assert _z(quieto[:-1] + [140]) > Z_ALERTA                       # un ensanche brusco enciende
     assert intensidad(142, None) is None and intensidad(240, None) == 0.8      # NVIDIA no; cerca sí
     assert intensidad(1220, None) > 1 and intensidad(50, 1.89) == 1            # Argentina; señal justa
+    curva = [(0.25, 0.04), (5, 0.046)]
+    s, p1, _ = spread_bono(0.165, 2.0, curva)
+    assert 1180 < s < 1230 and 15 < p1 < 20, (s, p1)                     # AO28D a 84
+    assert _fecha_bonistas("November 6th, 2026", hoy) == "2026-11-06"
     print("ok", desde_precio(102.4436, 100, hoy, fin), datetime.now().isoformat(timespec="seconds"))

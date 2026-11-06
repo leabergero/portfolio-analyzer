@@ -2333,9 +2333,9 @@ function Posicion({ d, cartera, recargar, lanzar, extras, bench, sim, setSim }) 
             <tr key={`${i}-${j}`} className={j ? "lote-hijo" : undefined}
                 style={(() => { const m = cds?.marcas?.[f.ticker]; return m ? { background: tinteCds(m.riesgo) } : undefined; })()}
                 title={(() => { const m = cds?.marcas?.[f.ticker]; if (!m) return undefined;
-                  return t(`CDS de ${m.emisor}: ${num(m.spread_pb, 0)} pb (umbral ${cds.umbral_pb})`
+                  return t(`Spread de crédito de ${m.emisor}: ${num(m.spread_pb, 0)} pb (umbral ${cds.umbral_pb})`
                            + (m.z20 != null ? ` · señal 20 r ${num(m.z20, 2)} (umbral ${cds.z_alerta})` : ""),
-                           `${m.emisor} CDS: ${num(m.spread_pb, 0)} bp (threshold ${cds.umbral_pb})`
+                           `${m.emisor} credit spread: ${num(m.spread_pb, 0)} bp (threshold ${cds.umbral_pb})`
                            + (m.z20 != null ? ` · 20-s signal ${num(m.z20, 2)} (threshold ${cds.z_alerta})` : "")); })()}>
               <td className="mono textochip" style={{ whiteSpace: "nowrap" }}>{j ? "└ " : f.lotes ? (
                 <span title={t("Ver las compras", "Show the purchases")} style={{ cursor: "pointer" }}
@@ -5169,7 +5169,7 @@ function RiesgoCredito({ cartera }) {
       {!k ? <div className="pie">{t("Ningún papel de esta cartera tiene CDS en ICE.",
                                     "No holding in this portfolio has a CDS at ICE.")}</div> : (<>
         <div className="kpis">
-          <Kpi etiqueta={t("CDS ponderado", "Weighted CDS")} valor={`${num(k.spread_pb, 0)} pb`}
+          <Kpi etiqueta={t("Spread ponderado", "Weighted spread")} valor={`${num(k.spread_pb, 0)} pb`}
                nivel={nivelCds(k.spread_pb)}
                sub={t(`sobre el ${pct(k.cobertura_pct, 0)} de la cartera`, `on ${pct(k.cobertura_pct, 0)} of the portfolio`)} />
           <Kpi etiqueta={t("Chance en 12 meses", "Odds in 12 months")} valor={pct(k.prob_1a_pct)}
@@ -5181,12 +5181,14 @@ function RiesgoCredito({ cartera }) {
         </div>
         <div className="tabla-wrap"><table>
           <thead><tr><th>{t("Activo", "Asset")}</th><th>{t("Emisor", "Issuer")}</th>
-            <th className="n">{t("Peso", "Weight")}</th><th className="n">CDS 5a</th>
+            <th className="n">{t("Peso", "Weight")}</th>
+            <th className="n" title={t("CDS a 5 años; en un bono, su TIR menos la del Treasury del mismo plazo",
+                                       "5-year CDS; for a bond, its yield minus the same-maturity Treasury")}>Spread</th>
             <th className="n">{t("Δ día", "Δ day")}</th><th className="n">{t("Δ 30 días", "Δ 30 days")}</th>
             <th className="n" title={t(`Ensanche de 20 ruedas en desvíos de su propio año; se enciende en ${d.z_alerta}`,
                                        `20-session widening in standard deviations of its own year; fires at ${d.z_alerta}`)}>
               {t("Señal 20 r", "20-s signal")}</th>
-            <th className="n">{t("12 meses", "12 months")}</th><th className="n">{t(`Hasta ${d.activos[0]?.vto?.slice(0, 4)}`, `Through ${d.activos[0]?.vto?.slice(0, 4)}`)}</th>
+            <th className="n">{t("12 meses", "12 months")}</th><th className="n">{t("Hasta el vto.", "To maturity")}</th>
           </tr></thead>
           <tbody>{d.activos.map((a) => (
             <tr key={a.ticker} onClick={() => setSel(sel === a.ticker ? null : a.ticker)}
@@ -5194,7 +5196,15 @@ function RiesgoCredito({ cartera }) {
               <td className="mono" style={{ whiteSpace: "nowrap" }}>{a.ticker}<LogoTicker ticker={a.ticker} /></td>
               <td>{a.emisor}</td>
               <td className="n">{pct(a.peso_pct, 1)}</td>
-              <td className="n"><span className={"nivel " + nivelCds(a.spread_pb)[0]}>{num(a.spread_pb, 0)} pb</span></td>
+              <td className="n" style={{ whiteSpace: "nowrap" }}>
+                {a.origen === "tir" && <span className="chip" style={{ marginRight: 6, minWidth: 0, padding: "2px 6px" }}
+                  title={t(`TIR ${pct(a.tir_pct)} menos el Treasury al mismo plazo`
+                           + (a.ley ? ` · ley ${a.ley === "LA" ? "argentina" : a.ley === "LNY" ? "Nueva York" : a.ley}` : "")
+                           + (a.cds_pais_pb != null ? ` · CDS de Argentina: ${num(a.cds_pais_pb, 0)} pb` : ""),
+                           `Yield ${pct(a.tir_pct)} minus the same-maturity Treasury`
+                           + (a.ley ? ` · ${a.ley === "LA" ? "Argentine" : a.ley === "LNY" ? "New York" : a.ley} law` : "")
+                           + (a.cds_pais_pb != null ? ` · Argentina CDS: ${num(a.cds_pais_pb, 0)} bp` : ""))}>TIR</span>}
+                <span className={"nivel " + nivelCds(a.spread_pb)[0]}>{num(a.spread_pb, 0)} pb</span></td>
               <td className="n"><CambioPb v={a.cambio_1d_pb} /></td>
               <td className="n"><CambioPb v={a.cambio_30d_pb} /></td>
               <td className="n">{a.z20 == null
@@ -5203,7 +5213,7 @@ function RiesgoCredito({ cartera }) {
                 : <span className={a.z20 >= d.z_alerta ? "neg" : ""} style={{ fontWeight: a.z20 >= d.z_alerta ? 700 : 400 }}>
                     {num(a.z20, 2)}{a.z20 >= d.z_alerta ? " ⚠" : ""}</span>}</td>
               <td className="n">{pct(a.prob_1a_pct)}</td>
-              <td className="n">{pct(a.prob_vto_pct, 1)}</td>
+              <td className="n" title={a.vto}>{pct(a.prob_vto_pct, 1)} <span className="pie">{a.vto?.slice(0, 4)}</span></td>
             </tr>))}</tbody>
         </table></div>
         {foco && (foco.serie.length > 1
@@ -5225,9 +5235,11 @@ function RiesgoCredito({ cartera }) {
       </div>
       <div className="pie">
         {t(`La pérdida esperada supone que una acción va a cero y un bono recupera el ${d.recupero_pct} %. `
-          + `Un bono del Tesoro en dólares toma el CDS de Argentina; las ONs y los FCI quedan afuera.`,
+          + `Un bono o una ON no usa un CDS sino lo que paga: su TIR menos la del Treasury al mismo plazo (marca TIR); `
+          + `el CDS de Argentina queda de referencia al pasar el mouse. Los FCI quedan afuera.`,
           `Expected loss assumes a stock goes to zero and a bond recovers ${d.recupero_pct} %. `
-          + `A Treasury dollar bond takes Argentina's CDS; corporate notes and funds are left out.`)}
+          + `A bond or corporate note doesn't use a CDS but what it pays: its yield minus the same-maturity Treasury (TIR tag); `
+          + `Argentina's CDS stays as a reference on hover. Funds are left out.`)}
       </div>
     </div>
   );
