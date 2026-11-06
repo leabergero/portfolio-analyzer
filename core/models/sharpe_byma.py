@@ -141,7 +141,7 @@ if __name__ == "__main__":
     # depende de que alguien abra el panel. Timer propio si alguna vez molesta.
     try:
         from core.data import cds
-        datos, historia, _ = cds.ultimo()
+        datos, historia, _ = cds.ultimo(forzar=True)
         print(f"CDS: {len(datos)} emisores, {len(historia)} días guardados")
     except Exception as e:
         print(f"CDS: {e}")

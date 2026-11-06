@@ -16,6 +16,7 @@ si el mercado se pone nervioso, no como pronóstico literal.
 """
 import json
 import logging
+from collections import Counter
 import math
 import os
 from datetime import date, datetime
@@ -30,6 +31,9 @@ HORAS_CACHE = 6
 RECUPERO = 0.40          # el estándar de ISDA para deuda senior
 TASA = 0.04              # ponytail: tasa plana; ISDA usa la curva SOFR, mueve el spread < 1 pb
 HISTORIA = Path(__file__).resolve().parents[2] / "data" / "cds_historia.json"
+# Lo que publica ICE, tal cual y completo (todas las monedas y cupones): con esto
+# la historia se puede recalcular si cambia el modelo. ~15 KB por día comprimido.
+CRUDO = HISTORIA.parent / "cds_ice"
 
 # La señal: cuánto se ensanchó en 20 ruedas, en desvíos de su propio año. Un
 # salto de un día no anticipa nada; 20 ruedas sí (backtest 1987–2026 en
@@ -174,29 +178,63 @@ def _resumir(filas) -> dict:
     return por
 
 
+def _escribir(destino: Path, datos: bytes) -> None:
+    tmp = destino.with_suffix(".tmp")
+    tmp.write_bytes(datos)
+    os.replace(tmp, destino)
+
+
+def _guardar_crudo(filas: list) -> None:
+    """Un archivo por fecha de cierre. ICE mezcla fechas —unos pocos emisores ya
+    vienen con la de hoy mientras el resto sigue en la de ayer—, así que cada
+    fila va a su día y se suma a lo que ese día ya tenía."""
+    import gzip
+    CRUDO.mkdir(exist_ok=True)
+    por_fecha = {}
+    for x in filas:
+        if x.get("clearingDate") and x.get("instrumentName"):
+            por_fecha.setdefault(x["clearingDate"], {})[x["instrumentName"]] = x
+    for fecha, nuevas in por_fecha.items():
+        destino = CRUDO / f"{fecha}.json.gz"
+        try:
+            viejas = {x["instrumentName"]: x for x in json.loads(gzip.decompress(destino.read_bytes()))}
+        except (OSError, ValueError):
+            viejas = {}
+        if any(viejas.get(k) != v for k, v in nuevas.items()):
+            viejas.update(nuevas)
+            _escribir(destino, gzip.compress(json.dumps(sorted(viejas.values(), key=lambda x: x["instrumentName"]),
+                                                       separators=(",", ":")).encode()))
+
+
 def _guardar_historia(hoy: dict) -> dict:
-    """Suma el día a la historia (un spread por emisor y fecha) y la devuelve."""
+    """Suma a la historia el spread de cada emisor en SU fecha de cierre, y la devuelve."""
     try:
         h = json.loads(HISTORIA.read_text())
     except (OSError, ValueError):
         h = {}
-    fecha = next(iter(hoy.values()), {}).get("fecha")
-    if fecha and fecha not in h:
-        h[fecha] = {k: v["spread_pb"] for k, v in hoy.items()}
-        tmp = HISTORIA.with_suffix(".tmp")
-        tmp.write_text(json.dumps(h, separators=(",", ":"), sort_keys=True))
-        os.replace(tmp, HISTORIA)
+    cambio = False
+    for cod, v in hoy.items():
+        if h.setdefault(v["fecha"], {}).get(cod) != v["spread_pb"]:
+            h[v["fecha"]][cod] = v["spread_pb"]
+            cambio = True
+    if cambio:
+        _escribir(HISTORIA, json.dumps(h, separators=(",", ":"), sort_keys=True).encode())
     return h
 
 
-def ultimo() -> tuple:
-    """(resumen por emisor, historia, aviso). Si ICE no responde, lo último guardado."""
+def ultimo(forzar: bool = False) -> tuple:
+    """(resumen por emisor, historia, aviso). Si ICE no responde, lo último guardado.
+
+    `forzar` es para el timer: cada precio queda unas 24 h en ICE (Asia cierra
+    antes que EE.UU.), así que una bajada diaria que no lea la caché no pierde días."""
     clave = "cds:ice:v1"
-    datos = cache.leer_respuesta(clave, HORAS_CACHE)
+    datos = None if forzar else cache.leer_respuesta(clave, HORAS_CACHE)
     aviso = None
     if datos is None:
         try:
-            datos = _resumir(_bajar())
+            filas = _bajar()
+            _guardar_crudo(filas)
+            datos = _resumir(filas)
             cache.guardar_respuesta(clave, datos)
         except Exception as e:
             log.warning("ICE CDS: %s", e)
@@ -316,7 +354,8 @@ def analizar(posiciones) -> dict:
         }
     return {"activos": activos, "cartera": cartera, "sin_cds": sin_cds, "aviso": aviso,
             "mercado": alerta_mercado(), "z_alerta": Z_ALERTA,
-            "fecha": next(iter(datos.values()), {}).get("fecha") if datos else None,
+            # La de la mayoría: Asia ya puede venir con la de hoy.
+            "fecha": Counter(v["fecha"] for v in datos.values()).most_common(1)[0][0] if datos else None,
             "recupero_pct": RECUPERO * 100}
 
 
