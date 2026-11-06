@@ -137,11 +137,3 @@ def leer() -> dict:
 if __name__ == "__main__":
     d = calcular(int(sys.argv[1]) if len(sys.argv) > 1 else 2)
     print(f"{len(d['filas'])} de {d['listados']} papeles → {SALIDA}")
-    # ponytail: el mismo timer guarda el cierre de CDS del día, así la historia no
-    # depende de que alguien abra el panel. Timer propio si alguna vez molesta.
-    try:
-        from core.data import cds
-        datos, historia, _ = cds.ultimo(forzar=True)
-        print(f"CDS: {len(datos)} emisores, {len(historia)} días guardados")
-    except Exception as e:
-        print(f"CDS: {e}")

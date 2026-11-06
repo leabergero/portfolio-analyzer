@@ -19,6 +19,7 @@ import logging
 from collections import Counter
 import math
 import os
+import sys
 from datetime import date, datetime
 from pathlib import Path
 
@@ -121,8 +122,13 @@ def _ust(anios: float, curva: list) -> float:
 
 
 def spread_bono(tir: float, anios: float, curva: list):
-    """(spread en pb, prob. 12 meses %, prob. al vto. %) con el mismo recupero que los CDS."""
-    s = max((tir - _ust(anios, curva)) * 1e4, 0.0)
+    """(spread en pb, prob. 12 meses %, prob. al vto. %) con el mismo recupero que los CDS,
+    o None si la TIR queda debajo del Treasury: ningún emisor argentino debe menos
+    riesgo que EE.UU., es un precio ruidoso (YM37D a medio año: 2,9 % en 24 hs y
+    8,5 % en CI el mismo día). Mejor sin dato que un cero que tranquiliza."""
+    s = (tir - _ust(anios, curva)) * 1e4
+    if s <= 0:
+        return None
     lam = s / 1e4 / (1 - RECUPERO)
     return round(s, 1), round((1 - math.exp(-lam)) * 100, 2), round((1 - math.exp(-lam * anios)) * 100, 2)
 
@@ -150,7 +156,10 @@ def _bonos_tir() -> dict:
         anios = (date.fromisoformat(vto) - hoy).days / 365.0
         if anios <= 0.05:
             continue
-        s, p1, pv = spread_bono(float(tir), anios, curva)
+        r = spread_bono(float(tir), anios, curva)
+        if not r:
+            continue
+        s, p1, pv = r
         emi = b.get("emisor") or ""
         salida[TIR + b["bond_name"]] = {
             "spread_pb": s, "prob_1a_pct": p1, "prob_vto_pct": pv, "fecha": _fecha_bonistas(b.get("fecha"), hoy),
@@ -406,7 +415,10 @@ def _con_catalogo(datos: dict, posiciones) -> dict:
         tir = b.get("tir_efectiva_anual_pct")
         if not anios or tir is None:
             continue
-        s, p1, pv = spread_bono(tir / 100, anios, curva)
+        r = spread_bono(tir / 100, anios, curva)
+        if not r:
+            continue
+        s, p1, pv = r
         previo = datos.get(TIR + b["ticker"], {})
         datos[TIR + b["ticker"]] = {
             **previo, "spread_pb": s, "prob_1a_pct": p1, "prob_vto_pct": pv, "fecha": hoy.isoformat(),
@@ -498,7 +510,18 @@ def analizar(posiciones) -> dict:
             "recupero_pct": RECUPERO * 100}
 
 
-if __name__ == "__main__":                       # chequeo de ida y vuelta, sin red
+def guardar_dia() -> str:
+    """Lo que corre el timer `cds-ice.timer`: baja ICE sin caché y guarda el día."""
+    datos, historia, aviso = ultimo(forzar=True)
+    if aviso:
+        raise SystemExit(aviso)                  # que systemd lo marque como falla
+    fechas = Counter(v["fecha"] for v in datos.values())
+    return f"{len(datos)} emisores ({dict(fechas)}), {len(historia)} días de historia"
+
+
+if __name__ == "__main__" and sys.argv[1:] == ["guardar"]:
+    print(guardar_dia())
+elif __name__ == "__main__":                     # chequeo de ida y vuelta, sin red
     hoy, fin = date(2026, 11, 5), date(2031, 12, 20)
     for s, c in ((47, 100), (222, 100), (975, 500), (100, 100)):
         r = desde_precio(precio(s, c, hoy, fin), c, hoy, fin)
@@ -513,4 +536,5 @@ if __name__ == "__main__":                       # chequeo de ida y vuelta, sin 
     s, p1, _ = spread_bono(0.165, 2.0, curva)
     assert 1180 < s < 1230 and 15 < p1 < 20, (s, p1)                     # AO28D a 84
     assert _fecha_bonistas("November 6th, 2026", hoy) == "2026-11-06"
+    assert spread_bono(0.0289, 0.5, curva) is None                        # YM37D: debajo del Treasury
     print("ok", desde_precio(102.4436, 100, hoy, fin), datetime.now().isoformat(timespec="seconds"))
