@@ -2125,8 +2125,26 @@ function abrirReporte(nombre) {
 
 const ACCION_TENENCIAS = { fontSize: 11.5, padding: "3px 10px", minHeight: 27 };
 
+/* Fondo de la fila según qué tan cerca está el emisor de un umbral de CDS (1 = lo
+   cruzó): nada hasta el 80 %, de transparente a ámbar hasta el umbral, y de ámbar
+   a rojo hasta 1,5 veces el umbral. Así se marca sólo el que tiene riesgo. */
+const tinteCds = (r) => {
+  if (r == null || r < 0.8) return null;
+  if (r < 1) return `color-mix(in srgb, var(--alerta) ${Math.round((r - 0.8) / 0.2 * 28)}%, transparent)`;
+  const k = Math.round(Math.min((r - 1) / 0.5, 1) * 100);
+  return `color-mix(in srgb, color-mix(in srgb, var(--negativo) ${k}%, var(--alerta)) 28%, transparent)`;
+};
+
 function Posicion({ d, cartera, recargar, lanzar, extras, bench, sim, setSim }) {
   const filas = d.posiciones || [];
+  const [cds, setCds] = useState(null);
+  useEffect(() => {
+    if (!LAB) return;
+    let vivo = true;
+    setCds(null);
+    api(`/api/cds/${encodeURIComponent(cartera)}/marcas`).then((x) => vivo && !x.error && setCds(x));
+    return () => { vivo = false; };
+  }, [cartera]);
   const [altaAbierta, setAltaAbierta] = useState(false);
   const [simAbierto, setSimAbierto] = useState(false);
   const [crudo, setCrudo] = useState(null);
@@ -2312,7 +2330,13 @@ function Posicion({ d, cartera, recargar, lanzar, extras, bench, sim, setSim }) 
                 onClick={() => ordenarPor("twu")} style={{ cursor: "pointer" }}>TWU</th>
           </tr></thead>
           <tbody>{filasOrdenadas.flatMap((g, i) => [g, ...(g.lotes && abiertos[g.ticker] ? g.lotes : [])].map((f, j) => (
-            <tr key={`${i}-${j}`} className={j ? "lote-hijo" : undefined}>
+            <tr key={`${i}-${j}`} className={j ? "lote-hijo" : undefined}
+                style={(() => { const m = cds?.marcas?.[f.ticker]; return m ? { background: tinteCds(m.riesgo) } : undefined; })()}
+                title={(() => { const m = cds?.marcas?.[f.ticker]; if (!m) return undefined;
+                  return t(`CDS de ${m.emisor}: ${num(m.spread_pb, 0)} pb (umbral ${cds.umbral_pb})`
+                           + (m.z20 != null ? ` · señal 20 r ${num(m.z20, 2)} (umbral ${cds.z_alerta})` : ""),
+                           `${m.emisor} CDS: ${num(m.spread_pb, 0)} bp (threshold ${cds.umbral_pb})`
+                           + (m.z20 != null ? ` · 20-s signal ${num(m.z20, 2)} (threshold ${cds.z_alerta})` : "")); })()}>
               <td className="mono textochip" style={{ whiteSpace: "nowrap" }}>{j ? "└ " : f.lotes ? (
                 <span title={t("Ver las compras", "Show the purchases")} style={{ cursor: "pointer" }}
                       onClick={() => setAbiertos((x) => ({ ...x, [f.ticker]: !x[f.ticker] }))}>

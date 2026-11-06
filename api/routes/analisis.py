@@ -152,6 +152,12 @@ def riesgo_credito(nombre):
     return _simple(nombre, cds.analizar)
 
 
+@bp.get("/cds/<nombre>/marcas")
+def cds_marcas(nombre):
+    """Los papeles que se acercan a un umbral de CDS, para pintar Tenencias."""
+    return _simple(nombre, cds.marcas)
+
+
 @bp.get("/riesgo/<nombre>/cambiario")
 def riesgo_fx(nombre):
     """Cuánto del riesgo viene del activo y cuánto del tipo de cambio."""

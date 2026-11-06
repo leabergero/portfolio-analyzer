@@ -44,6 +44,8 @@ CRUDO = HISTORIA.parent / "cds_ice"
 RUEDAS = 20
 Z_ALERTA = 1.89
 MIN_HISTORIA = 80        # 20 para el primer ensanche + 60 para medir su desvío
+UMBRAL_PB = 300         # el "En riesgo" del semáforo; a ojo, ver backtest-senal-credito
+CERCA = 0.8             # desde el 80 % de un umbral se empieza a marcar
 BACKTEST = {"base_pct": 14.6, "con_senal_pct": 29.4, "p": 0.021, "muestra_desde": 2007}
 
 # Subyacente en EE.UU. → código de ICE. Sólo los que tienen CEDEAR o ADR; lo que
@@ -302,6 +304,32 @@ def alerta_mercado() -> dict:
     return r
 
 
+def intensidad(spread_pb, z20):
+    """Qué tan cerca está del umbral que más cerca tenga: 1 = lo cruzó. Por nivel
+    (UMBRAL_PB) o por ensanche de 20 ruedas (Z_ALERTA), el que esté peor."""
+    r = max(spread_pb / UMBRAL_PB if spread_pb else 0.0, z20 / Z_ALERTA if z20 else 0.0)
+    return round(r, 3) if r >= CERCA else None
+
+
+def marcas(posiciones) -> dict:
+    """{ticker: {riesgo, spread_pb, z20}} sólo de los que se acercan a un umbral.
+    Sin valuar la cartera: es para pintar Tenencias, tiene que ser liviano."""
+    datos, historia, _ = ultimo()
+    salida = {}
+    for p in posiciones:
+        t = str(p["ticker"]).upper()
+        cod = emisor(t, p.get("source"))
+        d = datos.get(cod) if cod else None
+        if not d or t in salida:
+            continue
+        serie = [historia[f][cod] for f in sorted(historia) if cod in historia[f]]
+        z = _z(serie)
+        r = intensidad(d["spread_pb"], z)
+        if r:
+            salida[t] = {"riesgo": r, "spread_pb": d["spread_pb"], "z20": z, "emisor": d["nombre"]}
+    return {"marcas": salida, "umbral_pb": UMBRAL_PB, "z_alerta": Z_ALERTA}
+
+
 def analizar(posiciones) -> dict:
     """Por ticker y por cartera, pesado por lo que vale hoy cada posición."""
     from core.models import portfolio
@@ -368,4 +396,6 @@ if __name__ == "__main__":                       # chequeo de ida y vuelta, sin 
     quieto = [100 + (i % 3) for i in range(100)]
     assert _z(quieto[:79]) is None and abs(_z(quieto)) < 2
     assert _z(quieto[:-1] + [140]) > Z_ALERTA                       # un ensanche brusco enciende
+    assert intensidad(142, None) is None and intensidad(240, None) == 0.8      # NVIDIA no; cerca sí
+    assert intensidad(1220, None) > 1 and intensidad(50, 1.89) == 1            # Argentina; señal justa
     print("ok", desde_precio(102.4436, 100, hoy, fin), datetime.now().isoformat(timespec="seconds"))
