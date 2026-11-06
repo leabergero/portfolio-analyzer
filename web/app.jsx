@@ -5096,6 +5096,37 @@ const nivelCds = (pb) => pb == null ? null : pb < 100 ? ["bien", "Sólido", "Sol
 const CambioPb = ({ v }) => v == null ? <span className="pie">—</span>
   : <span className={v > 0 ? "neg" : v < 0 ? "pos" : ""}>{v > 0 ? "+" : ""}{num(v, 0)}</span>;
 
+// La alerta que el backtest sí validó: el crédito de todo el mercado (HYG contra IEF).
+function AlertaCredito({ m }) {
+  const c = colores();
+  if (!m) return null;
+  if (m.error) return <div className="pie">{m.error}</div>;
+  const fecha = (s) => s && new Date(s + "T12:00").toLocaleDateString(IDIOMA === "en" ? "en-US" : "es-AR", { day: "numeric", month: "short" });
+  return (
+    <div className={"aviso " + (m.encendida ? "mal" : "ok")} style={{ marginBottom: 14 }}>
+      <b>{m.encendida
+        ? t(`Alerta de crédito encendida desde el ${fecha(m.desde)}.`, `Credit alert on since ${fecha(m.desde)}.`)
+        : m.desde ? t(`Alerta de crédito apagándose: se encendió el ${fecha(m.desde)}.`, `Credit alert fading: it fired on ${fecha(m.desde)}.`)
+                  : t("Sin alerta de crédito.", "No credit alert.")}</b>{" "}
+      {t(`El high yield se ensanchó ${num(m.z, 2)} desvíos en 20 ruedas contra el Treasury (umbral ${m.umbral}). `
+        + `Desde ${m.muestra_desde}, con la alerta encendida el S&P 500 cayó 10 % o más en los 60 días siguientes `
+        + `el ${pct(m.con_senal_pct, 1)} de las veces, contra ${pct(m.base_pct, 1)} sin ella (p = ${m.p}). `
+        + `Un salto de un solo día no anticipó nada.`,
+        `High yield widened ${num(m.z, 2)} deviations in 20 sessions against Treasuries (threshold ${m.umbral}). `
+        + `Since ${m.muestra_desde}, with the alert on the S&P 500 fell 10 % or more in the next 60 days `
+        + `${pct(m.con_senal_pct, 1)} of the time, against ${pct(m.base_pct, 1)} without it (p = ${m.p}). `
+        + `A single-day jump anticipated nothing.`)}
+      <Grafico alto={150}
+        datos={[{ type: "scatter", mode: "lines", x: m.serie.map((p) => p[0]), y: m.serie.map((p) => p[1]),
+                  line: { color: m.encendida ? c.negativo : c.texto2, width: 1.5 },
+                  hovertemplate: "%{x}: z %{y:.2f}<extra></extra>" }]}
+        layout={{ margin: { t: 8, b: 24, l: 36, r: 8 }, yaxis: { zeroline: false },
+                  shapes: [{ type: "line", xref: "paper", x0: 0, x1: 1, y0: m.umbral, y1: m.umbral,
+                             line: { color: c.alerta, width: 1, dash: "dash" } }] }} />
+    </div>
+  );
+}
+
 function RiesgoCredito({ cartera }) {
   const c = colores();
   const [d, setD] = useState(null);
@@ -5110,6 +5141,7 @@ function RiesgoCredito({ cartera }) {
       <h3>{t("El seguro contra el default de cada emisor", "The default insurance on each issuer")}
         {d.fecha && <span className="pie" style={{ marginLeft: "auto" }}>ICE · {d.fecha}</span>}</h3>
       {d.aviso && <div className="aviso">{d.aviso}</div>}
+      <AlertaCredito m={d.mercado} />
       {!k ? <div className="pie">{t("Ningún papel de esta cartera tiene CDS en ICE.",
                                     "No holding in this portfolio has a CDS at ICE.")}</div> : (<>
         <div className="kpis">
@@ -5127,6 +5159,9 @@ function RiesgoCredito({ cartera }) {
           <thead><tr><th>{t("Activo", "Asset")}</th><th>{t("Emisor", "Issuer")}</th>
             <th className="n">{t("Peso", "Weight")}</th><th className="n">CDS 5a</th>
             <th className="n">{t("Δ día", "Δ day")}</th><th className="n">{t("Δ 30 días", "Δ 30 days")}</th>
+            <th className="n" title={t(`Ensanche de 20 ruedas en desvíos de su propio año; se enciende en ${d.z_alerta}`,
+                                       `20-session widening in standard deviations of its own year; fires at ${d.z_alerta}`)}>
+              {t("Señal 20 r", "20-s signal")}</th>
             <th className="n">{t("12 meses", "12 months")}</th><th className="n">{t(`Hasta ${d.activos[0]?.vto?.slice(0, 4)}`, `Through ${d.activos[0]?.vto?.slice(0, 4)}`)}</th>
           </tr></thead>
           <tbody>{d.activos.map((a) => (
@@ -5138,6 +5173,11 @@ function RiesgoCredito({ cartera }) {
               <td className="n"><span className={"nivel " + nivelCds(a.spread_pb)[0]}>{num(a.spread_pb, 0)} pb</span></td>
               <td className="n"><CambioPb v={a.cambio_1d_pb} /></td>
               <td className="n"><CambioPb v={a.cambio_30d_pb} /></td>
+              <td className="n">{a.z20 == null
+                ? <span className="pie" title={t("La regla necesita historia propia del CDS", "The rule needs the CDS's own history")}>
+                    {t(`faltan ${a.faltan_dias} d`, `${a.faltan_dias} d to go`)}</span>
+                : <span className={a.z20 >= d.z_alerta ? "neg" : ""} style={{ fontWeight: a.z20 >= d.z_alerta ? 700 : 400 }}>
+                    {num(a.z20, 2)}{a.z20 >= d.z_alerta ? " ⚠" : ""}</span>}</td>
               <td className="n">{pct(a.prob_1a_pct)}</td>
               <td className="n">{pct(a.prob_vto_pct, 1)}</td>
             </tr>))}</tbody>

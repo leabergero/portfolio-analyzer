@@ -31,6 +31,17 @@ RECUPERO = 0.40          # el estándar de ISDA para deuda senior
 TASA = 0.04              # ponytail: tasa plana; ISDA usa la curva SOFR, mueve el spread < 1 pb
 HISTORIA = Path(__file__).resolve().parents[2] / "data" / "cds_historia.json"
 
+# La señal: cuánto se ensanchó en 20 ruedas, en desvíos de su propio año. Un
+# salto de un día no anticipa nada; 20 ruedas sí (backtest 1987–2026 en
+# ~/Vídeos/QUANTCENTRAL/cds-backtest-2026-11): con HYG/IEF por encima de 1,89
+# —su percentil 95— la chance de que el S&P caiga 10 % en 60 ruedas pasa de
+# 14,6 % a 29,4 % (p = 0,021). En 2026 se encendió el 16-oct, 12 días antes
+# de Alphabet. Por emisor es la misma regla, todavía sin validar.
+RUEDAS = 20
+Z_ALERTA = 1.89
+MIN_HISTORIA = 80        # 20 para el primer ensanche + 60 para medir su desvío
+BACKTEST = {"base_pct": 14.6, "con_senal_pct": 29.4, "p": 0.021, "muestra_desde": 2007}
+
 # Subyacente en EE.UU. → código de ICE. Sólo los que tienen CEDEAR o ADR; lo que
 # no está acá no tiene CDS en la lista de ICE (ETFs, Micron, Adobe, Lilly, Vista…).
 EMISOR = {
@@ -204,6 +215,55 @@ def _cambio(historia: dict, cod: str, fecha: str, dias: int):
     return round(historia[fecha][cod] - historia[max(previas)][cod], 1) if cod in historia.get(fecha, {}) else None
 
 
+def _z(serie: list):
+    """z del ensanche de las últimas RUEDAS contra los anteriores, o None si falta historia."""
+    if len(serie) < MIN_HISTORIA:
+        return None
+    import numpy as np
+    s = np.array(serie, dtype=float)
+    d = s[RUEDAS:] - s[:-RUEDAS]
+    sd = d[-253:-1].std(ddof=1)
+    return round(float(d[-1] / sd), 2) if sd > 0 else None
+
+
+def alerta_mercado() -> dict:
+    """Ensanche de 20 ruedas del high yield contra el Treasury (HYG/IEF), en z."""
+    clave = f"cds:alerta:{date.today().isoformat()}"
+    guardado = cache.leer_respuesta(clave, HORAS_CACHE)
+    if guardado is not None:
+        return guardado
+    import numpy as np
+    from core.data import yahoo
+    try:
+        # Ajustados: HYG reparte todos los meses y sin ajustar cada pago parece estrés.
+        px = {t: yahoo.ticker(t).history(start="2006-01-01", auto_adjust=True)["Close"] for t in ("HYG", "IEF")}
+    except Exception as e:
+        log.warning("alerta HYG/IEF: %s", e)
+        return {"error": "Yahoo no respondió: sin alerta de mercado por ahora."}
+    import pandas as pd
+    df = pd.DataFrame(px).dropna()
+    df.index = df.index.tz_localize(None) if getattr(df.index, "tz", None) else df.index
+    estres = -(np.log(df.HYG) - np.log(df.IEF)) * 1e4
+    d = estres.diff(RUEDAS)
+    z = (d / d.rolling(252).std().shift(1)).dropna()
+    # Un episodio sigue vivo mientras no pasen RUEDAS seguidas debajo del umbral:
+    # en 2026 cruzó el 16-oct, aflojó unos días y volvió el 30-oct; es la misma alerta.
+    arriba = np.flatnonzero(z.values >= Z_ALERTA)
+    desde = None
+    if len(arriba) and len(z) - 1 - arriba[-1] < RUEDAS:
+        i = len(arriba) - 1
+        while i > 0 and arriba[i] - arriba[i - 1] <= RUEDAS:
+            i -= 1
+        desde = str(z.index[arriba[i]].date())
+    encendida = bool(z.iloc[-1] >= Z_ALERTA)
+    ult = z.iloc[-130:]
+    r = {"z": round(float(z.iloc[-1]), 2), "umbral": Z_ALERTA, "encendida": encendida, "desde": desde,
+         "fecha": str(z.index[-1].date()), **BACKTEST,
+         "serie": [[str(i.date()), round(float(v), 2)] for i, v in ult.items()]}
+    cache.guardar_respuesta(clave, r)
+    return r
+
+
 def analizar(posiciones) -> dict:
     """Por ticker y por cartera, pesado por lo que vale hoy cada posición."""
     from core.models import portfolio
@@ -235,6 +295,9 @@ def analizar(posiciones) -> dict:
             "perdida_si_cae": 1 - RECUPERO if bono else 1.0,
             "serie": [[f, historia[f][cod]] for f in sorted(historia) if cod in historia[f]],
         })
+        a = activos[-1]
+        a["z20"] = _z([v for _, v in a["serie"]])
+        a["faltan_dias"] = max(MIN_HISTORIA - len(a["serie"]), 0)
 
     cubierto = sum(a["valor_usd"] for a in activos)
     cartera = None
@@ -252,6 +315,7 @@ def analizar(posiciones) -> dict:
             "dias_historia": len(historia),
         }
     return {"activos": activos, "cartera": cartera, "sin_cds": sin_cds, "aviso": aviso,
+            "mercado": alerta_mercado(), "z_alerta": Z_ALERTA,
             "fecha": next(iter(datos.values()), {}).get("fecha") if datos else None,
             "recupero_pct": RECUPERO * 100}
 
@@ -262,4 +326,7 @@ if __name__ == "__main__":                       # chequeo de ida y vuelta, sin 
         r = desde_precio(precio(s, c, hoy, fin), c, hoy, fin)
         assert abs(r["spread_pb"] - s) < 0.5, (s, c, r)
     assert abs(precio(100, 100, hoy, fin) - 100) < 1e-6
+    quieto = [100 + (i % 3) for i in range(100)]
+    assert _z(quieto[:79]) is None and abs(_z(quieto)) < 2
+    assert _z(quieto[:-1] + [140]) > Z_ALERTA                       # un ensanche brusco enciende
     print("ok", desde_precio(102.4436, 100, hoy, fin), datetime.now().isoformat(timespec="seconds"))
